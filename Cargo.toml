@@ -1,0 +1,17 @@
+[package]
+name = "reccedns"
+authors = ["Alex Ogden"]
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+anyhow = "1.0.86"
+clap = { version = "4.5", features = ["derive"] }
+colored = "2.1"
+indicatif = "0.17.8"
+lazy_static = "1.4.0"
+regex = "1"
+rand = "0.8"
+thiserror = "1.0.61"
+strum = "0.26.2"
+strum_macros = "0.26.2"
