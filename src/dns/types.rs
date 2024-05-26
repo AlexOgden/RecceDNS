@@ -12,17 +12,21 @@ pub enum QueryType {
     AAAA,
     #[strum(to_string = "MX")]
     MX,
+	#[strum(to_string = "TXT")]
+    TXT,
     #[strum(to_string = "CNAME")]
     CNAME,
-    #[strum(to_string = "all")]
+    #[strum(to_string = "any")]
     Any,
 }
 
+#[allow(clippy::upper_case_acronyms)]
 #[derive(Clone, Eq, PartialEq, Hash)]
 pub enum ResponseType {
     IPv4(Ipv4Addr),
     IPv6(Ipv6Addr),
     MX(MXResponse),
+	TXT(String),
     CanonicalName(String),
 }
 

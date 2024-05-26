@@ -5,7 +5,8 @@ use clap::Parser;
 use colored::Colorize;
 use indicatif::{ProgressBar, ProgressStyle};
 
-const PROGRESS_TICK_CHARS: &str = "⡿⣟⣯⣷⣾⣽⣻⢿";
+//const PROGRESS_TICK_CHARS: &str = "⡿⣟⣯⣷⣾⣽⣻⢿";
+const PROGRESS_TICK_CHARS: &str = "⡈⠔⠢⢁";
 
 /// Command-line arguments for the program
 #[derive(Parser, Debug)]

@@ -124,6 +124,7 @@ fn create_query_response_string(query_result: &[QueryResponse]) -> String {
             ResponseType::MX(mx) => {
                 format!("[{} {} {}]", query_type_formatted, mx.priority, mx.domain)
             }
+            ResponseType::TXT(txt_data) => format!("[{} {}]", query_type_formatted, txt_data),
             ResponseType::CanonicalName(domain) => format!("[{} {}]", query_type_formatted, domain),
         };
 

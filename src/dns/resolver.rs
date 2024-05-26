@@ -20,7 +20,7 @@ pub fn resolve_domain(
 
     match query_type {
         QueryType::Any => {
-            for qt in &[QueryType::A, QueryType::AAAA, QueryType::MX] {
+            for qt in &[QueryType::A, QueryType::AAAA, QueryType::MX, QueryType::TXT] {
                 query_and_collect(
                     socket,
                     dns_server,
@@ -124,6 +124,7 @@ fn build_dns_query(domain: &str, query_type: &QueryType) -> Vec<u8> {
         QueryType::A => packet.extend_from_slice(&[0x00, 0x01]),
         QueryType::AAAA => packet.extend_from_slice(&[0x00, 0x1c]),
         QueryType::MX => packet.extend_from_slice(&[0x00, 0x0f]),
+        QueryType::TXT => packet.extend_from_slice(&[0x00, 0x10]),
         QueryType::CNAME => packet.extend_from_slice(&[0x00, 0x05]),
         _ => {}
     }
@@ -228,6 +229,7 @@ fn parse_dns_response(response: &[u8]) -> Result<Vec<QueryResponse>> {
                     offset += rdlength as usize - 16; // Adjust offset for AAAA record
                 }
                 15 => {
+                    // MX (15)
                     if offset + 2 > response.len() {
                         return Err(anyhow!("Malformed DNS response: MX record incomplete"));
                     }
@@ -310,6 +312,24 @@ fn parse_dns_response(response: &[u8]) -> Result<Vec<QueryResponse>> {
                     results.push(record_response);
 
                     offset += rdlength as usize; // Adjust offset for CNAME record
+                }
+                16 => {
+                    // TXT (16)
+                    let txt_data_length = response[offset];
+                    offset += 1;
+
+                    let mut txt_data = String::new();
+                    for _ in 0..txt_data_length {
+                        txt_data.push(response[offset] as char);
+                        offset += 1;
+                    }
+
+                    let record_response = QueryResponse {
+                        query_type: QueryType::TXT,
+                        response_content: ResponseType::TXT(txt_data),
+                    };
+
+                    results.push(record_response);
                 }
                 _ => {} // Unsupported record type, ignore
             }
