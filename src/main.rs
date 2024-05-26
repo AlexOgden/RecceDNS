@@ -3,14 +3,16 @@ mod io;
 
 use anyhow::{bail, Result};
 use colored::Colorize;
-use dns::{network_check, resolver::QueryResponse};
+use dns::network_check;
 use dns::resolver::resolve_domain;
+use dns::types::QueryResponse;
 use io::cli::CliArgs;
 use rand::seq::IteratorRandom;
 use rand::thread_rng;
 use std::net::UdpSocket;
 use std::time::Duration;
 
+use crate::dns::types::ResponseType;
 use crate::io::{cli, wordlist};
 
 fn main() -> Result<()> {
@@ -36,9 +38,14 @@ fn main() -> Result<()> {
 
     let mut found_count = 0;
 
-    match resolve_domain(&socket, dns_resolvers[0], &args.target_domain, record_query_type) {
+    match resolve_domain(
+        &socket,
+        dns_resolvers[0],
+        &args.target_domain,
+        record_query_type,
+    ) {
         Ok(response) => {
-            let response_data_string = create_query_reponse_string(&response);
+            let response_data_string = create_query_response_string(&response);
             print_query_result(&args, "", dns_resolvers[0], &response_data_string);
             found_count += 1;
         }
@@ -53,8 +60,8 @@ fn main() -> Result<()> {
         let fqdn = format!("{}.{}", subdomain, args.target_domain);
         match resolve_domain(&socket, query_resolver, &fqdn, record_query_type) {
             Ok(response) => {
-                let response_data_string = create_query_reponse_string(&response);
-            print_query_result(&args, subdomain, dns_resolvers[0], &response_data_string);
+                let response_data_string = create_query_response_string(&response);
+                print_query_result(&args, subdomain, dns_resolvers[0], &response_data_string);
                 found_count += 1;
             }
             Err(err) => {
@@ -106,20 +113,27 @@ fn select_random_resolver<'a>(dns_resolvers: &'a [&str]) -> Result<&'a str> {
         .ok_or_else(|| anyhow::anyhow!("DNS Resolvers list is empty"))
 }
 
-fn create_query_reponse_string(query_result: &Vec<QueryResponse>) -> String {
-    let mut query_responses = Vec::new();
-    for response in query_result {
+fn create_query_response_string(query_result: &[QueryResponse]) -> String {
+    let mut query_responses = String::new();
+
+    for (index, response) in query_result.iter().enumerate() {
+        let query_type_formatted = response.query_type.to_string().bold();
         let content_string = match &response.response_content {
-            dns::resolver::ResponseType::IPv4(ip) => format!("[{} {}]", response.query_type, ip),
-            dns::resolver::ResponseType::IPv6(ip) => format!("[{} {}]", response.query_type, ip),
-            dns::resolver::ResponseType::MX(mx) => format!("[{} {} {}]", response.query_type, mx.priority, mx.domain),
-            dns::resolver::ResponseType::Domain(domain) => format!("[{} {}]", response.query_type, domain)
+            ResponseType::IPv4(ip) => format!("[{} {}]", query_type_formatted, ip),
+            ResponseType::IPv6(ip) => format!("[{} {}]", query_type_formatted, ip),
+            ResponseType::MX(mx) => {
+                format!("[{} {} {}]", query_type_formatted, mx.priority, mx.domain)
+            }
+            ResponseType::CanonicalName(domain) => format!("[{} {}]", query_type_formatted, domain),
         };
 
-        query_responses.push(content_string)
+        if index != 0 {
+            query_responses.push(',');
+        }
+        query_responses.push_str(&content_string);
     }
 
-    format!("[{}]", query_responses.join(","))
+    format!("[{}]", query_responses)
 }
 
 fn print_query_result(args: &CliArgs, subdomain: &str, resolver: &str, response: &str) {
@@ -148,7 +162,13 @@ fn print_query_error(args: &CliArgs, subdomain: &str, resolver: &str, err: &anyh
     if args.verbose {
         let domain = format!("{}.{}", subdomain.red().bold(), args.target_domain.blue());
         if args.show_resolver {
-            eprintln!("\r[{}] {} [resolver: {}] {:?}", "-".red(), domain, resolver.magenta(), err);
+            eprintln!(
+                "\r[{}] {} [resolver: {}] {:?}",
+                "-".red(),
+                domain,
+                resolver.magenta(),
+                err
+            );
         } else {
             eprintln!("\r[{}] {} {:?}", "-".red(), domain, err);
         }

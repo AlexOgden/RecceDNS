@@ -1,45 +1,13 @@
 use anyhow::{anyhow, Result};
-use clap::ValueEnum;
+
+use crate::dns::types::{MXResponse, QueryResponse, QueryType, ResponseType};
 use rand::Rng;
 use std::{
     collections::HashSet,
     net::{Ipv4Addr, Ipv6Addr, UdpSocket},
 };
-use strum_macros::Display;
 
 const BUFFER_SIZE: usize = 512;
-
-#[allow(clippy::upper_case_acronyms)]
-#[derive(Debug, PartialEq, Clone, ValueEnum, Display)]
-pub enum QueryType {
-    #[strum(to_string = "A")]
-    A,
-    #[strum(to_string = "AAAA")]
-    AAAA,
-    #[strum(to_string = "MX")]
-    MX,
-    #[strum(to_string = "CNAME")]
-    CNAME,
-    #[strum(to_string = "all")]
-    All,
-}
-
-pub enum ResponseType {
-    IPv4(Ipv4Addr),
-    IPv6(Ipv6Addr),
-    MX(MXResponse),
-    Domain(String),
-}
-
-pub struct MXResponse {
-    pub priority: u16,
-    pub domain: String,
-}
-
-pub struct QueryResponse {
-    pub query_type: QueryType,
-    pub response_content: ResponseType,
-}
 
 pub fn resolve_domain(
     socket: &UdpSocket,
@@ -47,48 +15,74 @@ pub fn resolve_domain(
     domain: &str,
     query_type: &QueryType,
 ) -> Result<Vec<QueryResponse>> {
-    let mut all_results = Vec::new();
+    let mut all_results = HashSet::new();
     let mut seen_cnames = HashSet::new();
 
     match query_type {
-        QueryType::All => {
+        QueryType::Any => {
             for qt in &[QueryType::A, QueryType::AAAA, QueryType::MX] {
-                match dns_query(socket, dns_server, domain, qt) {
-                    Ok(query_result) => {
-                        for response in query_result {
-                            if let ResponseType::Domain(ref cname) = response.response_content {
-                                if seen_cnames.insert(cname.clone()) {
-                                    all_results.push(response);
-                                }
-                            } else {
-                                all_results.push(response);
-                            }
-                        }
-                    }
-                    Err(_) => continue,
-                }
+                query_and_collect(
+                    socket,
+                    dns_server,
+                    domain,
+                    qt,
+                    &mut seen_cnames,
+                    &mut all_results,
+                )?;
             }
         }
-        _ => match dns_query(socket, dns_server, domain, query_type) {
-            Ok(query_result) => {
-                for response in query_result {
-                    if let ResponseType::Domain(ref cname) = response.response_content {
-                        if seen_cnames.insert(cname.clone()) {
-                            all_results.push(response);
-                        }
-                    } else {
-                        all_results.push(response);
-                    }
-                }
-            }
-            Err(err) => return Err(err),
-        },
+        _ => {
+            query_and_collect(
+                socket,
+                dns_server,
+                domain,
+                query_type,
+                &mut seen_cnames,
+                &mut all_results,
+            )?;
+        }
     }
 
     if all_results.is_empty() {
         Err(anyhow!("No record found"))
     } else {
-        Ok(all_results)
+        Ok(all_results.into_iter().collect())
+    }
+}
+
+fn query_and_collect(
+    socket: &UdpSocket,
+    dns_server: &str,
+    domain: &str,
+    query_type: &QueryType,
+    seen_cnames: &mut HashSet<String>,
+    all_results: &mut HashSet<QueryResponse>,
+) -> Result<()> {
+    match dns_query(socket, dns_server, domain, query_type) {
+        Ok(query_result) => {
+            for response in query_result {
+                match response.response_content {
+                    ResponseType::CanonicalName(ref cname) => {
+                        if seen_cnames.insert(cname.clone()) {
+                            all_results.insert(response.clone());
+                            query_and_collect(
+                                socket,
+                                dns_server,
+                                cname,
+                                query_type,
+                                seen_cnames,
+                                all_results,
+                            )?;
+                        }
+                    }
+                    _ => {
+                        all_results.insert(response);
+                    }
+                }
+            }
+            Ok(())
+        }
+        Err(err) => Err(err),
     }
 }
 
@@ -311,7 +305,7 @@ fn parse_dns_response(response: &[u8]) -> Result<Vec<QueryResponse>> {
 
                     let record_response = QueryResponse {
                         query_type: QueryType::CNAME,
-                        response_content: ResponseType::Domain(cname_target),
+                        response_content: ResponseType::CanonicalName(cname_target),
                     };
                     results.push(record_response);
 

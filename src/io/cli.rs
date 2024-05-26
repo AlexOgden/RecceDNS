@@ -1,12 +1,11 @@
 use crate::{
-    dns::resolver::QueryType,
-    io::validate::{validate_dns_resolver_list, validate_domain},
+    dns::types::QueryType, io::validate::{validate_dns_resolver_list, validate_domain}
 };
 use clap::Parser;
 use colored::Colorize;
 use indicatif::{ProgressBar, ProgressStyle};
 
-const PROGRESS_TICK_CHARS: &str = "⣾⣽⣻⢿⡿⣟⣯⣷";
+const PROGRESS_TICK_CHARS: &str = "⡿⣟⣯⣷⣾⣽⣻⢿";
 
 /// Command-line arguments for the program
 #[derive(Parser, Debug)]
@@ -34,7 +33,7 @@ pub struct CliArgs {
     pub verbose: bool,
 
     /// What resource-record to query
-    #[arg(short, long, value_enum, default_value_t = QueryType::All)]
+    #[arg(short, long, value_enum, default_value_t = QueryType::Any)]
     pub query_type: QueryType,
 
     /// Don't show the welcome ASCII art

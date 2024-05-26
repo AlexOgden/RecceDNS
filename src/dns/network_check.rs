@@ -1,6 +1,7 @@
 use colored::Colorize;
 
-use crate::dns::resolver::{resolve_domain, QueryType};
+use crate::dns::resolver::resolve_domain;
+use crate::dns::types::QueryType;
 use std::{
     net::{SocketAddr, UdpSocket},
     time::Duration,
