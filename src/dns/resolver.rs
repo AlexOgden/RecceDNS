@@ -1,7 +1,10 @@
 use anyhow::{anyhow, Result};
 use clap::ValueEnum;
 use rand::Rng;
-use std::net::{Ipv4Addr, Ipv6Addr, UdpSocket};
+use std::{
+    collections::HashSet,
+    net::{Ipv4Addr, Ipv6Addr, UdpSocket},
+};
 use strum_macros::Display;
 
 const BUFFER_SIZE: usize = 512;
@@ -15,8 +18,27 @@ pub enum QueryType {
     AAAA,
     #[strum(to_string = "MX")]
     MX,
+    #[strum(to_string = "CNAME")]
+    CNAME,
     #[strum(to_string = "all")]
     All,
+}
+
+pub enum ResponseType {
+    IPv4(Ipv4Addr),
+    IPv6(Ipv6Addr),
+    MX(MXResponse),
+    Domain(String),
+}
+
+pub struct MXResponse {
+    pub priority: u16,
+    pub domain: String,
+}
+
+pub struct QueryResponse {
+    pub query_type: QueryType,
+    pub response_content: ResponseType,
 }
 
 pub fn resolve_domain(
@@ -24,26 +46,47 @@ pub fn resolve_domain(
     dns_server: &str,
     domain: &str,
     query_type: &QueryType,
-) -> Result<Vec<String>> {
+) -> Result<Vec<QueryResponse>> {
     let mut all_results = Vec::new();
+    let mut seen_cnames = HashSet::new();
 
     match query_type {
         QueryType::All => {
             for qt in &[QueryType::A, QueryType::AAAA, QueryType::MX] {
                 match dns_query(socket, dns_server, domain, qt) {
-                    Ok(query_result) => all_results.extend(query_result),
+                    Ok(query_result) => {
+                        for response in query_result {
+                            if let ResponseType::Domain(ref cname) = response.response_content {
+                                if seen_cnames.insert(cname.clone()) {
+                                    all_results.push(response);
+                                }
+                            } else {
+                                all_results.push(response);
+                            }
+                        }
+                    }
                     Err(_) => continue,
                 }
             }
         }
         _ => match dns_query(socket, dns_server, domain, query_type) {
-            Ok(query_result) => all_results.extend(query_result),
+            Ok(query_result) => {
+                for response in query_result {
+                    if let ResponseType::Domain(ref cname) = response.response_content {
+                        if seen_cnames.insert(cname.clone()) {
+                            all_results.push(response);
+                        }
+                    } else {
+                        all_results.push(response);
+                    }
+                }
+            }
             Err(err) => return Err(err),
         },
     }
 
     if all_results.is_empty() {
-        Err(anyhow!("No IP address found"))
+        Err(anyhow!("No record found"))
     } else {
         Ok(all_results)
     }
@@ -54,7 +97,7 @@ fn dns_query(
     dns_server: &str,
     domain: &str,
     query_type: &QueryType,
-) -> Result<Vec<String>> {
+) -> Result<Vec<QueryResponse>> {
     const UDP_PORT: u8 = 53;
     let dns_server_address = format!("{}:{}", dns_server, UDP_PORT);
 
@@ -84,9 +127,10 @@ fn build_dns_query(domain: &str, query_type: &QueryType) -> Vec<u8> {
     }
     packet.push(0); // Terminate the domain name
     match query_type {
-        QueryType::A => packet.extend_from_slice(&[0x00, 0x01]), // QTYPE: A
-        QueryType::AAAA => packet.extend_from_slice(&[0x00, 0x1c]), // QTYPE: AAAA
-        QueryType::MX => packet.extend_from_slice(&[0x00, 0x0f]), // QTYPE: AAAA
+        QueryType::A => packet.extend_from_slice(&[0x00, 0x01]),
+        QueryType::AAAA => packet.extend_from_slice(&[0x00, 0x1c]),
+        QueryType::MX => packet.extend_from_slice(&[0x00, 0x0f]),
+        QueryType::CNAME => packet.extend_from_slice(&[0x00, 0x05]),
         _ => {}
     }
     packet.extend_from_slice(&[0x00, 0x01]); // QCLASS: IN (Internet)
@@ -107,7 +151,7 @@ fn send_dns_query(socket: &UdpSocket, query: &[u8], dns_server: &str) -> Result<
     Ok(response_buffer[..bytes_received].to_vec())
 }
 
-fn parse_dns_response(response: &[u8]) -> Result<Vec<String>> {
+fn parse_dns_response(response: &[u8]) -> Result<Vec<QueryResponse>> {
     if response.len() < 12 {
         return Err(anyhow!("Malformed DNS response: Response length too short"));
     }
@@ -128,7 +172,7 @@ fn parse_dns_response(response: &[u8]) -> Result<Vec<String>> {
     offset += 5; // Skip QTYPE and QCLASS
 
     // Parse the Answer section
-    let mut results = Vec::new();
+    let mut results: Vec<QueryResponse> = Vec::new();
     for _ in 0..ancount {
         if offset + 10 > response.len() {
             return Err(anyhow!("Malformed DNS response: Answer section incomplete"));
@@ -156,7 +200,13 @@ fn parse_dns_response(response: &[u8]) -> Result<Vec<String>> {
                         response[offset + 2],
                         response[offset + 3],
                     );
-                    results.push(format!("[A {}]", ipv4));
+
+                    let record_response = QueryResponse {
+                        query_type: QueryType::A,
+                        response_content: ResponseType::IPv4(ipv4),
+                    };
+                    results.push(record_response);
+
                     offset += rdlength as usize - 4; // Adjust offset for A record
                 }
                 28 => {
@@ -174,7 +224,13 @@ fn parse_dns_response(response: &[u8]) -> Result<Vec<String>> {
                         (response[offset + 12] as u16) << 8 | (response[offset + 13] as u16),
                         (response[offset + 14] as u16) << 8 | (response[offset + 15] as u16),
                     );
-                    results.push(format!("[AAAA {}]", ipv6));
+
+                    let record_response = QueryResponse {
+                        query_type: QueryType::AAAA,
+                        response_content: ResponseType::IPv6(ipv6),
+                    };
+                    results.push(record_response);
+
                     offset += rdlength as usize - 16; // Adjust offset for AAAA record
                 }
                 15 => {
@@ -182,11 +238,11 @@ fn parse_dns_response(response: &[u8]) -> Result<Vec<String>> {
                         return Err(anyhow!("Malformed DNS response: MX record incomplete"));
                     }
 
-                    let preference_number =
+                    let priority_number =
                         u16::from_be_bytes([response[offset], response[offset + 1]]);
                     offset += 2;
 
-                    let mut answer_domain: String = String::new();
+                    let mut response_domain: String = String::new();
                     let mut jump_offset = offset;
 
                     // Loop to parse the domain name labels
@@ -205,17 +261,26 @@ fn parse_dns_response(response: &[u8]) -> Result<Vec<String>> {
                         } else {
                             // Normal label, parse and append to answer_domain
                             for i in 1..=label_length {
-                                answer_domain.push(response[jump_offset + i] as char);
+                                response_domain.push(response[jump_offset + i] as char);
                             }
                             jump_offset += label_length + 1;
                             if response[jump_offset] == 0 {
                                 break; // End of domain name
                             }
-                            answer_domain.push('.'); // Append dot between labels
+                            response_domain.push('.'); // Append dot between labels
                         }
                     }
 
-                    results.push(format!("[MX {} {}]", preference_number, answer_domain));
+                    let mx_data = MXResponse {
+                        priority: priority_number,
+                        domain: response_domain,
+                    };
+                    let record_response = QueryResponse {
+                        query_type: QueryType::MX,
+                        response_content: ResponseType::MX(mx_data),
+                    };
+                    results.push(record_response);
+
                     offset += rdlength as usize - 2; // Adjust offset for MX record
                 }
                 5 => {
@@ -243,7 +308,13 @@ fn parse_dns_response(response: &[u8]) -> Result<Vec<String>> {
                             cname_target.push('.'); // Append dot between labels
                         }
                     }
-                    results.push(format!("[CNAME {}]", cname_target));
+
+                    let record_response = QueryResponse {
+                        query_type: QueryType::CNAME,
+                        response_content: ResponseType::Domain(cname_target),
+                    };
+                    results.push(record_response);
+
                     offset += rdlength as usize; // Adjust offset for CNAME record
                 }
                 _ => {} // Unsupported record type, ignore

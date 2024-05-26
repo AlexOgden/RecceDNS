@@ -3,7 +3,7 @@ mod io;
 
 use anyhow::{bail, Result};
 use colored::Colorize;
-use dns::network_check;
+use dns::{network_check, resolver::QueryResponse};
 use dns::resolver::resolve_domain;
 use io::cli::CliArgs;
 use rand::seq::IteratorRandom;
@@ -38,7 +38,8 @@ fn main() -> Result<()> {
 
     match resolve_domain(&socket, dns_resolvers[0], &args.target_domain, record_query_type) {
         Ok(response) => {
-            print_query_result(&args, "", dns_resolvers[0], &response);
+            let response_data_string = create_query_reponse_string(&response);
+            print_query_result(&args, "", dns_resolvers[0], &response_data_string);
             found_count += 1;
         }
         Err(err) => {
@@ -52,7 +53,8 @@ fn main() -> Result<()> {
         let fqdn = format!("{}.{}", subdomain, args.target_domain);
         match resolve_domain(&socket, query_resolver, &fqdn, record_query_type) {
             Ok(response) => {
-                print_query_result(&args, subdomain, query_resolver, &response);
+                let response_data_string = create_query_reponse_string(&response);
+            print_query_result(&args, subdomain, dns_resolvers[0], &response_data_string);
                 found_count += 1;
             }
             Err(err) => {
@@ -104,21 +106,28 @@ fn select_random_resolver<'a>(dns_resolvers: &'a [&str]) -> Result<&'a str> {
         .ok_or_else(|| anyhow::anyhow!("DNS Resolvers list is empty"))
 }
 
-fn print_query_result(args: &CliArgs, subdomain: &str, resolver: &str, response: &[String]) {
+fn create_query_reponse_string(query_result: &Vec<QueryResponse>) -> String {
+    let mut query_responses = Vec::new();
+    for response in query_result {
+        let content_string = match &response.response_content {
+            dns::resolver::ResponseType::IPv4(ip) => format!("[{} {}]", response.query_type, ip),
+            dns::resolver::ResponseType::IPv6(ip) => format!("[{} {}]", response.query_type, ip),
+            dns::resolver::ResponseType::MX(mx) => format!("[{} {} {}]", response.query_type, mx.priority, mx.domain),
+            dns::resolver::ResponseType::Domain(domain) => format!("[{} {}]", response.query_type, domain)
+        };
+
+        query_responses.push(content_string)
+    }
+
+    format!("[{}]", query_responses.join(","))
+}
+
+fn print_query_result(args: &CliArgs, subdomain: &str, resolver: &str, response: &str) {
     let domain = format!(
         "{}.{}",
         subdomain.cyan().bold(),
         args.target_domain.blue().italic()
     );
-    let response_str = {
-        let csv = response
-            .iter()
-            .map(|s| s.as_str())
-            .collect::<Vec<&str>>()
-            .join(", ");
-
-        format!("[{}]", csv)
-    };
 
     let status = "+".green();
 
@@ -128,10 +137,10 @@ fn print_query_result(args: &CliArgs, subdomain: &str, resolver: &str, response:
             status,
             domain,
             resolver.magenta(),
-            response_str
+            response
         );
     } else {
-        println!("\r[{}] {} {}", status, domain, response_str);
+        println!("\r[{}] {} {}", status, domain, response);
     }
 }
 
