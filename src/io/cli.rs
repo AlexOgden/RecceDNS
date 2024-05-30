@@ -1,6 +1,6 @@
 use crate::{
     dns::types::QueryType,
-    io::validate::{validate_dns_resolver_list, validate_domain},
+    io::validate::{dns_resolver_list, domain},
 };
 use clap::Parser;
 use colored::Colorize;
@@ -10,19 +10,20 @@ const PROGRESS_TICK_CHARS: &str = "⡈⠔⠢⢁";
 
 /// Command-line arguments for the program
 #[derive(Parser, Debug)]
+#[allow(clippy::struct_excessive_bools)]
 #[command(
 	name = "RecceDNS",
     author = "Alex Ogden",
     version = env!("CARGO_PKG_VERSION"),
     about = "DNS Enumeration tool with advanced features",
 )]
-pub struct CliArgs {
+pub struct CommandArgs {
     /// The target base domain name to probe
-    #[arg(short, long, required = true, value_parser = validate_domain)]
+    #[arg(short, long, required = true, value_parser = domain)]
     pub target_domain: String,
 
     /// IPv4 Address of the DNS resolver(s) to use (comma-seperated). Multiple resolvers will be randomly selected for each query
-    #[arg(short, long, default_value = "1.1.1.1", value_parser = validate_dns_resolver_list, required = false)]
+    #[arg(short, long, default_value = "1.1.1.1", value_parser = dns_resolver_list, required = false)]
     pub dns_resolvers: String,
 
     /// Path to subdomain wordlist
@@ -54,11 +55,11 @@ pub struct CliArgs {
     pub show_resolver: bool,
 }
 
-pub fn get_parsed_args() -> CliArgs {
-    CliArgs::parse()
+pub fn get_parsed_args() -> CommandArgs {
+    CommandArgs::parse()
 }
 
-pub fn print_options(args: &CliArgs) {
+pub fn print_options(args: &CommandArgs) {
     if args.no_print_options {
         return;
     }

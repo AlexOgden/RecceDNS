@@ -6,7 +6,7 @@ use colored::Colorize;
 use dns::network_check;
 use dns::resolver::resolve_domain;
 use dns::types::QueryResponse;
-use io::cli::CliArgs;
+use io::cli::CommandArgs;
 use rand::seq::IteratorRandom;
 use rand::thread_rng;
 use std::net::UdpSocket;
@@ -24,7 +24,7 @@ fn main() -> Result<()> {
     }
 
     let socket = setup_socket()?;
-    let subdomains = wordlist::read_wordlist(args.wordlist.as_str())?;
+    let subdomains = wordlist::read_from_file(args.wordlist.as_str())?;
     let record_query_type = &args.query_type;
 
     let mut dns_resolvers: Vec<&str> = args.dns_resolvers.split(',').collect();
@@ -84,7 +84,7 @@ fn setup_socket() -> Result<UdpSocket> {
     Ok(socket)
 }
 
-fn validate_dns_resolvers(args: &CliArgs, dns_resolvers: &mut Vec<&str>){
+fn validate_dns_resolvers(args: &CommandArgs, dns_resolvers: &mut Vec<&str>) {
     if !args.no_dns_check {
         match network_check::check_server_list(dns_resolvers) {
             Ok(()) => {
@@ -135,7 +135,7 @@ fn create_query_response_string(query_result: &[QueryResponse]) -> String {
     format!("[{query_responses}]")
 }
 
-fn print_query_result(args: &CliArgs, subdomain: &str, resolver: &str, response: &str) {
+fn print_query_result(args: &CommandArgs, subdomain: &str, resolver: &str, response: &str) {
     let domain = format!(
         "{}.{}",
         subdomain.cyan().bold(),
@@ -157,7 +157,7 @@ fn print_query_result(args: &CliArgs, subdomain: &str, resolver: &str, response:
     }
 }
 
-fn print_query_error(args: &CliArgs, subdomain: &str, resolver: &str, err: &anyhow::Error) {
+fn print_query_error(args: &CommandArgs, subdomain: &str, resolver: &str, err: &anyhow::Error) {
     if args.verbose {
         let domain = format!("{}.{}", subdomain.red().bold(), args.target_domain.blue());
         if args.show_resolver {

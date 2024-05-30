@@ -7,6 +7,9 @@ use std::{
     time::Duration,
 };
 
+const DNS_PORT: u16 = 53;
+const ROOT_SERVER: &str = "a.rootservers.net";
+
 fn check_udp_connection(socket: &UdpSocket, server_ip: &str, port: u16) -> Result<(), String> {
     let server_addr: SocketAddr = format!("{server_ip}:{port}")
         .parse()
@@ -31,30 +34,30 @@ fn check_dns_server(server_address: &str) -> Result<(), String> {
     let socket =
         UdpSocket::bind("0.0.0.0:0").map_err(|e| format!("Failed to create socket: {e}"))?;
 
-    check_udp_connection(&socket, server_address, 53)?;
+    check_udp_connection(&socket, server_address, DNS_PORT)?;
 
-    match resolve_domain(&socket, server_address, "a.rootservers.net", &QueryType::A) {
-        Ok(_) => {
-            let status = format!("[{}]", "OK".green());
-            println!(
-                "{} {:>width$}",
-                server_address.bright_blue(),
-                status,
-                width = 30 - server_address.len()
-            );
-            Ok(())
-        }
-        Err(_) => {
-            let status = format!("[{}]", "FAIL".red());
-            println!(
-                "{} {:>width$}",
-                server_address.bright_blue(),
-                status,
-                width = 30 - server_address.len()
-            );
-            Err(server_address.to_string())
-        }
+    if resolve_domain(&socket, server_address, ROOT_SERVER, &QueryType::A).is_ok() {
+        print_status(server_address, "OK", "green");
+        Ok(())
+    } else {
+        print_status(server_address, "FAIL", "red");
+        Err(String::from(server_address))
     }
+}
+
+fn print_status(server_address: &str, status: &str, color: &str) {
+    let colored_status = match color {
+        "green" => format!("[{}]", status.green()),
+        "red" => format!("[{}]", status.red()),
+        _ => status.to_string(),
+    };
+
+    println!(
+        "{} {:>width$}",
+        server_address.bright_blue(),
+        colored_status,
+        width = 30 - server_address.len()
+    );
 }
 
 pub fn check_server_list(server_list: &mut Vec<&str>) -> Result<(), Vec<String>> {
