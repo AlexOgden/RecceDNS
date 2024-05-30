@@ -28,7 +28,7 @@ fn main() -> Result<()> {
     let record_query_type = &args.query_type;
 
     let mut dns_resolvers: Vec<&str> = args.dns_resolvers.split(',').collect();
-    validate_dns_resolvers(&args, &mut dns_resolvers)?;
+    validate_dns_resolvers(&args, &mut dns_resolvers);
     if dns_resolvers.is_empty() {
         bail!("No DNS Resolvers in list! At least one resolver must be working!");
     }
@@ -61,7 +61,7 @@ fn main() -> Result<()> {
         match resolve_domain(&socket, query_resolver, &fqdn, record_query_type) {
             Ok(response) => {
                 let response_data_string = create_query_response_string(&response);
-                print_query_result(&args, subdomain, dns_resolvers[0], &response_data_string);
+                print_query_result(&args, subdomain, query_resolver, &response_data_string);
                 found_count += 1;
             }
             Err(err) => {
@@ -69,12 +69,12 @@ fn main() -> Result<()> {
             }
         }
 
-        cli::update_progress_bar(&progress_bar, &index, &total_subdomains);
+        cli::update_progress_bar(&progress_bar, index, total_subdomains);
     }
 
     progress_bar.finish_and_clear();
 
-    println!("\nDone! Found {} domains", found_count);
+    println!("\nDone! Found {found_count} domains");
     Ok(())
 }
 
@@ -84,24 +84,22 @@ fn setup_socket() -> Result<UdpSocket> {
     Ok(socket)
 }
 
-fn validate_dns_resolvers(args: &CliArgs, dns_resolvers: &mut Vec<&str>) -> Result<()> {
+fn validate_dns_resolvers(args: &CliArgs, dns_resolvers: &mut Vec<&str>){
     if !args.no_dns_check {
         match network_check::check_server_list(dns_resolvers) {
-            Ok(_) => {
+            Ok(()) => {
                 let status = format!("[{}]", "OK".green());
                 println!("DNS Resolvers: {:>width$}\n", status, width = 16);
             }
             Err(failed_servers) => {
                 println!(
                     "{}: {}\n",
-                    "Removed DNS resolvers with errors".yellow(),
+                    "Removed resolvers with errors".yellow(),
                     failed_servers.join(", ")
                 );
             }
         }
     }
-
-    Ok(())
 }
 
 fn select_random_resolver<'a>(dns_resolvers: &'a [&str]) -> Result<&'a str> {
@@ -119,13 +117,13 @@ fn create_query_response_string(query_result: &[QueryResponse]) -> String {
     for (index, response) in query_result.iter().enumerate() {
         let query_type_formatted = response.query_type.to_string().bold();
         let content_string = match &response.response_content {
-            ResponseType::IPv4(ip) => format!("[{} {}]", query_type_formatted, ip),
-            ResponseType::IPv6(ip) => format!("[{} {}]", query_type_formatted, ip),
+            ResponseType::IPv4(ip) => format!("[{query_type_formatted} {ip}]"),
+            ResponseType::IPv6(ip) => format!("[{query_type_formatted} {ip}]"),
             ResponseType::MX(mx) => {
                 format!("[{} {} {}]", query_type_formatted, mx.priority, mx.domain)
             }
-            ResponseType::TXT(txt_data) => format!("[{} {}]", query_type_formatted, txt_data),
-            ResponseType::CanonicalName(domain) => format!("[{} {}]", query_type_formatted, domain),
+            ResponseType::TXT(txt_data) => format!("[{query_type_formatted} {txt_data}]"),
+            ResponseType::CanonicalName(domain) => format!("[{query_type_formatted} {domain}]"),
         };
 
         if index != 0 {
@@ -134,7 +132,7 @@ fn create_query_response_string(query_result: &[QueryResponse]) -> String {
         query_responses.push_str(&content_string);
     }
 
-    format!("[{}]", query_responses)
+    format!("[{query_responses}]")
 }
 
 fn print_query_result(args: &CliArgs, subdomain: &str, resolver: &str, response: &str) {
@@ -155,7 +153,7 @@ fn print_query_result(args: &CliArgs, subdomain: &str, resolver: &str, response:
             response
         );
     } else {
-        println!("\r[{}] {} {}", status, domain, response);
+        println!("\r[{status}] {domain} {response}");
     }
 }
 

@@ -1,11 +1,11 @@
 use crate::{
-    dns::types::QueryType, io::validate::{validate_dns_resolver_list, validate_domain}
+    dns::types::QueryType,
+    io::validate::{validate_dns_resolver_list, validate_domain},
 };
 use clap::Parser;
 use colored::Colorize;
 use indicatif::{ProgressBar, ProgressStyle};
 
-//const PROGRESS_TICK_CHARS: &str = "⡿⣟⣯⣷⣾⣽⣻⢿";
 const PROGRESS_TICK_CHARS: &str = "⡈⠔⠢⢁";
 
 /// Command-line arguments for the program
@@ -51,7 +51,7 @@ pub struct CliArgs {
 
     /// Print which resolver was used for each query
     #[arg(long)]
-    pub show_resolver: bool
+    pub show_resolver: bool,
 }
 
 pub fn get_parsed_args() -> CliArgs {
@@ -83,7 +83,10 @@ pub fn print_ascii_art() {
 /_/ |_|\___/\___/\___/\___/_____/_/ |_//____/                                               
 ";
     println!("{}", title_art.cyan());
-    println!("Version: {}\n", env!("CARGO_PKG_VERSION"));
+    println!(
+        "Version: {} Developer: Alex Ogden\n",
+        env!("CARGO_PKG_VERSION")
+    );
 }
 
 pub fn setup_progress_bar(total: u64) -> ProgressBar {
@@ -98,7 +101,7 @@ pub fn setup_progress_bar(total: u64) -> ProgressBar {
     pb
 }
 
-pub fn update_progress_bar(pb: &ProgressBar, index: &usize, total: &u64) {
+pub fn update_progress_bar(pb: &ProgressBar, index: usize, total: u64) {
     pb.set_prefix(format!("[{}/{}]", index + 1, total));
     pb.inc(1);
 }

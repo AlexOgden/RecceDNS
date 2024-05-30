@@ -1,7 +1,7 @@
 use anyhow::{Context, Result, anyhow};
 use lazy_static::lazy_static;
 use regex::Regex;
-use std::net::Ipv4Addr;
+use core::net::Ipv4Addr;
 
 lazy_static! {
     static ref DOMAIN_REGEX: Regex =
@@ -34,7 +34,7 @@ pub fn validate_dns_resolver_list(servers: &str) -> Result<String> {
 
 pub fn validate_ipv4(ip: &str) -> Result<String> {
     ip.parse::<Ipv4Addr>()
-        .with_context(|| format!("Invalid IPv4 address: {}", ip))
+        .with_context(|| format!("Invalid IPv4 address: {ip}"))
         .map(|_| ip.to_string())
 }
 

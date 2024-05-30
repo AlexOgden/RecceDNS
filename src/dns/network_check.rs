@@ -8,28 +8,28 @@ use std::{
 };
 
 fn check_udp_connection(socket: &UdpSocket, server_ip: &str, port: u16) -> Result<(), String> {
-    let server_addr: SocketAddr = format!("{}:{}", server_ip, port)
+    let server_addr: SocketAddr = format!("{server_ip}:{port}")
         .parse()
-        .map_err(|e| format!("Failed to parse address: {}", e))?;
+        .map_err(|e| format!("Failed to parse address: {e}"))?;
 
     // Set read and write timeout to 2 seconds
     socket
         .set_read_timeout(Some(Duration::from_secs(2)))
-        .map_err(|e| format!("Failed to set read timeout: {}", e))?;
+        .map_err(|e| format!("Failed to set read timeout: {e}"))?;
     socket
         .set_write_timeout(Some(Duration::from_secs(2)))
-        .map_err(|e| format!("Failed to set write timeout: {}", e))?;
+        .map_err(|e| format!("Failed to set write timeout: {e}"))?;
 
     socket
         .connect(server_addr)
-        .map_err(|e| format!("Failed to connect to server: {}", e))?;
+        .map_err(|e| format!("Failed to connect to server: {e}"))?;
 
     Ok(())
 }
 
 fn check_dns_server(server_address: &str) -> Result<(), String> {
     let socket =
-        UdpSocket::bind("0.0.0.0:0").map_err(|e| format!("Failed to create socket: {}", e))?;
+        UdpSocket::bind("0.0.0.0:0").map_err(|e| format!("Failed to create socket: {e}"))?;
 
     check_udp_connection(&socket, server_address, 53)?;
 
@@ -65,7 +65,7 @@ pub fn check_server_list(server_list: &mut Vec<&str>) -> Result<(), Vec<String>>
 
     while i < server_list.len() {
         match check_dns_server(server_list[i]) {
-            Ok(_) => i += 1,
+            Ok(()) => i += 1,
             Err(dead_server) => {
                 failed_servers.push(dead_server);
                 server_list.remove(i);
@@ -87,7 +87,7 @@ mod test {
     #[test]
     fn udp_connect_check_ok() {
         let socket = UdpSocket::bind("0.0.0.0:0")
-            .map_err(|e| format!("Failed to create socket: {}", e))
+            .map_err(|e| format!("Failed to create socket: {e}"))
             .unwrap();
 
         let result = check_udp_connection(&socket, "127.0.0.1", 53);
@@ -98,7 +98,7 @@ mod test {
     #[test]
     fn udp_connect_check_fail() {
         let socket = UdpSocket::bind("0.0.0.0:0")
-            .map_err(|e| format!("Failed to create socket: {}", e))
+            .map_err(|e| format!("Failed to create socket: {e}"))
             .unwrap();
 
         let result = check_udp_connection(&socket, "999.0.0.1", 53);

@@ -93,7 +93,7 @@ fn dns_query(
     query_type: &QueryType,
 ) -> Result<Vec<QueryResponse>> {
     const UDP_PORT: u8 = 53;
-    let dns_server_address = format!("{}:{}", dns_server, UDP_PORT);
+    let dns_server_address = format!("{dns_server}:{UDP_PORT}");
 
     let query = build_dns_query(domain, query_type);
     let response = send_dns_query(socket, &query, &dns_server_address)?;
