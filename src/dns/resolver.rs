@@ -5,6 +5,7 @@ use rand::Rng;
 use std::{
     collections::HashSet,
     net::{Ipv4Addr, Ipv6Addr, UdpSocket},
+    time::Duration,
 };
 
 const BUFFER_SIZE: usize = 512;
@@ -134,6 +135,10 @@ fn build_dns_query(domain: &str, query_type: &QueryType) -> Vec<u8> {
 }
 
 fn send_dns_query(socket: &UdpSocket, query: &[u8], dns_server: &str) -> Result<Vec<u8>> {
+    socket
+        .set_read_timeout(Some(Duration::from_secs(5)))
+        .map_err(|error| anyhow!("Failed to set read timeout: {}", error))?;
+
     socket
         .send_to(query, dns_server)
         .map_err(|error| anyhow!("Failed to send DNS query: {}", error))?;
