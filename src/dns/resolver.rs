@@ -5,7 +5,6 @@ use rand::Rng;
 use std::{
     collections::HashSet,
     net::{Ipv4Addr, Ipv6Addr, UdpSocket},
-    time::Duration,
 };
 
 const BUFFER_SIZE: usize = 512;
@@ -136,10 +135,6 @@ fn build_dns_query(domain: &str, query_type: &QueryType) -> Vec<u8> {
 
 fn send_dns_query(socket: &UdpSocket, query: &[u8], dns_server: &str) -> Result<Vec<u8>> {
     socket
-        .set_read_timeout(Some(Duration::from_secs(5)))
-        .map_err(|error| anyhow!("Failed to set read timeout: {}", error))?;
-
-    socket
         .send_to(query, dns_server)
         .map_err(|error| anyhow!("Failed to send DNS query: {}", error))?;
 
@@ -191,150 +186,23 @@ fn parse_dns_response(response: &[u8]) -> Result<Vec<QueryResponse>> {
             match query_type {
                 1 => {
                     // A (1)
-                    if offset + 4 > response.len() {
-                        return Err(anyhow!("Malformed DNS response: A record incomplete"));
-                    }
-                    let ipv4 = Ipv4Addr::new(
-                        response[offset],
-                        response[offset + 1],
-                        response[offset + 2],
-                        response[offset + 3],
-                    );
-
-                    let record_response = QueryResponse {
-                        query_type: QueryType::A,
-                        response_content: ResponseType::IPv4(ipv4),
-                    };
-                    results.push(record_response);
-
-                    offset += rdlength as usize - 4; // Adjust offset for A record
+                    results.push(parse_a_record(response, &mut offset, rdlength)?);
                 }
                 28 => {
                     // AAAA (28)
-                    if offset + 16 > response.len() {
-                        return Err(anyhow!("Malformed DNS response: AAAA record incomplete"));
-                    }
-                    let ipv6 = Ipv6Addr::new(
-                        (response[offset] as u16) << 8 | (response[offset + 1] as u16),
-                        (response[offset + 2] as u16) << 8 | (response[offset + 3] as u16),
-                        (response[offset + 4] as u16) << 8 | (response[offset + 5] as u16),
-                        (response[offset + 6] as u16) << 8 | (response[offset + 7] as u16),
-                        (response[offset + 8] as u16) << 8 | (response[offset + 9] as u16),
-                        (response[offset + 10] as u16) << 8 | (response[offset + 11] as u16),
-                        (response[offset + 12] as u16) << 8 | (response[offset + 13] as u16),
-                        (response[offset + 14] as u16) << 8 | (response[offset + 15] as u16),
-                    );
-
-                    let record_response = QueryResponse {
-                        query_type: QueryType::AAAA,
-                        response_content: ResponseType::IPv6(ipv6),
-                    };
-                    results.push(record_response);
-
-                    offset += rdlength as usize - 16; // Adjust offset for AAAA record
+                    results.push(parse_aaaa_record(response, &mut offset, rdlength)?);
                 }
                 15 => {
                     // MX (15)
-                    if offset + 2 > response.len() {
-                        return Err(anyhow!("Malformed DNS response: MX record incomplete"));
-                    }
-
-                    let priority_number =
-                        u16::from_be_bytes([response[offset], response[offset + 1]]);
-                    offset += 2;
-
-                    let mut response_domain: String = String::new();
-                    let mut jump_offset = offset;
-
-                    // Loop to parse the domain name labels
-                    loop {
-                        let label_length = response[jump_offset] as usize;
-
-                        // Check for compression pointer
-                        if label_length & 0b1100_0000 == 0b1100_0000 {
-                            // Jump to the offset specified in the pointer
-                            let pointer_offset = u16::from_be_bytes([
-                                response[jump_offset],
-                                response[jump_offset + 1],
-                            ]) as usize
-                                & 0x3FFF;
-                            jump_offset = pointer_offset;
-                        } else {
-                            // Normal label, parse and append to answer_domain
-                            for i in 1..=label_length {
-                                response_domain.push(response[jump_offset + i] as char);
-                            }
-                            jump_offset += label_length + 1;
-                            if response[jump_offset] == 0 {
-                                break; // End of domain name
-                            }
-                            response_domain.push('.'); // Append dot between labels
-                        }
-                    }
-
-                    let mx_data = MXResponse {
-                        priority: priority_number,
-                        domain: response_domain,
-                    };
-                    let record_response = QueryResponse {
-                        query_type: QueryType::MX,
-                        response_content: ResponseType::MX(mx_data),
-                    };
-                    results.push(record_response);
-
-                    offset += rdlength as usize - 2; // Adjust offset for MX record
+                    results.push(parse_mx_record(response, &mut offset, rdlength)?);
                 }
                 5 => {
                     // CNAME (5)
-                    let mut cname_target = String::new();
-                    let mut jump_offset = offset;
-                    loop {
-                        let label_length = response[jump_offset] as usize;
-                        if label_length & 0b1100_0000 == 0b1100_0000 {
-                            // Compression pointer, follow the offset
-                            jump_offset = u16::from_be_bytes([
-                                response[jump_offset],
-                                response[jump_offset + 1],
-                            ]) as usize
-                                & 0x3FFF;
-                        } else {
-                            // Normal label, append to cname_target
-                            for i in 1..=label_length {
-                                cname_target.push(response[jump_offset + i] as char);
-                            }
-                            jump_offset += label_length + 1;
-                            if response[jump_offset] == 0 {
-                                break; // End of domain name
-                            }
-                            cname_target.push('.'); // Append dot between labels
-                        }
-                    }
-
-                    let record_response = QueryResponse {
-                        query_type: QueryType::CNAME,
-                        response_content: ResponseType::CanonicalName(cname_target),
-                    };
-                    results.push(record_response);
-
-                    offset += rdlength as usize; // Adjust offset for CNAME record
+                   results.push(parse_cname_record(response, &mut offset, rdlength)?);
                 }
                 16 => {
                     // TXT (16)
-                    let txt_data_length = response[offset];
-                    offset += 1;
-
-                    let mut txt_data = String::new();
-                    for _ in 0..txt_data_length {
-                        txt_data.push(response[offset] as char);
-                        offset += 1;
-                    }
-
-                    let record_response = QueryResponse {
-                        query_type: QueryType::TXT,
-                        response_content: ResponseType::TXT(txt_data),
-                    };
-
-                    results.push(record_response);
+                   results.push(parse_txt_record(response, &mut offset, rdlength)?);
                 }
                 _ => {} // Unsupported record type, ignore
             }
@@ -345,4 +213,159 @@ fn parse_dns_response(response: &[u8]) -> Result<Vec<QueryResponse>> {
     }
 
     Ok(results)
+}
+
+fn parse_a_record(response: &[u8], offset: &mut usize, rdlength: u16) -> Result<QueryResponse> {
+    // A (1)
+    if *offset + 4 > response.len() {
+        return Err(anyhow!("Malformed DNS response: A record incomplete"));
+    }
+    let ipv4 = Ipv4Addr::new(
+        response[*offset],
+        response[*offset + 1],
+        response[*offset + 2],
+        response[*offset + 3],
+    );
+
+    let record_response = QueryResponse {
+        query_type: QueryType::A,
+        response_content: ResponseType::IPv4(ipv4),
+    };
+
+    *offset += rdlength as usize - 4; // Adjust offset for A record
+
+    Ok(record_response)
+}
+
+fn parse_aaaa_record(response: &[u8], offset: &mut usize, rdlength: u16) -> Result<QueryResponse> {
+    // AAAA (28)
+    if *offset + 16 > response.len() {
+        return Err(anyhow!("Malformed DNS response: AAAA record incomplete"));
+    }
+    let ipv6 = Ipv6Addr::new(
+        (response[*offset] as u16) << 8 | (response[*offset + 1] as u16),
+        (response[*offset + 2] as u16) << 8 | (response[*offset + 3] as u16),
+        (response[*offset + 4] as u16) << 8 | (response[*offset + 5] as u16),
+        (response[*offset + 6] as u16) << 8 | (response[*offset + 7] as u16),
+        (response[*offset + 8] as u16) << 8 | (response[*offset + 9] as u16),
+        (response[*offset + 10] as u16) << 8 | (response[*offset + 11] as u16),
+        (response[*offset + 12] as u16) << 8 | (response[*offset + 13] as u16),
+        (response[*offset + 14] as u16) << 8 | (response[*offset + 15] as u16),
+    );
+
+    let record_response = QueryResponse {
+        query_type: QueryType::AAAA,
+        response_content: ResponseType::IPv6(ipv6),
+    };
+
+    *offset += rdlength as usize - 16; // Adjust offset for AAAA record
+
+    Ok(record_response)
+}
+
+fn parse_mx_record(response: &[u8], offset: &mut usize, rdlength: u16) -> Result<QueryResponse> {
+    // MX (15)
+    if *offset + 2 > response.len() {
+        return Err(anyhow!("Malformed DNS response: MX record incomplete"));
+    }
+
+    let priority_number = u16::from_be_bytes([response[*offset], response[*offset + 1]]);
+    *offset += 2;
+
+    let mut response_domain: String = String::new();
+    let mut jump_offset = *offset;
+
+    // Loop to parse the domain name labels
+    loop {
+        let label_length = response[jump_offset] as usize;
+
+        // Check for compression pointer
+        if label_length & 0b1100_0000 == 0b1100_0000 {
+            // Jump to the offset specified in the pointer
+            let pointer_offset =
+                u16::from_be_bytes([response[jump_offset], response[jump_offset + 1]]) as usize
+                    & 0x3FFF;
+            jump_offset = pointer_offset;
+        } else {
+            // Normal label, parse and append to answer_domain
+            for i in 1..=label_length {
+                response_domain.push(response[jump_offset + i] as char);
+            }
+            jump_offset += label_length + 1;
+            if response[jump_offset] == 0 {
+                break; // End of domain name
+            }
+            response_domain.push('.'); // Append dot between labels
+        }
+    }
+
+    let mx_data = MXResponse {
+        priority: priority_number,
+        domain: response_domain,
+    };
+    let record_response = QueryResponse {
+        query_type: QueryType::MX,
+        response_content: ResponseType::MX(mx_data),
+    };
+    *offset += rdlength as usize - 2; // Adjust offset for MX record
+
+    Ok(record_response)
+}
+
+fn parse_cname_record(response: &[u8], offset: &mut usize, rdlength: u16) -> Result<QueryResponse> {
+    if *offset + rdlength as usize > response.len() {
+        return Err(anyhow!("Malformed DNS response: CNAME record domain name incomplete"));
+    }
+
+    let mut cname_target = String::new();
+    let mut jump_offset = *offset;
+    loop {
+        let label_length = response[jump_offset] as usize;
+        if label_length & 0b1100_0000 == 0b1100_0000 {
+            // Compression pointer, follow the offset
+            jump_offset = u16::from_be_bytes([response[jump_offset], response[jump_offset + 1]])
+                as usize
+                & 0x3FFF;
+        } else {
+            // Normal label, append to cname_target
+            for i in 1..=label_length {
+                cname_target.push(response[jump_offset + i] as char);
+            }
+            jump_offset += label_length + 1;
+            if response[jump_offset] == 0 {
+                break; // End of domain name
+            }
+            cname_target.push('.'); // Append dot between labels
+        }
+    }
+
+    let record_response = QueryResponse {
+        query_type: QueryType::CNAME,
+        response_content: ResponseType::CanonicalName(cname_target),
+    };
+    *offset += rdlength as usize; // Adjust offset for CNAME record
+    
+    Ok(record_response)
+}
+
+fn parse_txt_record(response: &[u8], offset: &mut usize, rdlength: u16) -> Result<QueryResponse> {
+    if *offset + rdlength as usize > response.len() {
+        return Err(anyhow!("Malformed DNS response: TXT record data incomplete"));
+    }
+
+    let txt_data_length = response[*offset];
+    *offset += 1;
+
+    let mut txt_data = String::new();
+    for _ in 0..txt_data_length {
+        txt_data.push(response[*offset] as char);
+        *offset += 1;
+    }
+
+    let record_response = QueryResponse {
+        query_type: QueryType::TXT,
+        response_content: ResponseType::TXT(txt_data),
+    };
+
+    Ok(record_response)
 }
