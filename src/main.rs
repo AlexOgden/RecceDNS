@@ -157,7 +157,7 @@ fn print_query_result(args: &CommandArgs, subdomain: &str, resolver: &str, respo
 
 fn print_query_error(args: &CommandArgs, subdomain: &str, resolver: &str, err: &anyhow::Error) {
     if args.verbose {
-        let domain = format!("{}.{}", subdomain.red().bold(), args.target_domain.blue());
+        let domain = format!("{}.{}", subdomain.red().bold(), args.target_domain.blue().italic());
         if args.show_resolver {
             eprintln!(
                 "\r[{}] {} [resolver: {}] {:?}",
