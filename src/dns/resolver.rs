@@ -210,6 +210,7 @@ fn parse_dns_response(response: &[u8]) -> Result<Vec<QueryResponse>> {
                     results.push(parse_txt_record(response, &mut offset, rdlength)?);
                 }
                 6 => {
+                    // SOA (6)
                     results.push(parse_soa_record(response, &mut offset, rdlength)?);
                 }
                 _ => {} // Unsupported record type, ignore
@@ -321,6 +322,7 @@ fn parse_mx_record(response: &[u8], offset: &mut usize, rdlength: u16) -> Result
 }
 
 fn parse_cname_record(response: &[u8], offset: &mut usize, rdlength: u16) -> Result<QueryResponse> {
+    // CNAME (5)
     if *offset + rdlength as usize > response.len() {
         return Err(anyhow!(
             "Malformed DNS response: CNAME record domain name incomplete"
@@ -359,6 +361,7 @@ fn parse_cname_record(response: &[u8], offset: &mut usize, rdlength: u16) -> Res
 }
 
 fn parse_txt_record(response: &[u8], offset: &mut usize, rdlength: u16) -> Result<QueryResponse> {
+    // TXT (16)
     if *offset + rdlength as usize > response.len() {
         return Err(anyhow!(
             "Malformed DNS response: TXT record data incomplete"
@@ -383,6 +386,7 @@ fn parse_txt_record(response: &[u8], offset: &mut usize, rdlength: u16) -> Resul
 }
 
 fn parse_soa_record(response: &[u8], offset: &mut usize, rdlength: u16) -> Result<QueryResponse> {
+    // SOA (6)
     if *offset + rdlength as usize > response.len() {
         return Err(anyhow!(
             "Malformed DNS response: SOA record data incomplete"
@@ -412,7 +416,6 @@ fn parse_soa_record(response: &[u8], offset: &mut usize, rdlength: u16) -> Resul
             *offset += length;
         }
 
-        // Skip the null label
         *offset += 1;
         Ok(domain_name)
     };
