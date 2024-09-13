@@ -72,11 +72,7 @@ pub fn print_options(args: &CommandArgs) {
     println!("{}: {}", "wordlist".bright_blue(), args.wordlist);
     println!("{}: {}", "records".bright_blue(), args.query_type);
     println!("{}: {}", "resolvers".bright_blue(), args.dns_resolvers);
-    println!(
-        "{}: {}",
-        "show-resolver".bright_blue(),
-        args.show_resolver
-    );
+    println!("{}: {}", "show-resolver".bright_blue(), args.show_resolver);
     if let Some(delay_ms) = args.delay {
         println!("{}: {}ms\n", "delay".bright_blue(), delay_ms);
     }

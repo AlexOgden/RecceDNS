@@ -30,7 +30,10 @@ fn main() -> Result<()> {
 
     let mut dns_resolvers: Vec<&str> = args.dns_resolvers.split(',').collect();
     validate_dns_resolvers(&args, &mut dns_resolvers);
-    ensure!(!dns_resolvers.is_empty(), "No DNS Resolvers in list! At least one resolver must be working!");
+    ensure!(
+        !dns_resolvers.is_empty(),
+        "No DNS Resolvers in list! At least one resolver must be working!"
+    );
 
     let total_subdomains = subdomains.len() as u64;
     let progress_bar = cli::setup_progress_bar(subdomains.len() as u64);
@@ -60,7 +63,9 @@ fn main() -> Result<()> {
         cli::update_progress_bar(&progress_bar, index, total_subdomains);
 
         if let Some(delay_ms) = args.delay {
-            thread::sleep(Duration::from_millis(delay_ms));
+            if delay_ms > 0 {
+                thread::sleep(Duration::from_millis(delay_ms));
+            }
         }
     }
 
@@ -151,7 +156,11 @@ fn print_query_result(args: &CommandArgs, subdomain: &str, resolver: &str, respo
 
 fn print_query_error(args: &CommandArgs, subdomain: &str, resolver: &str, err: &anyhow::Error) {
     if args.verbose {
-        let domain = format!("{}.{}", subdomain.red().bold(), args.target_domain.blue().italic());
+        let domain = format!(
+            "{}.{}",
+            subdomain.red().bold(),
+            args.target_domain.blue().italic()
+        );
         if args.show_resolver {
             eprintln!(
                 "\r[{}] {} [resolver: {}] {:?}",
