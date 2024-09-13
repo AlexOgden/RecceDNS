@@ -10,6 +10,7 @@ use io::cli::CommandArgs;
 use rand::seq::IteratorRandom;
 use rand::thread_rng;
 use std::net::UdpSocket;
+use std::thread;
 use std::time::Duration;
 
 use crate::dns::types::ResponseType;
@@ -68,11 +69,15 @@ fn main() -> Result<()> {
         }
 
         cli::update_progress_bar(&progress_bar, index, total_subdomains);
+
+        if let Some(delay_ms) = args.delay {
+            thread::sleep(Duration::from_millis(delay_ms));
+        }
     }
 
     progress_bar.finish_and_clear();
 
-    println!("\nDone! Found {found_count} domains");
+    println!("\nDone! Found {found_count} subdomains");
     Ok(())
 }
 

@@ -53,6 +53,10 @@ pub struct CommandArgs {
     /// Print which resolver was used for each query
     #[arg(long)]
     pub show_resolver: bool,
+
+    /// Delay in milliseconds between DNS requests
+    #[arg(long, required = false)]
+    pub delay: Option<u64>,
 }
 
 pub fn get_parsed_args() -> CommandArgs {
@@ -69,10 +73,13 @@ pub fn print_options(args: &CommandArgs) {
     println!("{}: {}", "records".bright_blue(), args.query_type);
     println!("{}: {}", "resolvers".bright_blue(), args.dns_resolvers);
     println!(
-        "{}: {}\n",
+        "{}: {}",
         "show-resolver".bright_blue(),
         args.show_resolver
     );
+    if let Some(delay_ms) = args.delay {
+        println!("{}: {}ms\n", "delay".bright_blue(), delay_ms);
+    }
 }
 
 pub fn print_ascii_art() {
