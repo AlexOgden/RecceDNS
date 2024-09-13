@@ -7,6 +7,8 @@ use std::{
     net::{Ipv4Addr, Ipv6Addr, UdpSocket},
 };
 
+use super::types::SOAResponse;
+
 const BUFFER_SIZE: usize = 512;
 
 pub fn resolve_domain(
@@ -62,7 +64,7 @@ fn query_and_collect(
         Ok(query_result) => {
             for response in query_result {
                 match response.response_content {
-                    ResponseType::CanonicalName(ref cname) => {
+                    ResponseType::CNAME(ref cname) => {
                         if seen_cnames.insert(cname.clone()) {
                             all_results.insert(response.clone());
                             query_and_collect(
@@ -128,6 +130,7 @@ fn build_dns_query(domain: &str, query_type: &QueryType) -> Result<Vec<u8>> {
         QueryType::MX => packet.extend_from_slice(&[0x00, 0x0f]),
         QueryType::TXT => packet.extend_from_slice(&[0x00, 0x10]),
         QueryType::CNAME => packet.extend_from_slice(&[0x00, 0x05]),
+        QueryType::SOA => packet.extend_from_slice(&[0x00, 0x06]),
         _ => {}
     }
     packet.extend_from_slice(&[0x00, 0x01]); // QCLASS: IN (Internet)
@@ -200,11 +203,14 @@ fn parse_dns_response(response: &[u8]) -> Result<Vec<QueryResponse>> {
                 }
                 5 => {
                     // CNAME (5)
-                   results.push(parse_cname_record(response, &mut offset, rdlength)?);
+                    results.push(parse_cname_record(response, &mut offset, rdlength)?);
                 }
                 16 => {
                     // TXT (16)
-                   results.push(parse_txt_record(response, &mut offset, rdlength)?);
+                    results.push(parse_txt_record(response, &mut offset, rdlength)?);
+                }
+                6 => {
+                    results.push(parse_soa_record(response, &mut offset, rdlength)?);
                 }
                 _ => {} // Unsupported record type, ignore
             }
@@ -316,7 +322,9 @@ fn parse_mx_record(response: &[u8], offset: &mut usize, rdlength: u16) -> Result
 
 fn parse_cname_record(response: &[u8], offset: &mut usize, rdlength: u16) -> Result<QueryResponse> {
     if *offset + rdlength as usize > response.len() {
-        return Err(anyhow!("Malformed DNS response: CNAME record domain name incomplete"));
+        return Err(anyhow!(
+            "Malformed DNS response: CNAME record domain name incomplete"
+        ));
     }
 
     let mut cname_target = String::new();
@@ -343,16 +351,18 @@ fn parse_cname_record(response: &[u8], offset: &mut usize, rdlength: u16) -> Res
 
     let record_response = QueryResponse {
         query_type: QueryType::CNAME,
-        response_content: ResponseType::CanonicalName(cname_target),
+        response_content: ResponseType::CNAME(cname_target),
     };
     *offset += rdlength as usize; // Adjust offset for CNAME record
-    
+
     Ok(record_response)
 }
 
 fn parse_txt_record(response: &[u8], offset: &mut usize, rdlength: u16) -> Result<QueryResponse> {
     if *offset + rdlength as usize > response.len() {
-        return Err(anyhow!("Malformed DNS response: TXT record data incomplete"));
+        return Err(anyhow!(
+            "Malformed DNS response: TXT record data incomplete"
+        ));
     }
 
     let txt_data_length = response[*offset];
@@ -367,6 +377,102 @@ fn parse_txt_record(response: &[u8], offset: &mut usize, rdlength: u16) -> Resul
     let record_response = QueryResponse {
         query_type: QueryType::TXT,
         response_content: ResponseType::TXT(txt_data),
+    };
+
+    Ok(record_response)
+}
+
+fn parse_soa_record(response: &[u8], offset: &mut usize, rdlength: u16) -> Result<QueryResponse> {
+    if *offset + rdlength as usize > response.len() {
+        return Err(anyhow!(
+            "Malformed DNS response: SOA record data incomplete"
+        ));
+    }
+
+    let read_domain_name = |data: &[u8], offset: &mut usize| -> Result<String> {
+        let mut domain_name = String::new();
+        let mut first_label = true;
+
+        while data[*offset] != 0 {
+            if !first_label {
+                domain_name.push('.');
+            }
+            first_label = false;
+
+            let length = data[*offset] as usize;
+            *offset += 1;
+
+            if *offset + length > data.len() {
+                return Err(anyhow!(
+                    "Malformed DNS response: Domain name data incomplete"
+                ));
+            }
+
+            domain_name.push_str(core::str::from_utf8(&data[*offset..*offset + length])?);
+            *offset += length;
+        }
+
+        // Skip the null label
+        *offset += 1;
+        Ok(domain_name)
+    };
+
+    let mname_data = read_domain_name(response, offset)?;
+    let rname_data = read_domain_name(response, offset)?;
+
+    let serial_data: u32 = u32::from_be_bytes([
+        response[*offset],
+        response[*offset + 1],
+        response[*offset + 2],
+        response[*offset + 3],
+    ]);
+    *offset += 4;
+
+    let refresh_data: u32 = u32::from_be_bytes([
+        response[*offset],
+        response[*offset + 1],
+        response[*offset + 2],
+        response[*offset + 3],
+    ]);
+    *offset += 4;
+
+    let retry_data: u32 = u32::from_be_bytes([
+        response[*offset],
+        response[*offset + 1],
+        response[*offset + 2],
+        response[*offset + 3],
+    ]);
+    *offset += 4;
+
+    let expire_data: u32 = u32::from_be_bytes([
+        response[*offset],
+        response[*offset + 1],
+        response[*offset + 2],
+        response[*offset + 3],
+    ]);
+    *offset += 4;
+
+    let minimum_data: u32 = u32::from_be_bytes([
+        response[*offset],
+        response[*offset + 1],
+        response[*offset + 2],
+        response[*offset + 3],
+    ]);
+    *offset += 4;
+
+    let soa_response = SOAResponse {
+        mname: mname_data,
+        rname: rname_data,
+        serial: serial_data,
+        refresh: refresh_data,
+        retry: retry_data,
+        expire: expire_data,
+        minimum: minimum_data,
+    };
+
+    let record_response = QueryResponse {
+        query_type: QueryType::SOA,
+        response_content: ResponseType::SOA(soa_response),
     };
 
     Ok(record_response)
