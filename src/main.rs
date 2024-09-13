@@ -117,9 +117,12 @@ fn create_query_response_string(query_result: &[QueryResponse]) -> String {
             ResponseType::IPv4(ip) => format!("[{query_type_formatted} {ip}]"),
             ResponseType::IPv6(ip) => format!("[{query_type_formatted} {ip}]"),
             ResponseType::TXT(txt_data) => format!("[{query_type_formatted} {txt_data}]"),
-            ResponseType::CanonicalName(domain) => format!("[{query_type_formatted} {domain}]"),
+            ResponseType::CNAME(domain) => format!("[{query_type_formatted} {domain}]"),
             ResponseType::MX(mx) => {
                 format!("[{} {} {}]", query_type_formatted, mx.priority, mx.domain)
+            },
+            ResponseType::SOA(soa) => {
+                format!("[{} {} {} {} {} {} {} {}]", query_type_formatted, soa.mname, soa.rname, soa.serial, soa.refresh, soa.retry, soa.expire, soa.minimum)
             }
         };
 
