@@ -95,12 +95,13 @@ fn dns_query(
     const UDP_PORT: u8 = 53;
     let dns_server_address = format!("{dns_server}:{UDP_PORT}");
 
-    let query = build_dns_query(domain, query_type);
+    let query = build_dns_query(domain, query_type)?;
     let response = send_dns_query(socket, &query, &dns_server_address)?;
     parse_dns_response(&response)
 }
 
-fn build_dns_query(domain: &str, query_type: &QueryType) -> Vec<u8> {
+#[allow(clippy::match_wildcard_for_single_variants)]
+fn build_dns_query(domain: &str, query_type: &QueryType) -> Result<Vec<u8>> {
     let mut packet = Vec::new();
 
     // Generate a random ID
@@ -116,7 +117,8 @@ fn build_dns_query(domain: &str, query_type: &QueryType) -> Vec<u8> {
 
     // Question
     for part in domain.split('.') {
-        packet.push(part.len() as u8);
+        let q_length = u8::try_from(part.len())?;
+        packet.push(q_length);
         packet.extend_from_slice(part.as_bytes());
     }
     packet.push(0); // Terminate the domain name
@@ -130,7 +132,7 @@ fn build_dns_query(domain: &str, query_type: &QueryType) -> Vec<u8> {
     }
     packet.extend_from_slice(&[0x00, 0x01]); // QCLASS: IN (Internet)
 
-    packet
+    Ok(packet)
 }
 
 fn send_dns_query(socket: &UdpSocket, query: &[u8], dns_server: &str) -> Result<Vec<u8>> {
