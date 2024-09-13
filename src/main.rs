@@ -1,7 +1,7 @@
 mod dns;
 mod io;
 
-use anyhow::{bail, Result};
+use anyhow::{ensure, Result};
 use colored::Colorize;
 use dns::network_check;
 use dns::resolver::resolve_domain;
@@ -29,9 +29,7 @@ fn main() -> Result<()> {
 
     let mut dns_resolvers: Vec<&str> = args.dns_resolvers.split(',').collect();
     validate_dns_resolvers(&args, &mut dns_resolvers);
-    if dns_resolvers.is_empty() {
-        bail!("No DNS Resolvers in list! At least one resolver must be working!");
-    }
+    ensure!(!dns_resolvers.is_empty(), "No DNS Resolvers in list! At least one resolver must be working!");
 
     let total_subdomains = subdomains.len() as u64;
     let progress_bar = cli::setup_progress_bar(subdomains.len() as u64);
