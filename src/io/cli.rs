@@ -92,7 +92,7 @@ pub fn print_ascii_art() {
 ";
     println!("{}", title_art.cyan());
     println!(
-        "Version: {} Developer: Alex Ogden\n",
+        "Version: {} | Developer: Alex Ogden\n",
         env!("CARGO_PKG_VERSION")
     );
 }
