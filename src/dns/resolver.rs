@@ -1,15 +1,11 @@
 use anyhow::{anyhow, Result};
 
-use crate::dns::types::{MXResponse, QueryResponse, QueryType, ResponseType};
+use crate::dns::types::{MXResponse, QueryResponse, QueryType, ResponseType, SOAResponse};
 use rand::Rng;
 use std::{
     collections::HashSet,
     net::{Ipv4Addr, Ipv6Addr, UdpSocket},
 };
-
-use super::types::SOAResponse;
-
-const BUFFER_SIZE: usize = 512;
 
 pub fn resolve_domain(
     socket: &UdpSocket,
@@ -139,6 +135,8 @@ fn build_dns_query(domain: &str, query_type: &QueryType) -> Result<Vec<u8>> {
 }
 
 fn send_dns_query(socket: &UdpSocket, query: &[u8], dns_server: &str) -> Result<Vec<u8>> {
+    const BUFFER_SIZE: usize = 512;
+
     socket
         .send_to(query, dns_server)
         .map_err(|error| anyhow!("Failed to send DNS query: {}", error))?;
