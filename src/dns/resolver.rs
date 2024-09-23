@@ -98,7 +98,6 @@ fn dns_query(
     parse_dns_response(&response)
 }
 
-#[allow(clippy::match_wildcard_for_single_variants)]
 fn build_dns_query(domain: &str, query_type: &QueryType) -> Result<Vec<u8>> {
     let mut packet = Vec::new();
 
@@ -127,7 +126,7 @@ fn build_dns_query(domain: &str, query_type: &QueryType) -> Result<Vec<u8>> {
         QueryType::TXT => packet.extend_from_slice(&[0x00, 0x10]),
         QueryType::CNAME => packet.extend_from_slice(&[0x00, 0x05]),
         QueryType::SOA => packet.extend_from_slice(&[0x00, 0x06]),
-        _ => {}
+        QueryType::Any => return Err(anyhow!("Invalid query type")),
     }
     packet.extend_from_slice(&[0x00, 0x01]); // QCLASS: IN (Internet)
 
