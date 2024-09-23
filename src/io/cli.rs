@@ -54,7 +54,7 @@ pub struct CommandArgs {
     #[arg(long)]
     pub show_resolver: bool,
 
-    /// Delay in milliseconds between DNS requests
+    /// Delay in milliseconds between DNS requests for subdomain enumeration
     #[arg(long, required = false)]
     pub delay: Option<u64>,
 }
