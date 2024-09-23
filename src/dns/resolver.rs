@@ -18,7 +18,7 @@ pub fn resolve_domain(
 
     match query_type {
         QueryType::Any => {
-            for qt in &[QueryType::A, QueryType::AAAA, QueryType::MX, QueryType::TXT] {
+            for qt in &[QueryType::A, QueryType::AAAA, QueryType::MX, QueryType::TXT, QueryType::SOA] {
                 query_and_collect(
                     socket,
                     dns_server,
