@@ -122,7 +122,17 @@ fn create_query_response_string(query_result: &[QueryResponse]) -> String {
                 format!("[{} {} {}]", query_type_formatted, mx.priority, mx.domain)
             },
             ResponseType::SOA(soa) => {
-                format!("[{} {} {} {} {} {} {} {}]", query_type_formatted, soa.mname, soa.rname, soa.serial, soa.refresh, soa.retry, soa.expire, soa.minimum)
+                format!(
+                    "[{} {} {} {} {} {} {} {}]",
+                    query_type_formatted,
+                    soa.mname,
+                    soa.rname,
+                    soa.serial,
+                    soa.refresh,
+                    soa.retry,
+                    soa.expire,
+                    soa.minimum
+                )
             }
         };
 
