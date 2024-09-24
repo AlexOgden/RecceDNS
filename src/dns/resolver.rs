@@ -18,7 +18,13 @@ pub fn resolve_domain(
 
     match query_type {
         QueryType::Any => {
-            for qt in &[QueryType::A, QueryType::AAAA, QueryType::MX, QueryType::TXT, QueryType::SOA] {
+            for qt in &[
+                QueryType::A,
+                QueryType::AAAA,
+                QueryType::MX,
+                QueryType::TXT,
+                QueryType::SOA,
+            ] {
                 query_and_collect(
                     socket,
                     dns_server,
@@ -525,14 +531,7 @@ mod test {
         assert_eq!(query_response.query_type, QueryType::AAAA);
 
         let expected_ip = Ipv6Addr::new(
-            0x2a00,
-            0x1450,
-            0x4009,
-            0x0081f,
-            0x0000,
-            0x0000,
-            0x0000, 
-            0x200e,
+            0x2a00, 0x1450, 0x4009, 0x0081f, 0x0000, 0x0000, 0x0000, 0x200e,
         );
 
         if let ResponseType::IPv6(parsed_ip) = query_response.response_content {
