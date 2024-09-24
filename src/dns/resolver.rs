@@ -477,3 +477,32 @@ fn parse_soa_record(response: &[u8], offset: &mut usize, rdlength: u16) -> Resul
 
     Ok(record_response)
 }
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn parse_valid_a_response() {
+        // google.com A 142.250.187.206
+        let a_record_response_data: [u8; 55] = [
+            0x2c, 0xb7, 0x81, 0x80, 0x00, 0x01, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x06, 0x67,
+            0x6f, 0x6f, 0x67, 0x6c, 0x65, 0x03, 0x63, 0x6f, 0x6d, 0x00, 0x00, 0x01, 0x00, 0x01,
+            0xc0, 0x0c, 0x00, 0x01, 0x00, 0x01, 0x00, 0x00, 0x01, 0x2c, 0x00, 0x04, 0x8e, 0xfa,
+            0xbb, 0xce, 0x00, 0x00, 0x29, 0x04, 0xd0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        ];
+
+        let parsed_response: Vec<QueryResponse> =
+            parse_dns_response(&a_record_response_data).expect("Parse Failed");
+        assert_eq!(parsed_response.len(), 1);
+
+        let query_response = &parsed_response[0];
+        assert_eq!(query_response.query_type, QueryType::A);
+
+        let expected_ip = Ipv4Addr::new(142, 250, 187, 206);
+
+        if let ResponseType::IPv4(parsed_ip) = query_response.response_content {
+            assert_eq!(parsed_ip, expected_ip);
+        }
+    }
+}
