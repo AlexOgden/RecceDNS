@@ -397,30 +397,57 @@ fn parse_soa_record(response: &[u8], offset: &mut usize, rdlength: u16) -> Resul
     }
 
     let read_domain_name = |data: &[u8], offset: &mut usize| -> Result<String> {
-        let mut domain_name = String::new();
+        let mut domain_name = Vec::with_capacity(256);
         let mut first_label = true;
-
-        while data[*offset] != 0 {
+        let mut original_offset = *offset; // Keep track of the original offset
+        let mut jumped = false; // To track if we've jumped to a pointer location
+    
+        loop {
+            let length = data[*offset] as usize;
+    
+            // If length indicates pointer compression (0b11000000), follow the pointer
+            if length & 0b1100_0000 == 0b1100_0000 {
+                let pointer = ((length & 0b0011_1111) << 8) | data[*offset + 1] as usize;
+                *offset += 2;
+    
+                // Set the offset to the pointer's target, but only if we haven't already jumped
+                if !jumped {
+                    original_offset = *offset; // Save the current offset for after the jump
+                    *offset = pointer;
+                    jumped = true;
+                }
+                continue;
+            }
+    
+            // Stop when we encounter a null byte (end of domain name)
+            if length == 0 {
+                if jumped {
+                    *offset = original_offset; // Restore offset to continue parsing after the jump
+                } else {
+                    *offset += 1;
+                }
+                break;
+            }
+    
+            // Ensure there's enough data to read the label
+            if *offset + length + 1 > data.len() {
+                return Err(anyhow!("Malformed DNS response: Domain name data incomplete"));
+            }
+    
+            // Append a dot between labels
             if !first_label {
-                domain_name.push('.');
+                domain_name.push(b'.');
             }
             first_label = false;
-
-            let length = data[*offset] as usize;
+    
+            // Append the label
             *offset += 1;
-
-            if *offset + length > data.len() {
-                return Err(anyhow!(
-                    "Malformed DNS response: Domain name data incomplete"
-                ));
-            }
-
-            domain_name.push_str(core::str::from_utf8(&data[*offset..*offset + length])?);
+            domain_name.extend_from_slice(&data[*offset..*offset + length]);
             *offset += length;
         }
-
-        *offset += 1;
-        Ok(domain_name)
+    
+        // Convert the domain name from Vec<u8> to String
+        String::from_utf8(domain_name).map_err(|e| anyhow!("Invalid UTF-8 sequence: {}", e))
     };
 
     let mname_data = read_domain_name(response, offset)?;
@@ -554,5 +581,16 @@ mod test {
         let parsed_response: Vec<QueryResponse> =
             parse_dns_response(&soa_record_response_data).expect("Parse Failed");
         assert_eq!(parsed_response.len(), 1);
+        
+        let response_data = &parsed_response[0];
+        assert_eq!(response_data.query_type, QueryType::SOA);
+
+        if let ResponseType::SOA(soa_response) = &response_data.response_content {
+            assert_eq!(soa_response.expire, 1800);
+            assert_eq!(soa_response.retry, 900);
+            assert_eq!(soa_response.refresh, 900);
+            assert_eq!(soa_response.minimum, 60);
+            assert_eq!(soa_response.serial, 677_709_978);
+        }
     }
 }
