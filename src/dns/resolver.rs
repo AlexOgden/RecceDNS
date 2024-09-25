@@ -161,6 +161,7 @@ fn parse_dns_response(response: &[u8]) -> Result<Vec<QueryResponse>> {
 
     let qdcount = u16::from_be_bytes([response[4], response[5]]); //Question Count
     let ancount = u16::from_be_bytes([response[6], response[7]]); //Answer Count
+    let nscount = u16::from_be_bytes([response[8], response[9]]); // Authority Record Count
 
     if qdcount != 1 {
         return Err(anyhow!("Malformed DNS response: Incorrect question count"));
@@ -221,6 +222,42 @@ fn parse_dns_response(response: &[u8]) -> Result<Vec<QueryResponse>> {
         } else {
             // Unsupported class, skip the record
             offset += rdlength as usize;
+        }
+    }
+
+    // Parse the Authority section if there are authority records (NSCOUNT)
+    if nscount > 0 {
+        for _ in 0..nscount {
+            if offset + 10 > response.len() {
+                return Err(anyhow!(
+                    "Malformed DNS response: Authority section incomplete"
+                ));
+            }
+
+            offset += 2; // Skip the NAME (pointer)
+            let query_type = u16::from_be_bytes([response[offset], response[offset + 1]]);
+            offset += 2;
+            let class = u16::from_be_bytes([response[offset], response[offset + 1]]);
+            offset += 2;
+            offset += 4; // Skip the TTL
+            let rdlength = u16::from_be_bytes([response[offset], response[offset + 1]]);
+
+            offset += 2;
+            if class == 1 {
+                match query_type {
+                    6 => {
+                        // SOA (6) in Authority section
+                        results.push(parse_soa_record(response, &mut offset, rdlength)?);
+                    }
+                    _ => {
+                        // Unsupported or irrelevant record type, skip
+                        offset += rdlength as usize;
+                    }
+                }
+            } else {
+                // Unsupported class, skip the record
+                offset += rdlength as usize;
+            }
         }
     }
 
