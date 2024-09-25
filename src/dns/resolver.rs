@@ -18,7 +18,13 @@ pub fn resolve_domain(
 
     match query_type {
         QueryType::Any => {
-            for qt in &[QueryType::A, QueryType::AAAA, QueryType::MX, QueryType::TXT, QueryType::SOA] {
+            for qt in &[
+                QueryType::A,
+                QueryType::AAAA,
+                QueryType::MX,
+                QueryType::TXT,
+                QueryType::SOA,
+            ] {
                 query_and_collect(
                     socket,
                     dns_server,
@@ -391,30 +397,57 @@ fn parse_soa_record(response: &[u8], offset: &mut usize, rdlength: u16) -> Resul
     }
 
     let read_domain_name = |data: &[u8], offset: &mut usize| -> Result<String> {
-        let mut domain_name = String::new();
+        let mut domain_name = Vec::with_capacity(256);
         let mut first_label = true;
-
-        while data[*offset] != 0 {
+        let mut original_offset = *offset; // Keep track of the original offset
+        let mut jumped = false; // To track if we've jumped to a pointer location
+    
+        loop {
+            let length = data[*offset] as usize;
+    
+            // If length indicates pointer compression (0b11000000), follow the pointer
+            if length & 0b1100_0000 == 0b1100_0000 {
+                let pointer = ((length & 0b0011_1111) << 8) | data[*offset + 1] as usize;
+                *offset += 2;
+    
+                // Set the offset to the pointer's target, but only if we haven't already jumped
+                if !jumped {
+                    original_offset = *offset; // Save the current offset for after the jump
+                    *offset = pointer;
+                    jumped = true;
+                }
+                continue;
+            }
+    
+            // Stop when we encounter a null byte (end of domain name)
+            if length == 0 {
+                if jumped {
+                    *offset = original_offset; // Restore offset to continue parsing after the jump
+                } else {
+                    *offset += 1;
+                }
+                break;
+            }
+    
+            // Ensure there's enough data to read the label
+            if *offset + length + 1 > data.len() {
+                return Err(anyhow!("Malformed DNS response: Domain name data incomplete"));
+            }
+    
+            // Append a dot between labels
             if !first_label {
-                domain_name.push('.');
+                domain_name.push(b'.');
             }
             first_label = false;
-
-            let length = data[*offset] as usize;
+    
+            // Append the label
             *offset += 1;
-
-            if *offset + length > data.len() {
-                return Err(anyhow!(
-                    "Malformed DNS response: Domain name data incomplete"
-                ));
-            }
-
-            domain_name.push_str(core::str::from_utf8(&data[*offset..*offset + length])?);
+            domain_name.extend_from_slice(&data[*offset..*offset + length]);
             *offset += length;
         }
-
-        *offset += 1;
-        Ok(domain_name)
+    
+        // Convert the domain name from Vec<u8> to String
+        String::from_utf8(domain_name).map_err(|e| anyhow!("Invalid UTF-8 sequence: {}", e))
     };
 
     let mname_data = read_domain_name(response, offset)?;
@@ -476,4 +509,96 @@ fn parse_soa_record(response: &[u8], offset: &mut usize, rdlength: u16) -> Resul
     };
 
     Ok(record_response)
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn parse_invalid_response() {
+        let invalid_data: [u8; 8] = [0x00, 0x32, 0x45, 0x21, 0x2F, 0xFF, 0xA2, 0x80];
+
+        let parse_result = parse_dns_response(&invalid_data);
+        assert!(parse_result.is_err());
+    }
+
+    #[test]
+    fn parse_valid_a_response() {
+        // google.com A 142.250.187.206
+        let a_record_response_data: [u8; 55] = [
+            0x2c, 0xb7, 0x81, 0x80, 0x00, 0x01, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x06, 0x67,
+            0x6f, 0x6f, 0x67, 0x6c, 0x65, 0x03, 0x63, 0x6f, 0x6d, 0x00, 0x00, 0x01, 0x00, 0x01,
+            0xc0, 0x0c, 0x00, 0x01, 0x00, 0x01, 0x00, 0x00, 0x01, 0x2c, 0x00, 0x04, 0x8e, 0xfa,
+            0xbb, 0xce, 0x00, 0x00, 0x29, 0x04, 0xd0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        ];
+
+        let parsed_response: Vec<QueryResponse> =
+            parse_dns_response(&a_record_response_data).expect("Parse Failed");
+        assert_eq!(parsed_response.len(), 1);
+
+        let query_response = &parsed_response[0];
+        assert_eq!(query_response.query_type, QueryType::A);
+
+        let expected_ip = Ipv4Addr::new(142, 250, 187, 206);
+
+        if let ResponseType::IPv4(parsed_ip) = query_response.response_content {
+            assert_eq!(parsed_ip, expected_ip);
+        }
+    }
+
+    #[test]
+    fn parse_valid_aaaa_response() {
+        // google.com AAAA 2a00:1450:4009:81f::200e
+        let aaaa_record_response_data: [u8; 67] = [
+            0xb2, 0xf6, 0x81, 0x80, 0x00, 0x01, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x06, 0x67,
+            0x6f, 0x6f, 0x67, 0x6c, 0x65, 0x03, 0x63, 0x6f, 0x6d, 0x00, 0x00, 0x1c, 0x00, 0x01,
+            0xc0, 0x0c, 0x00, 0x1c, 0x00, 0x01, 0x00, 0x00, 0x01, 0x2c, 0x00, 0x10, 0x2a, 0x00,
+            0x14, 0x50, 0x40, 0x09, 0x08, 0x1f, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x20, 0x0e,
+            0x00, 0x00, 0x29, 0x04, 0xd0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        ];
+
+        let parsed_response: Vec<QueryResponse> =
+            parse_dns_response(&aaaa_record_response_data).expect("Parse Failed");
+        assert_eq!(parsed_response.len(), 1);
+
+        let query_response = &parsed_response[0];
+        assert_eq!(query_response.query_type, QueryType::AAAA);
+
+        let expected_ip = Ipv6Addr::new(
+            0x2a00, 0x1450, 0x4009, 0x0081f, 0x0000, 0x0000, 0x0000, 0x200e,
+        );
+
+        if let ResponseType::IPv6(parsed_ip) = query_response.response_content {
+            assert_eq!(parsed_ip, expected_ip);
+        }
+    }
+
+    #[test]
+    fn parse_valid_soa_record() {
+        // google.com SOA
+        let soa_record_response_data: [u8; 89] = [
+            0xff, 0xfe, 0x81, 0x80, 0x0, 0x1, 0x0, 0x1, 0x0, 0x0, 0x0, 0x1, 0x6, 0x67, 0x6f, 0x6f,
+            0x67, 0x6c, 0x65, 0x3, 0x63, 0x6f, 0x6d, 0x0, 0x0, 0x6, 0x0, 0x1, 0xc0, 0xc, 0x0, 0x6,
+            0x0, 0x1, 0x0, 0x0, 0x0, 0x3c, 0x0, 0x26, 0x3, 0x6e, 0x73, 0x31, 0xc0, 0xc, 0x9, 0x64,
+            0x6e, 0x73, 0x2d, 0x61, 0x64, 0x6d, 0x69, 0x6e, 0xc0, 0xc, 0x28, 0x65, 0x8, 0x9a, 0x0,
+            0x0, 0x3, 0x84, 0x0, 0x0, 0x3, 0x84, 0x0, 0x0, 0x7, 0x8, 0x0, 0x0, 0x0, 0x3c, 0x0, 0x0,
+            0x29, 0x4, 0xd0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0,
+        ];
+
+        let parsed_response: Vec<QueryResponse> =
+            parse_dns_response(&soa_record_response_data).expect("Parse Failed");
+        assert_eq!(parsed_response.len(), 1);
+        
+        let response_data = &parsed_response[0];
+        assert_eq!(response_data.query_type, QueryType::SOA);
+
+        if let ResponseType::SOA(soa_response) = &response_data.response_content {
+            assert_eq!(soa_response.expire, 1800);
+            assert_eq!(soa_response.retry, 900);
+            assert_eq!(soa_response.refresh, 900);
+            assert_eq!(soa_response.minimum, 60);
+            assert_eq!(soa_response.serial, 677_709_978);
+        }
+    }
 }
