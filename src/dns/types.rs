@@ -22,6 +22,20 @@ pub enum QueryType {
     Any,
 }
 
+impl QueryType {
+    pub const fn from_number(num: u16) -> Self {
+        match num {
+            1 => Self::A,
+            28 => Self::AAAA,
+            15 => Self::MX,
+            16 => Self::TXT,
+            5 => Self::CNAME,
+            6 => Self::SOA,
+            _ => Self::Any
+        }
+    }
+}
+
 #[allow(clippy::upper_case_acronyms)]
 #[derive(Clone, Eq, PartialEq, Hash)]
 pub enum ResponseType {

@@ -23,7 +23,6 @@ pub fn resolve_domain(
                 QueryType::AAAA,
                 QueryType::MX,
                 QueryType::TXT,
-                QueryType::SOA,
             ] {
                 query_and_collect(
                     socket,
@@ -173,6 +172,9 @@ fn parse_dns_response(response: &[u8]) -> Result<Vec<QueryResponse>> {
     while offset < response.len() && response[offset] != 0 {
         offset += response[offset] as usize + 1;
     }
+
+    // Extract QTYPE and QCLASS
+    let q_type = u16::from_be_bytes([response[offset + 1], response[offset + 2]]);
     offset += 5; // Skip QTYPE and QCLASS
 
     // Parse the Answer section
@@ -183,7 +185,7 @@ fn parse_dns_response(response: &[u8]) -> Result<Vec<QueryResponse>> {
         }
 
         offset += 2; // Skip the NAME (pointer)
-        let query_type = u16::from_be_bytes([response[offset], response[offset + 1]]);
+        let query_type = QueryType::from_number(u16::from_be_bytes([response[offset], response[offset + 1]]));
         offset += 2;
         let class = u16::from_be_bytes([response[offset], response[offset + 1]]);
         offset += 2;
@@ -193,27 +195,27 @@ fn parse_dns_response(response: &[u8]) -> Result<Vec<QueryResponse>> {
         offset += 2;
         if class == 1 {
             match query_type {
-                1 => {
+                QueryType::A => {
                     // A (1)
                     results.push(parse_a_record(response, &mut offset, rdlength)?);
                 }
-                28 => {
+                QueryType::AAAA => {
                     // AAAA (28)
                     results.push(parse_aaaa_record(response, &mut offset, rdlength)?);
                 }
-                15 => {
+                QueryType::MX => {
                     // MX (15)
                     results.push(parse_mx_record(response, &mut offset, rdlength)?);
                 }
-                5 => {
+                QueryType::CNAME => {
                     // CNAME (5)
                     results.push(parse_cname_record(response, &mut offset, rdlength)?);
                 }
-                16 => {
+                QueryType::TXT => {
                     // TXT (16)
                     results.push(parse_txt_record(response, &mut offset, rdlength)?);
                 }
-                6 => {
+                QueryType::SOA => {
                     // SOA (6)
                     results.push(parse_soa_record(response, &mut offset, rdlength)?);
                 }
@@ -226,7 +228,7 @@ fn parse_dns_response(response: &[u8]) -> Result<Vec<QueryResponse>> {
     }
 
     // Parse the Authority section if there are authority records (NSCOUNT)
-    if nscount > 0 {
+    if nscount > 0 && QueryType::from_number(q_type) == QueryType::SOA {
         for _ in 0..nscount {
             if offset + 10 > response.len() {
                 return Err(anyhow!(
@@ -235,7 +237,7 @@ fn parse_dns_response(response: &[u8]) -> Result<Vec<QueryResponse>> {
             }
 
             offset += 2; // Skip the NAME (pointer)
-            let query_type = u16::from_be_bytes([response[offset], response[offset + 1]]);
+            let query_type = QueryType::from_number(u16::from_be_bytes([response[offset], response[offset + 1]]));
             offset += 2;
             let class = u16::from_be_bytes([response[offset], response[offset + 1]]);
             offset += 2;
@@ -245,7 +247,7 @@ fn parse_dns_response(response: &[u8]) -> Result<Vec<QueryResponse>> {
             offset += 2;
             if class == 1 {
                 match query_type {
-                    6 => {
+                    QueryType::SOA => {
                         // SOA (6) in Authority section
                         results.push(parse_soa_record(response, &mut offset, rdlength)?);
                     }
