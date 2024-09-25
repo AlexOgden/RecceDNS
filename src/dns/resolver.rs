@@ -516,6 +516,14 @@ mod test {
     use super::*;
 
     #[test]
+    fn parse_invalid_response() {
+        let invalid_data: [u8; 8] = [0x00, 0x32, 0x45, 0x21, 0x2F, 0xFF, 0xA2, 0x80];
+
+        let parse_result = parse_dns_response(&invalid_data);
+        assert!(parse_result.is_err());
+    }
+
+    #[test]
     fn parse_valid_a_response() {
         // google.com A 142.250.187.206
         let a_record_response_data: [u8; 55] = [
