@@ -109,20 +109,19 @@ fn select_random_resolver<'a>(dns_resolvers: &'a [&str]) -> Result<&'a str> {
 }
 
 fn create_query_response_string(query_result: &[QueryResponse]) -> String {
-    let mut query_responses = String::new();
-
-    for (index, response) in query_result.iter().enumerate() {
-        let query_type_formatted = response.query_type.to_string().bold();
-        let content_string = match &response.response_content {
-            ResponseType::IPv4(ip) => format!("[{query_type_formatted} {ip}]"),
-            ResponseType::IPv6(ip) => format!("[{query_type_formatted} {ip}]"),
-            ResponseType::TXT(txt_data) => format!("[{query_type_formatted} {txt_data}]"),
-            ResponseType::CNAME(domain) => format!("[{query_type_formatted} {domain}]"),
-            ResponseType::MX(mx) => {
-                format!("[{} {} {}]", query_type_formatted, mx.priority, mx.domain)
-            },
-            ResponseType::SOA(soa) => {
-                format!(
+    let query_responses: String = query_result
+        .iter()
+        .map(|response| {
+            let query_type_formatted = response.query_type.to_string().bold();
+            match &response.response_content {
+                ResponseType::IPv4(ip) => format!("[{query_type_formatted} {ip}]"),
+                ResponseType::IPv6(ip) => format!("[{query_type_formatted} {ip}]"),
+                ResponseType::TXT(txt_data) => format!("[{query_type_formatted} {txt_data}]"),
+                ResponseType::CNAME(domain) => format!("[{query_type_formatted} {domain}]"),
+                ResponseType::MX(mx) => {
+                    format!("[{} {} {}]", query_type_formatted, mx.priority, mx.domain)
+                }
+                ResponseType::SOA(soa) => format!(
                     "[{} {} {} {} {} {} {} {}]",
                     query_type_formatted,
                     soa.mname,
@@ -132,15 +131,11 @@ fn create_query_response_string(query_result: &[QueryResponse]) -> String {
                     soa.retry,
                     soa.expire,
                     soa.minimum
-                )
+                ),
             }
-        };
-
-        if index != 0 {
-            query_responses.push(',');
-        }
-        query_responses.push_str(&content_string);
-    }
+        })
+        .collect::<Vec<_>>()
+        .join(",");
 
     format!("[{query_responses}]")
 }

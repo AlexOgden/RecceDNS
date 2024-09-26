@@ -17,7 +17,12 @@ pub fn resolve_domain(
     let mut seen_cnames = HashSet::new();
 
     let query_types: Vec<&QueryType> = match query_type {
-        QueryType::Any => vec![&QueryType::A, &QueryType::AAAA, &QueryType::MX, &QueryType::TXT],
+        QueryType::Any => vec![
+            &QueryType::A,
+            &QueryType::AAAA,
+            &QueryType::MX,
+            &QueryType::TXT,
+        ],
         _ => vec![query_type],
     };
 
@@ -57,7 +62,7 @@ fn query_and_collect(
         } else {
             all_results.insert(response);
         }
-    };
+    }
 
     Ok(())
 }

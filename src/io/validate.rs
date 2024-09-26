@@ -1,7 +1,7 @@
-use anyhow::{Context, Result, anyhow};
+use anyhow::{anyhow, Context, Result};
+use core::net::Ipv4Addr;
 use lazy_static::lazy_static;
 use regex::Regex;
-use core::net::Ipv4Addr;
 
 lazy_static! {
     static ref DOMAIN_REGEX: Regex =
@@ -20,10 +20,7 @@ pub fn domain(domain: &str) -> Result<String> {
 pub fn dns_resolver_list(servers: &str) -> Result<String> {
     let server_list: Vec<&str> = servers.split(',').collect();
 
-    if server_list
-        .iter()
-        .all(|&server| ipv4(server).is_ok())
-    {
+    if server_list.iter().all(|&server| ipv4(server).is_ok()) {
         Ok(servers.to_string())
     } else {
         Err(anyhow!(
@@ -44,12 +41,15 @@ mod test {
 
     #[test]
     fn valid_ipv4() {
-        let valid_ips = ["192.168.0.1", "127.0.0.1", "172.0.1.1", "111.111.111.111", "0.0.0.0"];
+        let valid_ips = [
+            "192.168.0.1",
+            "127.0.0.1",
+            "172.0.1.1",
+            "111.111.111.111",
+            "0.0.0.0",
+        ];
         for ip in valid_ips {
-            assert_eq!(
-                ipv4(ip).unwrap(),
-                ip
-            );
+            assert_eq!(ipv4(ip).unwrap(), ip);
         }
     }
 
@@ -96,10 +96,7 @@ mod test {
 
     #[test]
     fn valid_domain() {
-        assert_eq!(
-            domain("example.com").unwrap(),
-            "example.com"
-        );
+        assert_eq!(domain("example.com").unwrap(), "example.com");
     }
 
     #[test]
@@ -134,5 +131,4 @@ mod test {
         let long_subdomain = "sub".repeat(64) + ".example.com";
         assert!(domain(&long_subdomain).is_err());
     }
-
 }

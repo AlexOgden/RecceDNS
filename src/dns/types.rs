@@ -1,7 +1,7 @@
 use std::net::{Ipv4Addr, Ipv6Addr};
 
-use strum_macros::Display;
 use clap::ValueEnum;
+use strum_macros::Display;
 
 #[allow(clippy::upper_case_acronyms)]
 #[derive(Debug, PartialEq, Eq, Clone, ValueEnum, Display, Hash)]
@@ -12,7 +12,7 @@ pub enum QueryType {
     AAAA,
     #[strum(to_string = "MX")]
     MX,
-	#[strum(to_string = "TXT")]
+    #[strum(to_string = "TXT")]
     TXT,
     #[strum(to_string = "CNAME")]
     CNAME,
@@ -31,7 +31,7 @@ impl QueryType {
             16 => Self::TXT,
             5 => Self::CNAME,
             6 => Self::SOA,
-            _ => Self::Any
+            _ => Self::Any,
         }
     }
 }
@@ -42,9 +42,9 @@ pub enum ResponseType {
     IPv4(Ipv4Addr),
     IPv6(Ipv6Addr),
     MX(MXResponse),
-	TXT(String),
+    TXT(String),
     CNAME(String),
-    SOA(SOAResponse)
+    SOA(SOAResponse),
 }
 
 #[derive(Clone, Eq, PartialEq, Hash)]
@@ -61,7 +61,7 @@ pub struct SOAResponse {
     pub refresh: u32,
     pub retry: u32,
     pub expire: u32,
-    pub minimum: u32
+    pub minimum: u32,
 }
 
 #[derive(Clone, Eq, PartialEq, Hash)]
