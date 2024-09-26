@@ -18,12 +18,7 @@ pub fn resolve_domain(
 
     match query_type {
         QueryType::Any => {
-            for qt in &[
-                QueryType::A,
-                QueryType::AAAA,
-                QueryType::MX,
-                QueryType::TXT,
-            ] {
+            for qt in &[QueryType::A, QueryType::AAAA, QueryType::MX, QueryType::TXT] {
                 query_and_collect(
                     socket,
                     dns_server,
@@ -163,7 +158,9 @@ fn parse_dns_response(response: &[u8]) -> Result<Vec<QueryResponse>> {
     let nscount = u16::from_be_bytes([response[8], response[9]]); // Authority Record Count
 
     if qdcount != 1 {
-        return Err(anyhow!("Malformed DNS response: Incorrect question count"));
+        return Err(anyhow!(
+            "Malformed DNS response: Incorrect question count ({qdcount})"
+        ));
     }
 
     let mut offset = 12; // Start of the Question section
@@ -185,7 +182,8 @@ fn parse_dns_response(response: &[u8]) -> Result<Vec<QueryResponse>> {
         }
 
         offset += 2; // Skip the NAME (pointer)
-        let query_type = QueryType::from_number(u16::from_be_bytes([response[offset], response[offset + 1]]));
+        let query_type =
+            QueryType::from_number(u16::from_be_bytes([response[offset], response[offset + 1]]));
         offset += 2;
         let class = u16::from_be_bytes([response[offset], response[offset + 1]]);
         offset += 2;
@@ -237,7 +235,10 @@ fn parse_dns_response(response: &[u8]) -> Result<Vec<QueryResponse>> {
             }
 
             offset += 2; // Skip the NAME (pointer)
-            let query_type = QueryType::from_number(u16::from_be_bytes([response[offset], response[offset + 1]]));
+            let query_type = QueryType::from_number(u16::from_be_bytes([
+                response[offset],
+                response[offset + 1],
+            ]));
             offset += 2;
             let class = u16::from_be_bytes([response[offset], response[offset + 1]]);
             offset += 2;
@@ -440,15 +441,15 @@ fn parse_soa_record(response: &[u8], offset: &mut usize, rdlength: u16) -> Resul
         let mut first_label = true;
         let mut original_offset = *offset; // Keep track of the original offset
         let mut jumped = false; // To track if we've jumped to a pointer location
-    
+
         loop {
             let length = data[*offset] as usize;
-    
+
             // If length indicates pointer compression (0b11000000), follow the pointer
             if length & 0b1100_0000 == 0b1100_0000 {
                 let pointer = ((length & 0b0011_1111) << 8) | data[*offset + 1] as usize;
                 *offset += 2;
-    
+
                 // Set the offset to the pointer's target, but only if we haven't already jumped
                 if !jumped {
                     original_offset = *offset; // Save the current offset for after the jump
@@ -457,7 +458,7 @@ fn parse_soa_record(response: &[u8], offset: &mut usize, rdlength: u16) -> Resul
                 }
                 continue;
             }
-    
+
             // Stop when we encounter a null byte (end of domain name)
             if length == 0 {
                 if jumped {
@@ -467,24 +468,26 @@ fn parse_soa_record(response: &[u8], offset: &mut usize, rdlength: u16) -> Resul
                 }
                 break;
             }
-    
+
             // Ensure there's enough data to read the label
             if *offset + length + 1 > data.len() {
-                return Err(anyhow!("Malformed DNS response: Domain name data incomplete"));
+                return Err(anyhow!(
+                    "Malformed DNS response: Domain name data incomplete"
+                ));
             }
-    
+
             // Append a dot between labels
             if !first_label {
                 domain_name.push(b'.');
             }
             first_label = false;
-    
+
             // Append the label
             *offset += 1;
             domain_name.extend_from_slice(&data[*offset..*offset + length]);
             *offset += length;
         }
-    
+
         // Convert the domain name from Vec<u8> to String
         String::from_utf8(domain_name).map_err(|e| anyhow!("Invalid UTF-8 sequence: {}", e))
     };
@@ -614,7 +617,115 @@ mod test {
     }
 
     #[test]
-    fn parse_valid_soa_record() {
+    fn parse_valid_single_mx_response() {
+        // google.com MX
+        let mx_single_reponse_data: [u8; 60] = [
+            0x29, 0x5b, 0x81, 0x80, 0x0, 0x1, 0x0, 0x1, 0x0, 0x0, 0x0, 0x1, 0x6, 0x67, 0x6f, 0x6f,
+            0x67, 0x6c, 0x65, 0x3, 0x63, 0x6f, 0x6d, 0x0, 0x0, 0xf, 0x0, 0x1, 0xc0, 0xc, 0x0, 0xf,
+            0x0, 0x1, 0x0, 0x0, 0x1, 0x2c, 0x0, 0x9, 0x0, 0xa, 0x4, 0x73, 0x6d, 0x74, 0x70, 0xc0,
+            0xc, 0x0, 0x0, 0x29, 0x4, 0xd0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0,
+        ];
+
+        let parsed_response: Vec<QueryResponse> =
+            parse_dns_response(&mx_single_reponse_data).expect("Parse Failed");
+        assert_eq!(parsed_response.len(), 1);
+
+        let response_data = &parsed_response[0];
+        assert_eq!(response_data.query_type, QueryType::MX);
+
+        if let ResponseType::MX(mx_response) = &response_data.response_content {
+            assert_eq!(mx_response.priority, 10);
+            assert_eq!(mx_response.domain, "smtp.google.com");
+        }
+    }
+
+    #[test]
+    fn parse_valid_two_mx_response() {
+        // google.com MX
+        let mx_two_reponse_data: [u8; 87] = [
+            0x46, 0xa8, 0x81, 0xa0, 0x0, 0x1, 0x0, 0x2, 0x0, 0x0, 0x0, 0x1, 0xa, 0x70, 0x72, 0x6f,
+            0x74, 0x6f, 0x6e, 0x6d, 0x61, 0x69, 0x6c, 0x2, 0x63, 0x68, 0x0, 0x0, 0xf, 0x0, 0x1,
+            0xc0, 0xc, 0x0, 0xf, 0x0, 0x1, 0x0, 0x0, 0x1, 0x7d, 0x0, 0x9, 0x0, 0x5, 0x4, 0x6d,
+            0x61, 0x69, 0x6c, 0xc0, 0xc, 0xc0, 0xc, 0x0, 0xf, 0x0, 0x1, 0x0, 0x0, 0x1, 0x7d, 0x0,
+            0xc, 0x0, 0xa, 0x7, 0x6d, 0x61, 0x69, 0x6c, 0x73, 0x65, 0x63, 0xc0, 0xc, 0x0, 0x0,
+            0x29, 0x4, 0xd0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0,
+        ];
+
+        let parsed_response: Vec<QueryResponse> =
+            parse_dns_response(&mx_two_reponse_data).expect("Parse Failed");
+        assert_eq!(parsed_response.len(), 2);
+
+        let response_data = &parsed_response[0];
+        assert_eq!(response_data.query_type, QueryType::MX);
+
+        if let ResponseType::MX(mx_response) = &response_data.response_content {
+            assert_eq!(mx_response.priority, 5);
+            assert_eq!(mx_response.domain, "mail.protonmail.ch");
+        }
+
+        let response_data = &parsed_response[1];
+        assert_eq!(response_data.query_type, QueryType::MX);
+
+        if let ResponseType::MX(mx_response) = &response_data.response_content {
+            assert_eq!(mx_response.priority, 10);
+            assert_eq!(mx_response.domain, "mailsec.protonmail.ch");
+        }
+    }
+
+    #[test]
+    fn parse_valid_cname_response() {
+        // www.alexogden.com CNAME
+        let cname_record_response_data: [u8; 60] = [
+            0x92, 0x59, 0x81, 0x80, 0x0, 0x1, 0x0, 0x1, 0x0, 0x0, 0x0, 0x1, 0x3, 0x77, 0x77, 0x77,
+            0x9, 0x61, 0x6c, 0x65, 0x78, 0x6f, 0x67, 0x64, 0x65, 0x6e, 0x3, 0x63, 0x6f, 0x6d, 0x0,
+            0x0, 0x5, 0x0, 0x1, 0xc0, 0xc, 0x0, 0x5, 0x0, 0x1, 0x0, 0x0, 0x1d, 0xa9, 0x0, 0x2,
+            0xc0, 0x10, 0x0, 0x0, 0x29, 0x4, 0xd0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0,
+        ];
+
+        let parsed_response: Vec<QueryResponse> =
+            parse_dns_response(&cname_record_response_data).expect("Parse Failed");
+        assert_eq!(parsed_response.len(), 1);
+
+        let query_response = &parsed_response[0];
+        assert_eq!(query_response.query_type, QueryType::CNAME);
+
+        if let ResponseType::CNAME(domain) = &query_response.response_content {
+            assert_eq!(domain, "alexogden.com");
+        }
+    }
+
+    #[test]
+    fn parse_valid_txt_response() {
+        // mail.google.com TXT
+        let txt_record_response_data: [u8; 125] = [
+            0xe8, 0x3e, 0x81, 0x80, 0x0, 0x1, 0x0, 0x1, 0x0, 0x0, 0x0, 0x1, 0x4, 0x6d, 0x61, 0x69,
+            0x6c, 0x6, 0x67, 0x6f, 0x6f, 0x67, 0x6c, 0x65, 0x3, 0x63, 0x6f, 0x6d, 0x0, 0x0, 0x10,
+            0x0, 0x1, 0xc0, 0xc, 0x0, 0x10, 0x0, 0x1, 0x0, 0x1, 0x51, 0x77, 0x0, 0x45, 0x44, 0x67,
+            0x6f, 0x6f, 0x67, 0x6c, 0x65, 0x2d, 0x73, 0x69, 0x74, 0x65, 0x2d, 0x76, 0x65, 0x72,
+            0x69, 0x66, 0x69, 0x63, 0x61, 0x74, 0x69, 0x6f, 0x6e, 0x3d, 0x50, 0x6e, 0x63, 0x58,
+            0x70, 0x52, 0x4b, 0x52, 0x43, 0x41, 0x6c, 0x44, 0x41, 0x64, 0x6c, 0x65, 0x73, 0x54,
+            0x74, 0x4e, 0x46, 0x66, 0x36, 0x6b, 0x39, 0x54, 0x76, 0x67, 0x78, 0x67, 0x63, 0x52,
+            0x66, 0x6f, 0x6a, 0x64, 0x61, 0x4b, 0x6b, 0x45, 0x41, 0x43, 0x59, 0x0, 0x0, 0x29, 0x4,
+            0xd0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0,
+        ];
+
+        let parsed_response: Vec<QueryResponse> =
+            parse_dns_response(&txt_record_response_data).expect("Parse Failed");
+        assert_eq!(parsed_response.len(), 1);
+
+        let query_response = &parsed_response[0];
+        assert_eq!(query_response.query_type, QueryType::TXT);
+
+        if let ResponseType::TXT(text) = &query_response.response_content {
+            assert_eq!(
+                text,
+                "google-site-verification=PncXpRKRCAlDAdlesTtNFf6k9TvgxgcRfojdaKkEACY"
+            );
+        }
+    }
+
+    #[test]
+    fn parse_valid_soa_response() {
         // google.com SOA
         let soa_record_response_data: [u8; 89] = [
             0xff, 0xfe, 0x81, 0x80, 0x0, 0x1, 0x0, 0x1, 0x0, 0x0, 0x0, 0x1, 0x6, 0x67, 0x6f, 0x6f,
@@ -628,7 +739,7 @@ mod test {
         let parsed_response: Vec<QueryResponse> =
             parse_dns_response(&soa_record_response_data).expect("Parse Failed");
         assert_eq!(parsed_response.len(), 1);
-        
+
         let response_data = &parsed_response[0];
         assert_eq!(response_data.query_type, QueryType::SOA);
 
