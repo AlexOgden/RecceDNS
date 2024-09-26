@@ -16,29 +16,20 @@ pub fn resolve_domain(
     let mut all_results = HashSet::new();
     let mut seen_cnames = HashSet::new();
 
-    match query_type {
-        QueryType::Any => {
-            for qt in &[QueryType::A, QueryType::AAAA, QueryType::MX, QueryType::TXT] {
-                query_and_collect(
-                    socket,
-                    dns_server,
-                    domain,
-                    qt,
-                    &mut seen_cnames,
-                    &mut all_results,
-                )?;
-            }
-        }
-        _ => {
-            query_and_collect(
-                socket,
-                dns_server,
-                domain,
-                query_type,
-                &mut seen_cnames,
-                &mut all_results,
-            )?;
-        }
+    let query_types: Vec<&QueryType> = match query_type {
+        QueryType::Any => vec![&QueryType::A, &QueryType::AAAA, &QueryType::MX, &QueryType::TXT],
+        _ => vec![query_type],
+    };
+
+    for qt in query_types {
+        query_and_collect(
+            socket,
+            dns_server,
+            domain,
+            qt,
+            &mut seen_cnames,
+            &mut all_results,
+        )?;
     }
 
     if all_results.is_empty() {
