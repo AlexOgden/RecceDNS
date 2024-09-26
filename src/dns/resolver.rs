@@ -56,24 +56,19 @@ fn query_and_collect(
     seen_cnames: &mut HashSet<String>,
     all_results: &mut HashSet<QueryResponse>,
 ) -> Result<()> {
-    match dns_query(socket, dns_server, domain, query_type) {
-        Ok(query_result) => {
-            for response in query_result {
-                match response.response_content {
-                    ResponseType::CNAME(ref cname) => {
-                        if seen_cnames.insert(cname.clone()) {
-                            all_results.insert(response.clone());
-                        }
-                    }
-                    _ => {
-                        all_results.insert(response);
-                    }
-                }
+    let query_result = dns_query(socket, dns_server, domain, query_type)?;
+
+    for response in query_result {
+        if let ResponseType::CNAME(ref cname) = response.response_content {
+            if seen_cnames.insert(cname.clone()) {
+                all_results.insert(response);
             }
-            Ok(())
+        } else {
+            all_results.insert(response);
         }
-        Err(err) => Err(err),
-    }
+    };
+
+    Ok(())
 }
 
 fn dns_query(
