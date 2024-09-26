@@ -63,14 +63,6 @@ fn query_and_collect(
                     ResponseType::CNAME(ref cname) => {
                         if seen_cnames.insert(cname.clone()) {
                             all_results.insert(response.clone());
-                            query_and_collect(
-                                socket,
-                                dns_server,
-                                cname,
-                                query_type,
-                                seen_cnames,
-                                all_results,
-                            )?;
                         }
                     }
                     _ => {
@@ -217,7 +209,7 @@ fn parse_dns_response(response: &[u8]) -> Result<Vec<QueryResponse>> {
                     // SOA (6)
                     results.push(parse_soa_record(response, &mut offset, rdlength)?);
                 }
-                _ => {} // Unsupported record type, ignore
+                QueryType::Any => {} // Unsupported record type, ignore
             }
         } else {
             // Unsupported class, skip the record
