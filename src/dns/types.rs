@@ -69,3 +69,20 @@ pub struct QueryResponse {
     pub query_type: QueryType,
     pub response_content: ResponseType,
 }
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn test_number_to_enum() {
+        assert_eq!(QueryType::from_number(1), QueryType::A);
+        assert_eq!(QueryType::from_number(28), QueryType::AAAA);
+        assert_eq!(QueryType::from_number(15), QueryType::MX);
+        assert_eq!(QueryType::from_number(16), QueryType::TXT);
+        assert_eq!(QueryType::from_number(5), QueryType::CNAME);
+        assert_eq!(QueryType::from_number(6), QueryType::SOA);
+        assert_eq!(QueryType::from_number(3), QueryType::Any);
+        assert_eq!(QueryType::from_number(255), QueryType::Any);
+    }
+}
