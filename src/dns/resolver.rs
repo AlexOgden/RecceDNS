@@ -4,6 +4,7 @@ use crate::dns::types::{MXResponse, QueryResponse, QueryType, ResponseType, SOAR
 use once_cell::sync::Lazy;
 use rand::Rng;
 use std::sync::Mutex;
+use std::time::Duration;
 use std::{
     collections::HashSet,
     net::{Ipv4Addr, Ipv6Addr, UdpSocket},
@@ -15,6 +16,11 @@ fn get_socket() -> Result<UdpSocket> {
     let mut socket_guard = SOCKET.lock().expect("Failed to lock the mutex");
     if socket_guard.is_none() {
         let socket = UdpSocket::bind("0.0.0.0:0")?;
+        let timeout = Duration::from_secs(3);
+
+        socket.set_read_timeout(Some(timeout))?;
+        socket.set_write_timeout(Some(timeout))?;
+
         *socket_guard = Some(socket);
     }
     Ok(socket_guard
