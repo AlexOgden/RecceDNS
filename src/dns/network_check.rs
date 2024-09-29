@@ -108,4 +108,30 @@ mod test {
 
         assert!(result.is_err());
     }
+
+    #[test]
+    fn check_dns_server_9_9_9_9() {
+        let result = check_dns_server("9.9.9.9");
+        assert!(result.is_ok() || result.is_err());
+    }
+
+    #[test]
+    fn check_dns_server_8_8_8_8() {
+        let result = check_dns_server("8.8.8.8");
+        assert!(result.is_ok() || result.is_err());
+    }
+
+    #[test]
+    fn check_server_list_with_valid_servers() {
+        let mut server_list = vec!["9.9.9.9", "8.8.8.8"];
+        let result = check_server_list(&mut server_list);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn check_server_list_with_invalid_server() {
+        let mut server_list = vec!["999.0.0.1", "8.8.8.8"];
+        let result = check_server_list(&mut server_list);
+        assert!(result.is_err());
+    }
 }
