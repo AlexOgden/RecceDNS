@@ -57,6 +57,10 @@ pub struct CommandArgs {
     /// Delay in milliseconds between DNS requests for subdomain enumeration
     #[arg(long, required = false)]
     pub delay: Option<u64>,
+
+    /// Use a random resolver for each query, otherwise use them sequentially
+    #[arg(long, required = false, default_value_t = false)]
+    pub use_random: bool,
 }
 
 pub fn get_parsed_args() -> CommandArgs {

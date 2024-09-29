@@ -1,7 +1,6 @@
+use crate::dns::resolver_selector::{Random, ResolverSelector, Sequential};
 use anyhow::{ensure, Result};
 use colored::Colorize;
-use rand::seq::IteratorRandom;
-use rand::thread_rng;
 use std::thread;
 use std::time::Duration;
 
@@ -22,13 +21,19 @@ pub fn enumerate_subdomains(args: &CommandArgs) -> Result<()> {
         "No DNS Resolvers in list! At least one resolver must be working!"
     );
 
+    let mut resolver_selector: Box<dyn ResolverSelector> = if args.use_random {
+        Box::new(Random)
+    } else {
+        Box::new(Sequential::new())
+    };
+
     let total_subdomains = subdomains.len() as u64;
     let progress_bar = cli::setup_progress_bar(subdomains.len() as u64);
 
     let mut found_count: u32 = 0;
 
     for (index, subdomain) in subdomains.iter().enumerate() {
-        let query_resolver = select_random_resolver(&dns_resolvers)?;
+        let query_resolver = resolver_selector.select(&dns_resolvers)?;
 
         let fqdn = if subdomain.is_empty() {
             args.target_domain.clone()
@@ -78,15 +83,6 @@ fn validate_dns_resolvers(args: &CommandArgs, dns_resolvers: &mut Vec<&str>) {
             }
         }
     }
-}
-
-fn select_random_resolver<'a>(dns_resolvers: &'a [&str]) -> Result<&'a str> {
-    let mut random_generator = thread_rng();
-    dns_resolvers
-        .iter()
-        .choose(&mut random_generator)
-        .copied()
-        .ok_or_else(|| anyhow::anyhow!("DNS Resolvers list is empty"))
 }
 
 fn create_query_response_string(query_result: &[QueryResponse]) -> String {
