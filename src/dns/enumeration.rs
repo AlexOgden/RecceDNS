@@ -1,6 +1,8 @@
 use crate::dns::resolver_selector::{Random, ResolverSelector, Sequential};
-use anyhow::{ensure, Result};
+use anyhow::{anyhow, ensure, Result};
 use colored::Colorize;
+use rand::Rng;
+use std::io::{self, Write};
 use std::thread;
 use std::time::Duration;
 
@@ -9,6 +11,8 @@ use crate::dns::resolver::resolve_domain;
 use crate::dns::types::{QueryResponse, ResponseType};
 use crate::io::cli::CommandArgs;
 use crate::io::{cli, wordlist};
+
+use super::types::QueryType;
 
 pub fn enumerate_subdomains(args: &CommandArgs) -> Result<()> {
     let subdomains = wordlist::read_from_file(args.wordlist.as_str())?;
@@ -20,6 +24,22 @@ pub fn enumerate_subdomains(args: &CommandArgs) -> Result<()> {
         !dns_resolvers.is_empty(),
         "No DNS Resolvers in list! At least one resolver must be working!"
     );
+
+    let is_wildcard = check_wildcard_domain(args, &dns_resolvers)?;
+    if is_wildcard {
+        println!(
+            "[{}] Warning: Wildcard domain detected. Results may include false positives!",
+            "!".yellow()
+        );
+        print!("[{}] Do you want to continue? (y/n): ", "?".cyan());
+        io::stdout().flush()?; // Ensure the prompt is displayed before reading input
+        let mut input = String::new();
+        io::stdin().read_line(&mut input)?;
+        if input.trim().to_lowercase() != "y" {
+            println!("Aborting due to wildcard domain detection.");
+            return Ok(());
+        }
+    }
 
     let mut resolver_selector: Box<dyn ResolverSelector> = if args.use_random {
         Box::new(Random)
@@ -65,6 +85,32 @@ pub fn enumerate_subdomains(args: &CommandArgs) -> Result<()> {
 
     println!("\nDone! Found {found_count} subdomains");
     Ok(())
+}
+
+fn check_wildcard_domain(args: &CommandArgs, dns_resolvers: &[&str]) -> Result<bool> {
+    let mut rng = rand::thread_rng();
+    let max_label_length = 63;
+    let attempts = 3;
+
+    if dns_resolvers.is_empty() {
+        return Err(anyhow!("No DNS resolvers available"));
+    }
+
+    let query_resolver = dns_resolvers.first().unwrap();
+
+    for _ in 0..attempts {
+        let random_length = rng.gen_range(10..=max_label_length);
+        let random_subdomain: String = (0..random_length)
+            .map(|_| rng.gen_range('a'..='z'))
+            .collect();
+        let fqdn = format!("{}.{}", random_subdomain, args.target_domain);
+
+        if resolve_domain(query_resolver, &fqdn, &QueryType::A).is_err() {
+            return Ok(false); // If any random subdomain fails to resolve, it's not a wildcard domain
+        }
+    }
+
+    Ok(true) // All random subdomains resolved, indicating a wildcard domain
 }
 
 fn validate_dns_resolvers(args: &CommandArgs, dns_resolvers: &mut Vec<&str>) {
