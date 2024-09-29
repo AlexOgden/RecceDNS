@@ -1,20 +1,36 @@
 use anyhow::{anyhow, Result};
 
 use crate::dns::types::{MXResponse, QueryResponse, QueryType, ResponseType, SOAResponse};
+use once_cell::sync::Lazy;
 use rand::Rng;
+use std::sync::Mutex;
 use std::{
     collections::HashSet,
     net::{Ipv4Addr, Ipv6Addr, UdpSocket},
 };
 
+static SOCKET: Lazy<Mutex<Option<UdpSocket>>> = Lazy::new(|| Mutex::new(None));
+
+fn get_socket() -> Result<UdpSocket> {
+    let mut socket_guard = SOCKET.lock().expect("Failed to lock the mutex");
+    if socket_guard.is_none() {
+        let socket = UdpSocket::bind("0.0.0.0:0")?;
+        *socket_guard = Some(socket);
+    }
+    Ok(socket_guard
+        .as_ref()
+        .expect("Socket should be initialized")
+        .try_clone()?)
+}
+
 pub fn resolve_domain(
-    socket: &UdpSocket,
     dns_server: &str,
     domain: &str,
     query_type: &QueryType,
 ) -> Result<Vec<QueryResponse>> {
     let mut all_results = HashSet::new();
     let mut seen_cnames = HashSet::new();
+    let socket = get_socket()?;
 
     let query_types: Vec<&QueryType> = match query_type {
         QueryType::Any => vec![
@@ -28,7 +44,7 @@ pub fn resolve_domain(
 
     for qt in query_types {
         query_and_collect(
-            socket,
+            &socket,
             dns_server,
             domain,
             qt,

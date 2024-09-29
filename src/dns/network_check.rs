@@ -36,7 +36,7 @@ fn check_dns_server(server_address: &str) -> Result<(), String> {
 
     check_udp_connection(&socket, server_address, DNS_PORT)?;
 
-    if resolve_domain(&socket, server_address, ROOT_SERVER, &QueryType::A).is_ok() {
+    if resolve_domain(server_address, ROOT_SERVER, &QueryType::A).is_ok() {
         print_status(server_address, "OK", "green");
         Ok(())
     } else {
