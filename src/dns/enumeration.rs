@@ -36,7 +36,7 @@ pub fn enumerate_subdomains(args: &CommandArgs) -> Result<()> {
         let mut input = String::new();
         io::stdin().read_line(&mut input)?;
         if input.trim().to_lowercase() != "y" {
-            println!("Aborting due to wildcard domain detection.");
+            println!("[{}] Aborting due to wildcard domain detection.", "!".red());
             return Ok(());
         }
     }
