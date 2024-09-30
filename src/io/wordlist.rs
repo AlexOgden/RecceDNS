@@ -23,6 +23,10 @@ pub fn read_from_file<P: AsRef<Path>>(file_path: P) -> Result<Vec<String>, Error
     let lines: Result<Vec<_>, _> = reader
         .lines()
         .map(|line| line.map_err(|_| Error::ReadError(file_path_ref.display().to_string())))
+        .filter(|line| {
+            line.as_ref()
+                .map_or(true, |content| !content.trim().is_empty())
+        })
         .collect();
 
     lines
