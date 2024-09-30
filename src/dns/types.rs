@@ -18,6 +18,8 @@ pub enum QueryType {
     CNAME,
     #[strum(to_string = "SOA")]
     SOA,
+    #[strum(to_string = "NS")]
+    NS,
     #[strum(to_string = "any")]
     Any,
 }
@@ -31,6 +33,7 @@ impl QueryType {
             16 => Self::TXT,
             5 => Self::CNAME,
             6 => Self::SOA,
+            2 => Self::NS,
             _ => Self::Any,
         }
     }
@@ -45,6 +48,7 @@ pub enum ResponseType {
     TXT(String),
     CNAME(String),
     SOA(SOAResponse),
+    NS(String),
 }
 
 #[derive(Clone, Eq, PartialEq, Hash)]
@@ -82,6 +86,7 @@ mod test {
         assert_eq!(QueryType::from_number(16), QueryType::TXT);
         assert_eq!(QueryType::from_number(5), QueryType::CNAME);
         assert_eq!(QueryType::from_number(6), QueryType::SOA);
+        assert_eq!(QueryType::from_number(2), QueryType::NS);
         assert_eq!(QueryType::from_number(3), QueryType::Any);
         assert_eq!(QueryType::from_number(255), QueryType::Any);
     }
