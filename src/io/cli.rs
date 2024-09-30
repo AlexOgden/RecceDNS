@@ -22,7 +22,7 @@ pub struct CommandArgs {
     #[arg(short, long, required = true, value_parser = domain)]
     pub target_domain: String,
 
-    /// IPv4 Address of the DNS resolver(s) to use (comma-seperated). Multiple resolvers will be randomly selected for each query
+    /// IPv4 Address of the DNS resolver(s) to use (comma-seperated). Multiple resolvers will selected either randomly or sequentially
     #[arg(short, long, default_value = "1.1.1.1", value_parser = dns_resolver_list, required = false)]
     pub dns_resolvers: String,
 
