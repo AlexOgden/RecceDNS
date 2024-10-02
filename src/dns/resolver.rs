@@ -104,12 +104,13 @@ fn dns_query(
 }
 
 fn build_dns_query(domain: &str, query_type: &QueryType) -> Result<Vec<u8>> {
-    let mut packet = Vec::new();
+    if domain.is_empty() {
+        return Err(anyhow!("Domain name cannot be empty"));
+    }
 
-    // Generate a random ID
+    let mut packet = Vec::new();
     let random_id: u16 = rand::thread_rng().gen();
 
-    // Header
     packet.extend_from_slice(&random_id.to_be_bytes()); // ID
     packet.extend_from_slice(&[0x01, 0x00]); // Flags
     packet.extend_from_slice(&[0x00, 0x01]); // QDCOUNT: 1 question
@@ -117,13 +118,13 @@ fn build_dns_query(domain: &str, query_type: &QueryType) -> Result<Vec<u8>> {
     packet.extend_from_slice(&[0x00, 0x00]); // NSCOUNT
     packet.extend_from_slice(&[0x00, 0x00]); // ARCOUNT
 
-    // Question
     for part in domain.split('.') {
-        let q_length = u8::try_from(part.len())?;
+        let q_length = u8::try_from(part.len()).map_err(|_| anyhow!("Domain part too long"))?;
         packet.push(q_length);
         packet.extend_from_slice(part.as_bytes());
     }
     packet.push(0); // Terminate the domain name
+
     match query_type {
         QueryType::A => packet.extend_from_slice(&[0x00, 0x01]),
         QueryType::AAAA => packet.extend_from_slice(&[0x00, 0x1c]),
@@ -144,12 +145,16 @@ fn send_dns_query(socket: &UdpSocket, query: &[u8], dns_server: &str) -> Result<
 
     socket
         .send_to(query, dns_server)
-        .map_err(|error| anyhow!("Failed to send DNS query: {}", error))?;
+        .map_err(|error| anyhow!("Failed to send DNS query to {}: {}", dns_server, error))?;
 
     let mut response_buffer = [0; BUFFER_SIZE];
-    let (bytes_received, _) = socket
-        .recv_from(&mut response_buffer)
-        .map_err(|error| anyhow!("Failed to receive DNS response: {}", error))?;
+    let (bytes_received, _) = socket.recv_from(&mut response_buffer).map_err(|error| {
+        anyhow!(
+            "Failed to receive DNS response from {}: {}",
+            dns_server,
+            error
+        )
+    })?;
 
     Ok(response_buffer[..bytes_received].to_vec())
 }
@@ -159,8 +164,8 @@ fn parse_dns_response(response: &[u8]) -> Result<Vec<QueryResponse>> {
         return Err(anyhow!("Malformed DNS response: Response length too short"));
     }
 
-    let qdcount = u16::from_be_bytes([response[4], response[5]]); //Question Count
-    let ancount = u16::from_be_bytes([response[6], response[7]]); //Answer Count
+    let qdcount = u16::from_be_bytes([response[4], response[5]]); // Question Count
+    let ancount = u16::from_be_bytes([response[6], response[7]]); // Answer Count
     let nscount = u16::from_be_bytes([response[8], response[9]]); // Authority Record Count
 
     if qdcount != 1 {
@@ -340,8 +345,6 @@ fn parse_mx_record(response: &[u8], offset: &mut usize, rdlength: u16) -> Result
     // Loop to parse the domain name labels
     loop {
         let label_length = response[jump_offset] as usize;
-
-        // Check for compression pointer
         if label_length & 0b1100_0000 == 0b1100_0000 {
             // Jump to the offset specified in the pointer
             let pointer_offset =

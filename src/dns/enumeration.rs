@@ -89,8 +89,8 @@ pub fn enumerate_subdomains(args: &CommandArgs) -> Result<()> {
 
 fn check_wildcard_domain(args: &CommandArgs, dns_resolvers: &[&str]) -> Result<bool> {
     let mut rng = rand::thread_rng();
-    let max_label_length = 63;
-    let attempts = 3;
+    let max_label_length: u8 = 63;
+    let attempts: u8 = 3;
 
     if dns_resolvers.is_empty() {
         return Err(anyhow!("No DNS resolvers available"));
