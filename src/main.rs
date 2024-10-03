@@ -1,5 +1,6 @@
 mod dns;
 mod io;
+mod modes;
 
 use anyhow::Result;
 
@@ -11,5 +12,5 @@ fn main() -> Result<()> {
         io::cli::print_options(&args);
     }
 
-    dns::enumeration::enumerate_subdomains(&args)
+    modes::subdomain_enumerator::enumerate_subdomains(&args)
 }

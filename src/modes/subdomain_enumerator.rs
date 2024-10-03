@@ -8,11 +8,9 @@ use std::time::Duration;
 
 use crate::dns::network_check;
 use crate::dns::resolver::resolve_domain;
-use crate::dns::types::{QueryResponse, ResponseType};
+use crate::dns::types::{QueryResponse, QueryType, ResponseType};
 use crate::io::cli::CommandArgs;
 use crate::io::{cli, wordlist};
-
-use super::types::QueryType;
 
 pub fn enumerate_subdomains(args: &CommandArgs) -> Result<()> {
     let subdomains = wordlist::read_from_file(args.wordlist.as_str())?;
