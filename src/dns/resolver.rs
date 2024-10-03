@@ -49,14 +49,10 @@ pub fn resolve_domain(
     };
 
     for qt in query_types {
-        query_and_collect(
-            &socket,
-            dns_server,
-            domain,
-            qt,
-            &mut seen_cnames,
-            &mut all_results,
-        )?;
+        let (updated_seen_cnames, updated_all_results) =
+            query_and_collect(&socket, dns_server, domain, qt, seen_cnames, all_results)?;
+        seen_cnames = updated_seen_cnames;
+        all_results = updated_all_results;
     }
 
     if all_results.is_empty() {
@@ -71,9 +67,9 @@ fn query_and_collect(
     dns_server: &str,
     domain: &str,
     query_type: &QueryType,
-    seen_cnames: &mut HashSet<String>,
-    all_results: &mut HashSet<QueryResponse>,
-) -> Result<()> {
+    mut seen_cnames: HashSet<String>,
+    mut all_results: HashSet<QueryResponse>,
+) -> Result<(HashSet<String>, HashSet<QueryResponse>)> {
     let query_result = dns_query(socket, dns_server, domain, query_type)?;
 
     for response in query_result {
@@ -86,7 +82,7 @@ fn query_and_collect(
         }
     }
 
-    Ok(())
+    Ok((seen_cnames, all_results))
 }
 
 fn dns_query(
