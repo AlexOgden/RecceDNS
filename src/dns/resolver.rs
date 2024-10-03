@@ -3,12 +3,10 @@ use anyhow::{anyhow, Result};
 use crate::dns::types::{MXResponse, QueryResponse, QueryType, ResponseType, SOAResponse};
 use once_cell::sync::Lazy;
 use rand::Rng;
+use std::collections::HashSet;
+use std::net::{Ipv4Addr, Ipv6Addr, UdpSocket};
 use std::sync::Mutex;
 use std::time::Duration;
-use std::{
-    collections::HashSet,
-    net::{Ipv4Addr, Ipv6Addr, UdpSocket},
-};
 
 static SOCKET: Lazy<Mutex<Option<UdpSocket>>> = Lazy::new(|| Mutex::new(None));
 

@@ -1,4 +1,3 @@
-use crate::dns::resolver_selector::{Random, ResolverSelector, Sequential};
 use anyhow::{anyhow, Result};
 use colored::Colorize;
 use rand::Rng;
@@ -6,10 +5,12 @@ use std::io::{self, Write};
 use std::thread;
 use std::time::Duration;
 
-use crate::dns::resolver::resolve_domain;
-use crate::dns::types::{QueryResponse, QueryType, ResponseType};
-use crate::io::cli::CommandArgs;
-use crate::io::{cli, wordlist};
+use crate::dns::{
+    resolver::resolve_domain,
+    resolver_selector::{Random, ResolverSelector, Sequential},
+    types::{QueryResponse, QueryType, ResponseType},
+};
+use crate::io::{cli, cli::CommandArgs, wordlist};
 
 pub fn enumerate_subdomains(args: &CommandArgs, dns_resolvers: &[&str]) -> Result<()> {
     let record_query_type = &args.query_type;

@@ -106,15 +106,15 @@ pub fn print_options(args: &CommandArgs) {
             OperationMode::SubdomainEnumeration => "Subdomain Enumeration",
         }
     );
-    println!("{}: {}", "domain".bright_blue(), args.target_domain);
+    println!("{}: {}", "Domain".bright_blue(), args.target_domain);
     if let Some(wordlist) = &args.wordlist {
-        println!("{}: {}", "wordlist".bright_blue(), wordlist);
+        println!("{}: {}", "Wordlist".bright_blue(), wordlist);
     }
-    println!("{}: {}", "records".bright_blue(), args.query_type);
-    println!("{}: {}", "resolvers".bright_blue(), args.dns_resolvers);
-    println!("{}: {}", "show-resolver".bright_blue(), args.show_resolver);
+    println!("{}: {}", "Records".bright_blue(), args.query_type);
+    println!("{}: {}", "Resolvers".bright_blue(), args.dns_resolvers);
+    println!("{}: {}", "Show-resolver".bright_blue(), args.show_resolver);
     if let Some(delay_ms) = args.delay {
-        println!("{}: {}ms\n", "delay".bright_blue(), delay_ms);
+        println!("{}: {}ms\n", "Delay".bright_blue(), delay_ms);
     }
 }
 

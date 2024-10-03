@@ -1,7 +1,7 @@
 use anyhow::{anyhow, Context, Result};
-use core::net::Ipv4Addr;
 use lazy_static::lazy_static;
 use regex::Regex;
+use std::net::Ipv4Addr;
 
 lazy_static! {
     static ref DOMAIN_REGEX: Regex =
