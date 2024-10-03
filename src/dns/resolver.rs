@@ -12,7 +12,7 @@ use std::{
 
 static SOCKET: Lazy<Mutex<Option<UdpSocket>>> = Lazy::new(|| Mutex::new(None));
 
-fn get_socket() -> Result<UdpSocket> {
+fn initialize_socket() -> Result<UdpSocket> {
     let mut socket_guard = SOCKET.lock().expect("Failed to lock the mutex");
     if socket_guard.is_none() {
         let socket = UdpSocket::bind("0.0.0.0:0")?;
@@ -36,7 +36,7 @@ pub fn resolve_domain(
 ) -> Result<Vec<QueryResponse>> {
     let mut all_results = HashSet::new();
     let mut seen_cnames = HashSet::new();
-    let socket = get_socket()?;
+    let socket = initialize_socket()?;
 
     let query_types: Vec<&QueryType> = match query_type {
         QueryType::Any => vec![
@@ -70,7 +70,7 @@ fn query_and_collect(
     mut seen_cnames: HashSet<String>,
     mut all_results: HashSet<QueryResponse>,
 ) -> Result<(HashSet<String>, HashSet<QueryResponse>)> {
-    let query_result = dns_query(socket, dns_server, domain, query_type)?;
+    let query_result = perform_dns_query(socket, dns_server, domain, query_type)?;
 
     for response in query_result {
         if let ResponseType::CNAME(ref cname) = response.response_content {
@@ -85,7 +85,7 @@ fn query_and_collect(
     Ok((seen_cnames, all_results))
 }
 
-fn dns_query(
+fn perform_dns_query(
     socket: &UdpSocket,
     dns_server: &str,
     domain: &str,
@@ -97,6 +97,25 @@ fn dns_query(
     let query = build_dns_query(domain, query_type)?;
     let response = send_dns_query(socket, &query, &dns_server_address)?;
     parse_dns_response(&response)
+}
+
+fn send_dns_query(socket: &UdpSocket, query: &[u8], dns_server: &str) -> Result<Vec<u8>> {
+    const BUFFER_SIZE: usize = 512;
+
+    socket
+        .send_to(query, dns_server)
+        .map_err(|error| anyhow!("Failed to send DNS query to {}: {}", dns_server, error))?;
+
+    let mut response_buffer = [0; BUFFER_SIZE];
+    let (bytes_received, _) = socket.recv_from(&mut response_buffer).map_err(|error| {
+        anyhow!(
+            "Failed to receive DNS response from {}: {}",
+            dns_server,
+            error
+        )
+    })?;
+
+    Ok(response_buffer[..bytes_received].to_vec())
 }
 
 fn build_dns_query(domain: &str, query_type: &QueryType) -> Result<Vec<u8>> {
@@ -134,25 +153,6 @@ fn build_dns_query(domain: &str, query_type: &QueryType) -> Result<Vec<u8>> {
     packet.extend_from_slice(&[0x00, 0x01]); // QCLASS: IN (Internet)
 
     Ok(packet)
-}
-
-fn send_dns_query(socket: &UdpSocket, query: &[u8], dns_server: &str) -> Result<Vec<u8>> {
-    const BUFFER_SIZE: usize = 512;
-
-    socket
-        .send_to(query, dns_server)
-        .map_err(|error| anyhow!("Failed to send DNS query to {}: {}", dns_server, error))?;
-
-    let mut response_buffer = [0; BUFFER_SIZE];
-    let (bytes_received, _) = socket.recv_from(&mut response_buffer).map_err(|error| {
-        anyhow!(
-            "Failed to receive DNS response from {}: {}",
-            dns_server,
-            error
-        )
-    })?;
-
-    Ok(response_buffer[..bytes_received].to_vec())
 }
 
 fn parse_dns_response(response: &[u8]) -> Result<Vec<QueryResponse>> {
