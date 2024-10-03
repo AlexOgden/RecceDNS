@@ -2,7 +2,7 @@ use crate::{
     dns::types::QueryType,
     io::validate::{dns_resolver_list, domain},
 };
-use clap::Parser;
+use clap::{Parser, ValueEnum};
 use colored::Colorize;
 use indicatif::{ProgressBar, ProgressStyle};
 
@@ -18,6 +18,10 @@ const PROGRESS_TICK_CHARS: &str = "⡈⠔⠢⢁";
     about = "DNS Enumeration tool with advanced features",
 )]
 pub struct CommandArgs {
+    /// The operation mode to run, bruteforce subdomains or enumerate records
+    #[arg(short, required = true)]
+    pub operation_mode: OperationMode,
+
     /// The target base domain name to probe
     #[arg(short, long, required = true, value_parser = domain)]
     pub target_domain: String,
@@ -27,8 +31,8 @@ pub struct CommandArgs {
     pub dns_resolvers: String,
 
     /// Path to subdomain wordlist
-    #[arg(short, long, required = true)]
-    pub wordlist: String,
+    #[arg(short, long, required = false)]
+    pub wordlist: Option<String>,
 
     /// Print extra information
     #[arg(short, long, default_value_t = false)]
@@ -63,8 +67,30 @@ pub struct CommandArgs {
     pub use_random: bool,
 }
 
+impl CommandArgs {
+    pub fn validate(&self) -> Result<(), String> {
+        if self.operation_mode == OperationMode::SubdomainEnumeration && self.wordlist.is_none() {
+            return Err("The argument '--wordlist <WORDLIST>' is required when the operation mode is 'subdomain'".to_string());
+        }
+        Ok(())
+    }
+}
+
+#[derive(ValueEnum, Clone, Debug, PartialEq, Eq)]
+pub enum OperationMode {
+    #[value(name = "basic")]
+    BasicEnumeration,
+    #[value(name = "subdomain")]
+    SubdomainEnumeration,
+}
+
 pub fn get_parsed_args() -> CommandArgs {
-    CommandArgs::parse()
+    let args = CommandArgs::parse();
+    if let Err(e) = args.validate() {
+        eprintln!("Error: {e}");
+        std::process::exit(1);
+    }
+    args
 }
 
 pub fn print_options(args: &CommandArgs) {
@@ -72,8 +98,18 @@ pub fn print_options(args: &CommandArgs) {
         return;
     }
     println!("Starting with options:");
+    println!(
+        "{}: {}",
+        "Operation Mode".bright_blue(),
+        match args.operation_mode {
+            OperationMode::BasicEnumeration => "Basic Enumeration",
+            OperationMode::SubdomainEnumeration => "Subdomain Enumeration",
+        }
+    );
     println!("{}: {}", "domain".bright_blue(), args.target_domain);
-    println!("{}: {}", "wordlist".bright_blue(), args.wordlist);
+    if let Some(wordlist) = &args.wordlist {
+        println!("{}: {}", "wordlist".bright_blue(), wordlist);
+    }
     println!("{}: {}", "records".bright_blue(), args.query_type);
     println!("{}: {}", "resolvers".bright_blue(), args.dns_resolvers);
     println!("{}: {}", "show-resolver".bright_blue(), args.show_resolver);

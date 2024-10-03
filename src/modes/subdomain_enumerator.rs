@@ -12,8 +12,16 @@ use crate::io::cli::CommandArgs;
 use crate::io::{cli, wordlist};
 
 pub fn enumerate_subdomains(args: &CommandArgs, dns_resolvers: &[&str]) -> Result<()> {
-    let subdomains = wordlist::read_from_file(args.wordlist.as_str())?;
     let record_query_type = &args.query_type;
+    let subdomains: Vec<String>;
+
+    if let Some(wordlist_path) = &args.wordlist {
+        subdomains = wordlist::read_from_file(wordlist_path)?;
+    } else {
+        return Err(anyhow!(
+            "Wordlist path is required for subdomain enumeration"
+        ));
+    }
 
     if handle_wildcard_domain(args, dns_resolvers)? {
         return Ok(());
@@ -40,7 +48,9 @@ pub fn enumerate_subdomains(args: &CommandArgs, dns_resolvers: &[&str]) -> Resul
         };
 
         match resolve_domain(query_resolver, &fqdn, record_query_type) {
-            Ok(response) => {
+            Ok(mut response) => {
+                response.sort_by(|a, b| a.query_type.cmp(&b.query_type));
+
                 let response_data_string = create_query_response_string(&response);
                 print_query_result(args, subdomain, query_resolver, &response_data_string);
                 found_count += 1;

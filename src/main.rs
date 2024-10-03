@@ -5,7 +5,7 @@ mod modes;
 use anyhow::{ensure, Result};
 use colored::Colorize;
 use dns::network_check;
-use io::cli::CommandArgs;
+use io::cli::{CommandArgs, OperationMode};
 
 fn main() -> Result<()> {
     let args = io::cli::get_parsed_args();
@@ -22,7 +22,14 @@ fn main() -> Result<()> {
         "No DNS Resolvers in list! At least one resolver must be working!"
     );
 
-    modes::subdomain_enumerator::enumerate_subdomains(&args, &dns_resolvers)
+    match args.operation_mode {
+        OperationMode::SubdomainEnumeration => {
+            modes::subdomain_enumerator::enumerate_subdomains(&args, &dns_resolvers)
+        }
+        OperationMode::BasicEnumeration => {
+            modes::basic_enumerator::enumerate_records(&args, &dns_resolvers)
+        }
+    }
 }
 
 fn validate_dns_resolvers<'a>(args: &'a CommandArgs, dns_resolvers: Vec<&'a str>) -> Vec<&'a str> {
