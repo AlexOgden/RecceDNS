@@ -8,6 +8,7 @@ use crate::{
     io::cli::CommandArgs,
 };
 use anyhow::{anyhow, Result};
+use std::collections::HashSet;
 
 pub fn enumerate_records(args: &CommandArgs, dns_resolvers: &[&str]) -> Result<()> {
     println!(
@@ -27,11 +28,18 @@ pub fn enumerate_records(args: &CommandArgs, dns_resolvers: &[&str]) -> Result<(
         QueryType::TXT,
     ];
 
+    let mut seen_cnames = HashSet::new();
+
     for query_type in query_types {
         match resolve_domain(resolver, domain, &query_type) {
             Ok(mut response) => {
                 response.sort_by(|a, b| a.query_type.cmp(&b.query_type));
                 for record in response {
+                    if let ResponseType::CNAME(ref cname) = record.response_content {
+                        if !seen_cnames.insert(cname.clone()) {
+                            continue; // Skip if CNAME is already seen
+                        }
+                    }
                     let response_data_string = create_query_response_string(&record, resolver)?;
                     println!("{response_data_string}");
                 }
