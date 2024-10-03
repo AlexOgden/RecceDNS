@@ -25,20 +25,8 @@ pub fn enumerate_subdomains(args: &CommandArgs) -> Result<()> {
         "No DNS Resolvers in list! At least one resolver must be working!"
     );
 
-    let is_wildcard = check_wildcard_domain(args, &dns_resolvers)?;
-    if is_wildcard {
-        println!(
-            "[{}] Warning: Wildcard domain detected. Results may include false positives!",
-            "!".yellow()
-        );
-        print!("[{}] Do you want to continue? (y/n): ", "?".cyan());
-        io::stdout().flush()?; // Ensure the prompt is displayed before reading input
-        let mut input = String::new();
-        io::stdin().read_line(&mut input)?;
-        if input.trim().to_lowercase() != "y" {
-            println!("[{}] Aborting due to wildcard domain detection.", "!".red());
-            return Ok(());
-        }
+    if handle_wildcard_domain(args, &dns_resolvers)? {
+        return Ok(());
     }
 
     let mut resolver_selector: Box<dyn ResolverSelector> = if args.use_random {
@@ -85,6 +73,25 @@ pub fn enumerate_subdomains(args: &CommandArgs) -> Result<()> {
 
     println!("\nDone! Found {found_count} subdomains");
     Ok(())
+}
+
+fn handle_wildcard_domain(args: &CommandArgs, dns_resolvers: &[&str]) -> Result<bool> {
+    let is_wildcard = check_wildcard_domain(args, dns_resolvers)?;
+    if is_wildcard {
+        println!(
+            "[{}] Warning: Wildcard domain detected. Results may include false positives!",
+            "!".yellow()
+        );
+        print!("[{}] Do you want to continue? (y/n): ", "?".cyan());
+        io::stdout().flush()?; // Ensure the prompt is displayed before reading input
+        let mut input = String::new();
+        io::stdin().read_line(&mut input)?;
+        if input.trim().to_lowercase() != "y" {
+            println!("[{}] Aborting due to wildcard domain detection.", "!".red());
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }
 
 fn check_wildcard_domain(args: &CommandArgs, dns_resolvers: &[&str]) -> Result<bool> {
