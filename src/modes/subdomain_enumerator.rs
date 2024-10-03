@@ -1,31 +1,29 @@
 use crate::dns::resolver_selector::{Random, ResolverSelector, Sequential};
-use anyhow::{anyhow, ensure, Result};
+use anyhow::{anyhow, Result};
 use colored::Colorize;
 use rand::Rng;
 use std::io::{self, Write};
 use std::thread;
 use std::time::Duration;
 
-use crate::dns::network_check;
 use crate::dns::resolver::resolve_domain;
-use crate::dns::types::{QueryResponse, ResponseType};
+use crate::dns::types::{QueryResponse, QueryType, ResponseType};
 use crate::io::cli::CommandArgs;
 use crate::io::{cli, wordlist};
 
-use super::types::QueryType;
-
-pub fn enumerate_subdomains(args: &CommandArgs) -> Result<()> {
-    let subdomains = wordlist::read_from_file(args.wordlist.as_str())?;
+pub fn enumerate_subdomains(args: &CommandArgs, dns_resolvers: &[&str]) -> Result<()> {
     let record_query_type = &args.query_type;
+    let subdomains: Vec<String>;
 
-    let mut dns_resolvers: Vec<&str> = args.dns_resolvers.split(',').collect();
-    validate_dns_resolvers(args, &mut dns_resolvers);
-    ensure!(
-        !dns_resolvers.is_empty(),
-        "No DNS Resolvers in list! At least one resolver must be working!"
-    );
+    if let Some(wordlist_path) = &args.wordlist {
+        subdomains = wordlist::read_from_file(wordlist_path)?;
+    } else {
+        return Err(anyhow!(
+            "Wordlist path is required for subdomain enumeration"
+        ));
+    }
 
-    if handle_wildcard_domain(args, &dns_resolvers)? {
+    if handle_wildcard_domain(args, dns_resolvers)? {
         return Ok(());
     }
 
@@ -41,7 +39,7 @@ pub fn enumerate_subdomains(args: &CommandArgs) -> Result<()> {
     let mut found_count: u32 = 0;
 
     for (index, subdomain) in subdomains.iter().enumerate() {
-        let query_resolver = resolver_selector.select(&dns_resolvers)?;
+        let query_resolver = resolver_selector.select(dns_resolvers)?;
 
         let fqdn = if subdomain.is_empty() {
             args.target_domain.clone()
@@ -50,7 +48,9 @@ pub fn enumerate_subdomains(args: &CommandArgs) -> Result<()> {
         };
 
         match resolve_domain(query_resolver, &fqdn, record_query_type) {
-            Ok(response) => {
+            Ok(mut response) => {
+                response.sort_by(|a, b| a.query_type.cmp(&b.query_type));
+
                 let response_data_string = create_query_response_string(&response);
                 print_query_result(args, subdomain, query_resolver, &response_data_string);
                 found_count += 1;
@@ -118,24 +118,6 @@ fn check_wildcard_domain(args: &CommandArgs, dns_resolvers: &[&str]) -> Result<b
     }
 
     Ok(true) // All random subdomains resolved, indicating a wildcard domain
-}
-
-fn validate_dns_resolvers(args: &CommandArgs, dns_resolvers: &mut Vec<&str>) {
-    if !args.no_dns_check {
-        match network_check::check_server_list(dns_resolvers) {
-            Ok(()) => {
-                let status = format!("[{}]", "OK".green());
-                println!("DNS Resolvers: {:>width$}\n", status, width = 16);
-            }
-            Err(failed_servers) => {
-                println!(
-                    "{}: {}\n",
-                    "Removed resolvers with errors".yellow(),
-                    failed_servers.join(", ")
-                );
-            }
-        }
-    }
 }
 
 fn create_query_response_string(query_result: &[QueryResponse]) -> String {

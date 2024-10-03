@@ -60,19 +60,14 @@ fn print_status(server_address: &str, status: &str, color: &str) {
     );
 }
 
-pub fn check_server_list(server_list: &mut Vec<&str>) -> Result<(), Vec<String>> {
+pub fn check_server_list(server_list: &[&str]) -> Result<(), Vec<String>> {
     println!("Checking DNS Servers...");
 
     let mut failed_servers = Vec::new();
-    let mut i = 0;
 
-    while i < server_list.len() {
-        match check_dns_server(server_list[i]) {
-            Ok(()) => i += 1,
-            Err(err) => {
-                failed_servers.push(err.to_string());
-                server_list.remove(i);
-            }
+    for &server in server_list {
+        if let Err(err) = check_dns_server(server) {
+            failed_servers.push(err.to_string());
         }
     }
 
@@ -123,15 +118,15 @@ mod test {
 
     #[test]
     fn check_server_list_with_valid_servers() {
-        let mut server_list = vec!["9.9.9.9", "8.8.8.8"];
-        let result = check_server_list(&mut server_list);
+        let server_list = vec!["9.9.9.9", "8.8.8.8"];
+        let result = check_server_list(&server_list);
         assert!(result.is_ok());
     }
 
     #[test]
     fn check_server_list_with_invalid_server() {
-        let mut server_list = vec!["999.0.0.1", "8.8.8.8"];
-        let result = check_server_list(&mut server_list);
+        let server_list = vec!["999.0.0.1", "8.8.8.8"];
+        let result = check_server_list(&server_list);
         assert!(result.is_err());
     }
 }
