@@ -5,9 +5,10 @@ use std::io::{self, Write};
 use std::thread;
 use std::time::Duration;
 
+use crate::dns::resolver_selector;
 use crate::dns::{
     resolver::resolve_domain,
-    resolver_selector::{Random, ResolverSelector, Sequential},
+    resolver_selector::ResolverSelector,
     types::{QueryResponse, QueryType, ResponseType},
 };
 use crate::io::{cli, cli::CommandArgs, wordlist};
@@ -29,9 +30,9 @@ pub fn enumerate_subdomains(args: &CommandArgs, dns_resolvers: &[&str]) -> Resul
     }
 
     let mut resolver_selector: Box<dyn ResolverSelector> = if args.use_random {
-        Box::new(Random)
+        Box::new(resolver_selector::Random)
     } else {
-        Box::new(Sequential::new())
+        Box::new(resolver_selector::Sequential::new())
     };
 
     let total_subdomains = subdomains.len() as u64;
