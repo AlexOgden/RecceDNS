@@ -19,7 +19,7 @@ const PROGRESS_TICK_CHARS: &str = "⡈⠔⠢⢁";
 )]
 pub struct CommandArgs {
     /// The operation mode to run, bruteforce subdomains or enumerate records
-    #[arg(short, required = true)]
+    #[arg(short = 'm', long = "mode", required = true)]
     pub operation_mode: OperationMode,
 
     /// The target base domain name to probe

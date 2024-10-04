@@ -15,7 +15,7 @@ fn main() -> Result<()> {
         io::cli::print_options(&args);
     }
 
-    let dns_resolvers: Vec<&str> = args.dns_resolvers.split(',').collect();
+    let dns_resolvers = args.dns_resolvers.split(',').collect();
     let dns_resolvers = validate_dns_resolvers(&args, dns_resolvers);
     ensure!(
         !dns_resolvers.is_empty(),
