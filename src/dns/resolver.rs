@@ -151,15 +151,12 @@ fn build_dns_query(domain: &str, query_type: &QueryType) -> Result<Vec<u8>> {
     }
     packet.push(0); // Terminate the domain name
 
-    match query_type {
-        QueryType::A => packet.extend_from_slice(&[0x00, 0x01]),
-        QueryType::AAAA => packet.extend_from_slice(&[0x00, 0x1c]),
-        QueryType::MX => packet.extend_from_slice(&[0x00, 0x0f]),
-        QueryType::TXT => packet.extend_from_slice(&[0x00, 0x10]),
-        QueryType::CNAME => packet.extend_from_slice(&[0x00, 0x05]),
-        QueryType::SOA => packet.extend_from_slice(&[0x00, 0x06]),
-        QueryType::NS => packet.extend_from_slice(&[0x00, 0x02]),
-        QueryType::Any => return Err(anyhow!("Invalid query type")),
+    // Set QTYPE
+    let query_type_number = query_type.to_number();
+    packet.extend_from_slice(&query_type_number.to_be_bytes());
+
+    if *query_type == QueryType::Any {
+        return Err(anyhow!("Invalid query type"));
     }
     packet.extend_from_slice(&[0x00, 0x01]); // QCLASS: IN (Internet)
 

@@ -13,21 +13,21 @@ pub enum TransportProtocol {
 #[derive(Debug, PartialEq, Eq, Clone, ValueEnum, Display, Hash, PartialOrd, Ord)]
 pub enum QueryType {
     #[strum(to_string = "A")]
-    A,
+    A = 1,
     #[strum(to_string = "AAAA")]
-    AAAA,
+    AAAA = 28,
     #[strum(to_string = "MX")]
-    MX,
+    MX = 15,
     #[strum(to_string = "TXT")]
-    TXT,
+    TXT = 16,
     #[strum(to_string = "CNAME")]
-    CNAME,
+    CNAME = 5,
     #[strum(to_string = "SOA")]
-    SOA,
+    SOA = 6,
     #[strum(to_string = "NS")]
-    NS,
+    NS = 2,
     #[strum(to_string = "any")]
-    Any,
+    Any = 0,
 }
 
 impl QueryType {
@@ -41,6 +41,19 @@ impl QueryType {
             6 => Self::SOA,
             2 => Self::NS,
             _ => Self::Any,
+        }
+    }
+
+    pub const fn to_number(&self) -> u16 {
+        match self {
+            Self::A => 1,
+            Self::AAAA => 28,
+            Self::MX => 15,
+            Self::TXT => 16,
+            Self::CNAME => 5,
+            Self::SOA => 6,
+            Self::NS => 2,
+            Self::Any => 0,
         }
     }
 }
