@@ -7,6 +7,8 @@ use std::{
 
 use crate::dns::{resolver::resolve_domain, types::QueryType};
 
+use super::types::TransportProtocol;
+
 const DNS_PORT: u16 = 53;
 const ROOT_SERVER: &str = "a.rootservers.net";
 
@@ -30,12 +32,19 @@ fn check_udp_connection(socket: &UdpSocket, server_ip: &str, port: u16) -> Resul
     Ok(())
 }
 
-fn check_dns_server(server_address: &str) -> Result<()> {
+fn check_dns_server(server_address: &str, transport_protocol: &TransportProtocol) -> Result<()> {
     let socket = UdpSocket::bind("0.0.0.0:0").context("Failed to create socket")?;
 
     check_udp_connection(&socket, server_address, DNS_PORT)?;
 
-    if resolve_domain(server_address, ROOT_SERVER, &QueryType::A).is_ok() {
+    if resolve_domain(
+        server_address,
+        ROOT_SERVER,
+        &QueryType::A,
+        transport_protocol,
+    )
+    .is_ok()
+    {
         print_status(server_address, "OK", "green");
         Ok(())
     } else {
@@ -59,13 +68,16 @@ fn print_status(server_address: &str, status: &str, color: &str) {
     );
 }
 
-pub fn check_server_list(server_list: &[&str]) -> Result<(), Vec<String>> {
+pub fn check_server_list(
+    server_list: &[&str],
+    transport_protocol: &TransportProtocol,
+) -> Result<(), Vec<String>> {
     println!("Checking DNS Servers...");
 
     let mut failed_servers = Vec::new();
 
     for &server in server_list {
-        if let Err(err) = check_dns_server(server) {
+        if let Err(err) = check_dns_server(server, transport_protocol) {
             failed_servers.push(err.to_string());
         }
     }
@@ -80,6 +92,8 @@ pub fn check_server_list(server_list: &[&str]) -> Result<(), Vec<String>> {
 #[cfg(test)]
 mod test {
     use super::*;
+    use anyhow::Context;
+    use std::net::UdpSocket;
 
     #[test]
     fn udp_connect_check_ok() {
@@ -104,28 +118,54 @@ mod test {
     }
 
     #[test]
-    fn check_dns_server_9_9_9_9() {
-        let result = check_dns_server("9.9.9.9");
+    fn check_dns_server_9_9_9_9_udp() {
+        let result = check_dns_server("9.9.9.9", &TransportProtocol::UDP);
         assert!(result.is_ok() || result.is_err());
     }
 
     #[test]
-    fn check_dns_server_8_8_8_8() {
-        let result = check_dns_server("8.8.8.8");
+    fn check_dns_server_8_8_8_8_udp() {
+        let result = check_dns_server("8.8.8.8", &TransportProtocol::UDP);
         assert!(result.is_ok() || result.is_err());
     }
 
     #[test]
-    fn check_server_list_with_valid_servers() {
+    fn check_dns_server_9_9_9_9_tcp() {
+        let result = check_dns_server("9.9.9.9", &TransportProtocol::TCP);
+        assert!(result.is_ok() || result.is_err());
+    }
+
+    #[test]
+    fn check_dns_server_8_8_8_8_tcp() {
+        let result = check_dns_server("8.8.8.8", &TransportProtocol::TCP);
+        assert!(result.is_ok() || result.is_err());
+    }
+
+    #[test]
+    fn check_server_list_with_valid_servers_udp() {
         let server_list = vec!["9.9.9.9", "8.8.8.8"];
-        let result = check_server_list(&server_list);
+        let result = check_server_list(&server_list, &TransportProtocol::UDP);
         assert!(result.is_ok());
     }
 
     #[test]
-    fn check_server_list_with_invalid_server() {
+    fn check_server_list_with_invalid_server_udp() {
         let server_list = vec!["999.0.0.1", "8.8.8.8"];
-        let result = check_server_list(&server_list);
+        let result = check_server_list(&server_list, &TransportProtocol::UDP);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn check_server_list_with_valid_servers_tcp() {
+        let server_list = vec!["9.9.9.9", "8.8.8.8"];
+        let result = check_server_list(&server_list, &TransportProtocol::TCP);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn check_server_list_with_invalid_server_tcp() {
+        let server_list = vec!["999.0.0.1", "8.8.8.8"];
+        let result = check_server_list(&server_list, &TransportProtocol::TCP);
         assert!(result.is_err());
     }
 }

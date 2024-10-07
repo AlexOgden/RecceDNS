@@ -49,7 +49,12 @@ pub fn enumerate_subdomains(args: &CommandArgs, dns_resolvers: &[&str]) -> Resul
             format!("{}.{}", subdomain, args.target_domain)
         };
 
-        match resolve_domain(query_resolver, &fqdn, record_query_type) {
+        match resolve_domain(
+            query_resolver,
+            &fqdn,
+            record_query_type,
+            &args.transport_protocol,
+        ) {
             Ok(mut response) => {
                 response.sort_by(|a, b| a.query_type.cmp(&b.query_type));
 
@@ -114,7 +119,14 @@ fn check_wildcard_domain(args: &CommandArgs, dns_resolvers: &[&str]) -> Result<b
             .collect();
         let fqdn = format!("{}.{}", random_subdomain, args.target_domain);
 
-        if resolve_domain(query_resolver, &fqdn, &QueryType::A).is_err() {
+        if resolve_domain(
+            query_resolver,
+            &fqdn,
+            &QueryType::A,
+            &args.transport_protocol,
+        )
+        .is_err()
+        {
             return Ok(false); // If any random subdomain fails to resolve, it's not a wildcard domain
         }
     }

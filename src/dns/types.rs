@@ -4,6 +4,13 @@ use clap::ValueEnum;
 use strum_macros::Display;
 
 #[allow(clippy::upper_case_acronyms)]
+#[derive(Debug, PartialEq, Eq, Clone, ValueEnum, Display, Hash)]
+pub enum TransportProtocol {
+    UDP,
+    TCP,
+}
+
+#[allow(clippy::upper_case_acronyms)]
 #[derive(Debug, PartialEq, Eq, Clone, ValueEnum, Display, Hash, PartialOrd, Ord)]
 pub enum QueryType {
     #[strum(to_string = "A")]
