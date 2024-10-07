@@ -1,14 +1,19 @@
 use anyhow::{anyhow, Result};
 
-use crate::dns::types::{MXResponse, QueryResponse, QueryType, ResponseType, SOAResponse};
+use crate::dns::types::{
+    MXResponse, QueryResponse, QueryType, ResponseType, SOAResponse, TransportProtocol,
+};
 use once_cell::sync::Lazy;
 use rand::Rng;
 use std::collections::HashSet;
-use std::net::{Ipv4Addr, Ipv6Addr, UdpSocket};
+use std::io::{Read, Write};
+use std::net::{Ipv4Addr, Ipv6Addr, TcpStream, UdpSocket};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 static UDP_SOCKET: Lazy<Mutex<Option<Arc<UdpSocket>>>> = Lazy::new(|| Mutex::new(None));
+const DNS_PORT: u8 = 53;
+const UDP_BUFFER_SIZE: usize = 512;
 
 fn initialize_udp_socket() -> Result<Arc<UdpSocket>> {
     let mut socket_guard = UDP_SOCKET.lock().expect("Failed to lock the socket mutex");
@@ -30,6 +35,7 @@ pub fn resolve_domain(
     dns_server: &str,
     domain: &str,
     query_type: &QueryType,
+    transport_protocol: &TransportProtocol,
 ) -> Result<Vec<QueryResponse>> {
     let mut all_results = HashSet::new();
     let mut seen_cnames = HashSet::new();
@@ -46,7 +52,7 @@ pub fn resolve_domain(
     };
 
     for qt in query_types {
-        let query_result = perform_dns_query(&socket, dns_server, domain, qt)?;
+        let query_result = execute_dns_query(&socket, transport_protocol, dns_server, domain, qt)?;
 
         for response in query_result {
             if let ResponseType::CNAME(ref cname) = response.response_content {
@@ -66,28 +72,29 @@ pub fn resolve_domain(
     }
 }
 
-fn perform_dns_query(
+fn execute_dns_query(
     socket: &UdpSocket,
+    transport_protocol: &TransportProtocol,
     dns_server: &str,
     domain: &str,
     query_type: &QueryType,
 ) -> Result<Vec<QueryResponse>> {
-    const DNS_PORT: u8 = 53;
     let dns_server_address = format!("{dns_server}:{DNS_PORT}");
 
     let query = build_dns_query(domain, query_type)?;
-    let response = send_dns_query(socket, &query, &dns_server_address)?;
+    let response = match transport_protocol {
+        TransportProtocol::UDP => send_dns_query_udp(socket, &query, &dns_server_address)?,
+        TransportProtocol::TCP => send_dns_query_tcp(&query, &dns_server_address)?,
+    };
     parse_dns_response(&response)
 }
 
-fn send_dns_query(socket: &UdpSocket, query: &[u8], dns_server: &str) -> Result<Vec<u8>> {
-    const BUFFER_SIZE: usize = 512;
-
+fn send_dns_query_udp(socket: &UdpSocket, query: &[u8], dns_server: &str) -> Result<Vec<u8>> {
     socket
         .send_to(query, dns_server)
         .map_err(|error| anyhow!("Failed to send DNS query to {}: {}", dns_server, error))?;
 
-    let mut response_buffer = [0; BUFFER_SIZE];
+    let mut response_buffer = [0; UDP_BUFFER_SIZE];
     let (bytes_received, _) = socket.recv_from(&mut response_buffer).map_err(|error| {
         anyhow!(
             "Failed to receive DNS response from {}: {}",
@@ -97,6 +104,29 @@ fn send_dns_query(socket: &UdpSocket, query: &[u8], dns_server: &str) -> Result<
     })?;
 
     Ok(response_buffer[..bytes_received].to_vec())
+}
+
+fn send_dns_query_tcp(query: &[u8], dns_server: &str) -> Result<Vec<u8>> {
+    let mut stream = TcpStream::connect(dns_server)
+        .map_err(|error| anyhow!("Failed to connect to {}: {}", dns_server, error))?;
+
+    // Prefix the query with its length (2 bytes, big-endian)
+    let query_len = u16::try_from(query.len())
+        .map_err(|_| anyhow!("Query length exceeds u16 maximum value"))?
+        .to_be_bytes();
+    stream.write_all(&query_len)?;
+    stream.write_all(query)?;
+
+    // Read the length of the response (2 bytes, big-endian)
+    let mut len_buffer = [0; 2];
+    stream.read_exact(&mut len_buffer)?;
+    let response_len = u16::from_be_bytes(len_buffer) as usize;
+
+    // Read the response
+    let mut response_buffer = vec![0; response_len];
+    stream.read_exact(&mut response_buffer)?;
+
+    Ok(response_buffer)
 }
 
 fn build_dns_query(domain: &str, query_type: &QueryType) -> Result<Vec<u8>> {

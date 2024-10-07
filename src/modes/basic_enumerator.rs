@@ -31,7 +31,7 @@ pub fn enumerate_records(args: &CommandArgs, dns_resolvers: &[&str]) -> Result<(
     let mut seen_cnames = HashSet::new();
 
     for query_type in query_types {
-        match resolve_domain(resolver, domain, &query_type) {
+        match resolve_domain(resolver, domain, &query_type, &args.transport_protocol) {
             Ok(mut response) => {
                 response.sort_by(|a, b| a.query_type.cmp(&b.query_type));
                 for record in response {
@@ -40,7 +40,8 @@ pub fn enumerate_records(args: &CommandArgs, dns_resolvers: &[&str]) -> Result<(
                             continue; // Skip if CNAME is already seen
                         }
                     }
-                    let response_data_string = create_query_response_string(&record, resolver)?;
+                    let response_data_string =
+                        create_query_response_string(&record, resolver, args)?;
                     println!("{response_data_string}");
                 }
             }
@@ -58,7 +59,7 @@ pub fn enumerate_records(args: &CommandArgs, dns_resolvers: &[&str]) -> Result<(
 }
 
 fn format_response(query_type: &str, content: &str) -> String {
-    format!("[{} {}]", query_type.bold(), content)
+    format!("[{} {}]", query_type.bold().bright_cyan(), content)
 }
 
 fn handle_ns_response(
@@ -66,10 +67,16 @@ fn handle_ns_response(
     domain: &str,
     resolver: &str,
     ns_domain: &str,
+    args: &CommandArgs,
 ) -> Result<String> {
     let mut result = format_response(query_type_formatted, domain);
-    let a_records = resolve_domain(resolver, ns_domain, &QueryType::A)?;
-    let aaaa_records = resolve_domain(resolver, ns_domain, &QueryType::AAAA)?;
+    let a_records = resolve_domain(resolver, ns_domain, &QueryType::A, &args.transport_protocol)?;
+    let aaaa_records = resolve_domain(
+        resolver,
+        ns_domain,
+        &QueryType::AAAA,
+        &args.transport_protocol,
+    )?;
     for a_record in a_records {
         if let ResponseType::IPv4(ip) = a_record.response_content {
             result.push_str(&format!(" [{} {}]", "A".bold(), ip));
@@ -83,15 +90,19 @@ fn handle_ns_response(
     Ok(result)
 }
 
-fn create_query_response_string(query_response: &QueryResponse, resolver: &str) -> Result<String> {
-    let query_type_formatted = query_response.query_type.to_string().bold();
+fn create_query_response_string(
+    query_response: &QueryResponse,
+    resolver: &str,
+    args: &CommandArgs,
+) -> Result<String> {
+    let query_type_formatted = query_response.query_type.to_string().bold().bright_cyan();
     match &query_response.response_content {
         ResponseType::IPv4(ip) => Ok(format_response(&query_type_formatted, &ip.to_string())),
         ResponseType::IPv6(ip) => Ok(format_response(&query_type_formatted, &ip.to_string())),
         ResponseType::TXT(txt_data) => Ok(format_response(&query_type_formatted, txt_data)),
         ResponseType::CNAME(domain) | ResponseType::NS(domain) => {
             if let ResponseType::NS(ns_domain) = &query_response.response_content {
-                handle_ns_response(&query_type_formatted, domain, resolver, ns_domain)
+                handle_ns_response(&query_type_formatted, domain, resolver, ns_domain, args)
             } else {
                 Ok(format_response(&query_type_formatted, domain))
             }

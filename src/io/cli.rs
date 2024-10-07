@@ -1,5 +1,5 @@
 use crate::{
-    dns::types::QueryType,
+    dns::types::{QueryType, TransportProtocol},
     io::validate::{dns_resolver_list, domain},
 };
 use clap::{Parser, ValueEnum};
@@ -29,6 +29,10 @@ pub struct CommandArgs {
     /// IPv4 Address of the DNS resolver(s) to use (comma-seperated). Multiple resolvers will selected either randomly or sequentially
     #[arg(short, long, default_value = "1.1.1.1", value_parser = dns_resolver_list, required = false)]
     pub dns_resolvers: String,
+
+    /// Transport protocol to use for DNS queries
+    #[arg(short = 'p', long, value_enum, default_value_t = TransportProtocol::UDP, required = false)]
+    pub transport_protocol: TransportProtocol,
 
     /// Path to subdomain wordlist
     #[arg(short, long, required = false)]
