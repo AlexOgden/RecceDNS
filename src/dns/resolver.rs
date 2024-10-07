@@ -5,13 +5,13 @@ use once_cell::sync::Lazy;
 use rand::Rng;
 use std::collections::HashSet;
 use std::net::{Ipv4Addr, Ipv6Addr, UdpSocket};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-static SOCKET: Lazy<Mutex<Option<UdpSocket>>> = Lazy::new(|| Mutex::new(None));
+static UDP_SOCKET: Lazy<Mutex<Option<Arc<UdpSocket>>>> = Lazy::new(|| Mutex::new(None));
 
-fn initialize_socket() -> Result<UdpSocket> {
-    let mut socket_guard = SOCKET.lock().expect("Failed to lock the mutex");
+fn initialize_udp_socket() -> Result<Arc<UdpSocket>> {
+    let mut socket_guard = UDP_SOCKET.lock().expect("Failed to lock the socket mutex");
     if socket_guard.is_none() {
         let socket = UdpSocket::bind("0.0.0.0:0")?;
         let timeout = Duration::from_secs(3);
@@ -19,12 +19,11 @@ fn initialize_socket() -> Result<UdpSocket> {
         socket.set_read_timeout(Some(timeout))?;
         socket.set_write_timeout(Some(timeout))?;
 
-        *socket_guard = Some(socket);
+        *socket_guard = Some(Arc::new(socket));
     }
-    Ok(socket_guard
-        .as_ref()
-        .expect("Socket should be initialized")
-        .try_clone()?)
+    Ok(Arc::clone(
+        socket_guard.as_ref().expect("Socket should be initialized"),
+    ))
 }
 
 pub fn resolve_domain(
@@ -34,7 +33,7 @@ pub fn resolve_domain(
 ) -> Result<Vec<QueryResponse>> {
     let mut all_results = HashSet::new();
     let mut seen_cnames = HashSet::new();
-    let socket = initialize_socket()?;
+    let socket = initialize_udp_socket()?;
 
     let query_types: Vec<&QueryType> = match query_type {
         QueryType::Any => vec![
@@ -47,10 +46,17 @@ pub fn resolve_domain(
     };
 
     for qt in query_types {
-        let (updated_seen_cnames, updated_all_results) =
-            query_and_collect(&socket, dns_server, domain, qt, seen_cnames, all_results)?;
-        seen_cnames = updated_seen_cnames;
-        all_results = updated_all_results;
+        let query_result = perform_dns_query(&socket, dns_server, domain, qt)?;
+
+        for response in query_result {
+            if let ResponseType::CNAME(ref cname) = response.response_content {
+                if seen_cnames.insert(cname.clone()) {
+                    all_results.insert(response);
+                }
+            } else {
+                all_results.insert(response);
+            }
+        }
     }
 
     if all_results.is_empty() {
@@ -60,37 +66,14 @@ pub fn resolve_domain(
     }
 }
 
-fn query_and_collect(
-    socket: &UdpSocket,
-    dns_server: &str,
-    domain: &str,
-    query_type: &QueryType,
-    mut seen_cnames: HashSet<String>,
-    mut all_results: HashSet<QueryResponse>,
-) -> Result<(HashSet<String>, HashSet<QueryResponse>)> {
-    let query_result = perform_dns_query(socket, dns_server, domain, query_type)?;
-
-    for response in query_result {
-        if let ResponseType::CNAME(ref cname) = response.response_content {
-            if seen_cnames.insert(cname.clone()) {
-                all_results.insert(response);
-            }
-        } else {
-            all_results.insert(response);
-        }
-    }
-
-    Ok((seen_cnames, all_results))
-}
-
 fn perform_dns_query(
     socket: &UdpSocket,
     dns_server: &str,
     domain: &str,
     query_type: &QueryType,
 ) -> Result<Vec<QueryResponse>> {
-    const UDP_PORT: u8 = 53;
-    let dns_server_address = format!("{dns_server}:{UDP_PORT}");
+    const DNS_PORT: u8 = 53;
+    let dns_server_address = format!("{dns_server}:{DNS_PORT}");
 
     let query = build_dns_query(domain, query_type)?;
     let response = send_dns_query(socket, &query, &dns_server_address)?;
