@@ -63,7 +63,7 @@ pub struct CommandArgs {
     pub delay: Option<u64>,
 
     /// Use a random resolver for each query, otherwise use them sequentially
-    #[arg(long, required = false, default_value_t = false)]
+    #[arg(short = 'r', long, required = false, default_value_t = false)]
     pub use_random: bool,
 }
 
