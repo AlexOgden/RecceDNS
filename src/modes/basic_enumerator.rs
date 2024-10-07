@@ -18,7 +18,29 @@ pub fn enumerate_records(args: &CommandArgs, dns_resolvers: &[&str]) -> Result<(
 
     let resolver = dns_resolvers[0];
     let domain = &args.target_domain;
-    let query_types = vec![
+    let query_types = get_query_types();
+    let mut seen_cnames = HashSet::new();
+
+    for query_type in query_types {
+        match resolve_domain(resolver, domain, &query_type, &args.transport_protocol) {
+            Ok(mut response) => {
+                response.sort_by(|a, b| a.query_type.cmp(&b.query_type));
+                process_response(&mut seen_cnames, &response, resolver, args)?;
+            }
+            Err(err) => {
+                if err.to_string() != "No record found" {
+                    eprintln!("{err}");
+                    return Err(anyhow!("Error querying with resolver {resolver}"));
+                }
+            }
+        }
+    }
+
+    Ok(())
+}
+
+fn get_query_types() -> Vec<QueryType> {
+    vec![
         QueryType::A,
         QueryType::AAAA,
         QueryType::CNAME,
@@ -26,35 +48,24 @@ pub fn enumerate_records(args: &CommandArgs, dns_resolvers: &[&str]) -> Result<(
         QueryType::NS,
         QueryType::SOA,
         QueryType::TXT,
-    ];
+    ]
+}
 
-    let mut seen_cnames = HashSet::new();
-
-    for query_type in query_types {
-        match resolve_domain(resolver, domain, &query_type, &args.transport_protocol) {
-            Ok(mut response) => {
-                response.sort_by(|a, b| a.query_type.cmp(&b.query_type));
-                for record in response {
-                    if let ResponseType::CNAME(ref cname) = record.response_content {
-                        if !seen_cnames.insert(cname.clone()) {
-                            continue; // Skip if CNAME is already seen
-                        }
-                    }
-                    let response_data_string =
-                        create_query_response_string(&record, resolver, args)?;
-                    println!("{response_data_string}");
-                }
-            }
-            Err(err) => {
-                if err.to_string() == "No record found" {
-                    continue;
-                }
-                eprintln!("{err}");
-                return Err(anyhow!("Error querying with resolver {resolver}"));
+fn process_response(
+    seen_cnames: &mut HashSet<String>,
+    response: &[QueryResponse],
+    resolver: &str,
+    args: &CommandArgs,
+) -> Result<()> {
+    for record in response {
+        if let ResponseType::CNAME(ref cname) = record.response_content {
+            if !seen_cnames.insert(cname.clone()) {
+                continue; // Skip if CNAME is already seen
             }
         }
+        let response_data_string = create_query_response_string(record, resolver, args)?;
+        println!("{response_data_string}");
     }
-
     Ok(())
 }
 
