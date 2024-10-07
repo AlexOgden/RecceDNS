@@ -6,6 +6,7 @@ pub trait ResolverSelector {
     fn select<'a>(&mut self, dns_resolvers: &'a [&str]) -> Result<&'a str>;
 }
 
+// Selects a DNS resolver randomly from the list of DNS resolvers
 pub struct Random;
 
 impl ResolverSelector for Random {
@@ -19,6 +20,7 @@ impl ResolverSelector for Random {
     }
 }
 
+// Selects a DNS resolver sequentially from the list of DNS resolvers
 pub struct Sequential {
     current_index: usize,
 }
