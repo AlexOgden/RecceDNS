@@ -1,13 +1,12 @@
 use anyhow::{anyhow, Context, Result};
-use lazy_static::lazy_static;
+use once_cell::sync::Lazy;
 use regex::Regex;
 use std::net::Ipv4Addr;
 
-lazy_static! {
-    static ref DOMAIN_REGEX: Regex =
-        Regex::new(r"^(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$")
-            .expect("Failed to create domain regex");
-}
+static DOMAIN_REGEX: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(r"^(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$")
+        .expect("Failed to create domain regex")
+});
 
 pub fn domain(domain: &str) -> Result<String> {
     if DOMAIN_REGEX.is_match(domain) {
