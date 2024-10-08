@@ -1,11 +1,12 @@
 mod dns;
 mod io;
 mod modes;
+mod network;
 
 use anyhow::{ensure, Result};
 use colored::Colorize;
-use dns::network_check;
 use io::cli::{CommandArgs, OperationMode};
+use network::network_check;
 
 fn main() -> Result<()> {
     let args = io::cli::get_parsed_args();

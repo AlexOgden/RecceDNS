@@ -5,9 +5,7 @@ use std::{
     time::Duration,
 };
 
-use crate::dns::{resolver::resolve_domain, types::QueryType};
-
-use super::types::TransportProtocol;
+use crate::dns::{resolver::resolve_domain, types::QueryType, types::TransportProtocol};
 
 const DNS_PORT: u16 = 53;
 const ROOT_SERVER: &str = "a.rootservers.net";
