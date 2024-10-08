@@ -108,4 +108,16 @@ mod test {
         assert_eq!(QueryType::from_number(3), QueryType::Any);
         assert_eq!(QueryType::from_number(255), QueryType::Any);
     }
+
+    #[test]
+    fn test_to_number() {
+        assert_eq!(QueryType::A.to_number(), 1);
+        assert_eq!(QueryType::AAAA.to_number(), 28);
+        assert_eq!(QueryType::MX.to_number(), 15);
+        assert_eq!(QueryType::TXT.to_number(), 16);
+        assert_eq!(QueryType::CNAME.to_number(), 5);
+        assert_eq!(QueryType::SOA.to_number(), 6);
+        assert_eq!(QueryType::NS.to_number(), 2);
+        assert_eq!(QueryType::Any.to_number(), 0);
+    }
 }
