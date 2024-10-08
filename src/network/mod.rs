@@ -1,1 +1,1 @@
-pub mod network_check;
+pub mod net_check;
