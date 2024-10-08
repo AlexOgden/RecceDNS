@@ -299,7 +299,6 @@ dependencies = [
  "clap",
  "colored",
  "indicatif",
- "lazy_static",
  "once_cell",
  "rand",
  "regex",
