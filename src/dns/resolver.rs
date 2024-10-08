@@ -1,9 +1,8 @@
 use anyhow::{Context, Result};
 
 use crate::dns::error::Error;
-use crate::dns::types::{
-    MXResponse, QueryResponse, QueryType, ResponseType, SOAResponse, TransportProtocol,
-};
+use crate::dns::types::{MXResponse, QueryResponse, QueryType, ResponseType, SOAResponse};
+use crate::network::types::TransportProtocol;
 use once_cell::sync::Lazy;
 use rand::Rng;
 use std::collections::HashSet;
