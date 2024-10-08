@@ -1,5 +1,6 @@
-use anyhow::{anyhow, Result};
+use anyhow::{Context, Result};
 
+use crate::dns::error::Error;
 use crate::dns::types::{
     MXResponse, QueryResponse, QueryType, ResponseType, SOAResponse, TransportProtocol,
 };
@@ -21,8 +22,12 @@ fn initialize_udp_socket() -> Result<Arc<UdpSocket>> {
         let socket = UdpSocket::bind("0.0.0.0:0")?;
         let timeout = Duration::from_secs(3);
 
-        socket.set_read_timeout(Some(timeout))?;
-        socket.set_write_timeout(Some(timeout))?;
+        socket
+            .set_read_timeout(Some(timeout))
+            .context("Failed to set read timeout")?;
+        socket
+            .set_write_timeout(Some(timeout))
+            .context("Failed to set write timeout")?;
 
         *socket_guard = Some(Arc::new(socket));
     }
@@ -66,7 +71,7 @@ pub fn resolve_domain(
     }
 
     if all_results.is_empty() {
-        Err(anyhow!("No record found"))
+        Err(Error::NoRecordsFound.into())
     } else {
         Ok(all_results.into_iter().collect())
     }
@@ -90,29 +95,28 @@ fn execute_dns_query(
 }
 
 fn send_dns_query_udp(socket: &UdpSocket, query: &[u8], dns_server: &str) -> Result<Vec<u8>> {
-    socket
-        .send_to(query, dns_server)
-        .map_err(|error| anyhow!("Failed to send DNS query to {}: {}", dns_server, error))?;
+    socket.send_to(query, dns_server).map_err(|error| {
+        Error::Network(format!(
+            "Failed to send query to {dns_server} (UDP): {error}"
+        ))
+    })?;
 
     let mut response_buffer = [0; UDP_BUFFER_SIZE];
-    let (bytes_received, _) = socket.recv_from(&mut response_buffer).map_err(|error| {
-        anyhow!(
-            "Failed to receive DNS response from {}: {}",
-            dns_server,
-            error
-        )
-    })?;
+    let (bytes_received, _) = socket
+        .recv_from(&mut response_buffer)
+        .map_err(|error| Error::Network(format!("Failed to receive response (UDP): {error}")))?;
 
     Ok(response_buffer[..bytes_received].to_vec())
 }
 
 fn send_dns_query_tcp(query: &[u8], dns_server: &str) -> Result<Vec<u8>> {
-    let mut stream = TcpStream::connect(dns_server)
-        .map_err(|error| anyhow!("Failed to connect to {}: {}", dns_server, error))?;
+    let mut stream = TcpStream::connect(dns_server).map_err(|error| {
+        Error::Network(format!("Failed to connect to {dns_server} (TCP): {error}"))
+    })?;
 
     // Prefix the query with its length (2 bytes, big-endian)
     let query_len = u16::try_from(query.len())
-        .map_err(|_| anyhow!("Query length exceeds u16 maximum value"))?
+        .map_err(|_| Error::InvalidData("Query length exceeds u16 maximum value".to_owned()))?
         .to_be_bytes();
     stream.write_all(&query_len)?;
     stream.write_all(query)?;
@@ -131,7 +135,7 @@ fn send_dns_query_tcp(query: &[u8], dns_server: &str) -> Result<Vec<u8>> {
 
 fn build_dns_query(domain: &str, query_type: &QueryType) -> Result<Vec<u8>> {
     if domain.is_empty() {
-        return Err(anyhow!("Domain name cannot be empty"));
+        return Err(Error::InvalidData("Domain name cannot be empty".to_owned()).into());
     }
 
     let mut packet = Vec::new();
@@ -145,7 +149,8 @@ fn build_dns_query(domain: &str, query_type: &QueryType) -> Result<Vec<u8>> {
     packet.extend_from_slice(&[0x00, 0x00]); // ARCOUNT
 
     for part in domain.split('.') {
-        let q_length = u8::try_from(part.len()).map_err(|_| anyhow!("Domain part too long"))?;
+        let q_length = u8::try_from(part.len())
+            .map_err(|_| Error::InvalidData("Domain part too long".to_owned()))?;
         packet.push(q_length);
         packet.extend_from_slice(part.as_bytes());
     }
@@ -156,16 +161,22 @@ fn build_dns_query(domain: &str, query_type: &QueryType) -> Result<Vec<u8>> {
     packet.extend_from_slice(&query_type_number.to_be_bytes());
 
     if *query_type == QueryType::Any {
-        return Err(anyhow!("Invalid query type"));
+        return Err(
+            Error::InvalidData("Query type 'ANY' not supported for DNS query".to_owned()).into(),
+        );
     }
     packet.extend_from_slice(&[0x00, 0x01]); // QCLASS: IN (Internet)
 
     Ok(packet)
 }
 
+#[allow(clippy::too_many_lines)]
 fn parse_dns_response(response: &[u8]) -> Result<Vec<QueryResponse>> {
     if response.len() < 12 {
-        return Err(anyhow!("Malformed DNS response: Response length too short"));
+        return Err(Error::ProtocolData(
+            "Malformed DNS response: Response length too short".to_owned(),
+        )
+        .into());
     }
 
     let qdcount = u16::from_be_bytes([response[4], response[5]]); // Question Count
@@ -173,9 +184,10 @@ fn parse_dns_response(response: &[u8]) -> Result<Vec<QueryResponse>> {
     let nscount = u16::from_be_bytes([response[8], response[9]]); // Authority Record Count
 
     if qdcount != 1 {
-        return Err(anyhow!(
+        return Err(Error::ProtocolData(format!(
             "Malformed DNS response: Incorrect question count ({qdcount})"
-        ));
+        ))
+        .into());
     }
 
     let mut offset = 12; // Start of the Question section
@@ -193,7 +205,10 @@ fn parse_dns_response(response: &[u8]) -> Result<Vec<QueryResponse>> {
     let mut results: Vec<QueryResponse> = Vec::new();
     for _ in 0..ancount {
         if offset + 10 > response.len() {
-            return Err(anyhow!("Malformed DNS response: Answer section incomplete"));
+            return Err(Error::ProtocolData(
+                "Malformed DNS response: Answer section incomplete".to_owned(),
+            )
+            .into());
         }
 
         offset += 2; // Skip the NAME (pointer)
@@ -248,9 +263,10 @@ fn parse_dns_response(response: &[u8]) -> Result<Vec<QueryResponse>> {
     if nscount > 0 && QueryType::from_number(q_type) == QueryType::SOA {
         for _ in 0..nscount {
             if offset + 10 > response.len() {
-                return Err(anyhow!(
-                    "Malformed DNS response: Authority section incomplete"
-                ));
+                return Err(Error::ProtocolData(
+                    "Malformed DNS response: Authority section incomplete".to_owned(),
+                )
+                .into());
             }
 
             offset += 2; // Skip the NAME (pointer)
@@ -289,7 +305,9 @@ fn parse_dns_response(response: &[u8]) -> Result<Vec<QueryResponse>> {
 fn parse_a_record(response: &[u8], offset: &mut usize, rdlength: u16) -> Result<QueryResponse> {
     // A (1)
     if *offset + 4 > response.len() {
-        return Err(anyhow!("Malformed DNS response: A record incomplete"));
+        return Err(
+            Error::ProtocolData("Malformed DNS response: A record incomplete".to_owned()).into(),
+        );
     }
     let ipv4 = Ipv4Addr::new(
         response[*offset],
@@ -311,7 +329,10 @@ fn parse_a_record(response: &[u8], offset: &mut usize, rdlength: u16) -> Result<
 fn parse_aaaa_record(response: &[u8], offset: &mut usize, rdlength: u16) -> Result<QueryResponse> {
     // AAAA (28)
     if *offset + 16 > response.len() {
-        return Err(anyhow!("Malformed DNS response: AAAA record incomplete"));
+        return Err(Error::ProtocolData(
+            "Malformed DNS response: AAAA record incomplete".to_owned(),
+        )
+        .into());
     }
     let ipv6 = Ipv6Addr::new(
         (response[*offset] as u16) << 8 | (response[*offset + 1] as u16),
@@ -337,7 +358,9 @@ fn parse_aaaa_record(response: &[u8], offset: &mut usize, rdlength: u16) -> Resu
 fn parse_mx_record(response: &[u8], offset: &mut usize, rdlength: u16) -> Result<QueryResponse> {
     // MX (15)
     if *offset + 2 > response.len() {
-        return Err(anyhow!("Malformed DNS response: MX record incomplete"));
+        return Err(
+            Error::ProtocolData("Malformed DNS response: MX record incomplete".to_owned()).into(),
+        );
     }
 
     let priority_number = u16::from_be_bytes([response[*offset], response[*offset + 1]]);
@@ -384,9 +407,10 @@ fn parse_mx_record(response: &[u8], offset: &mut usize, rdlength: u16) -> Result
 fn parse_cname_record(response: &[u8], offset: &mut usize, rdlength: u16) -> Result<QueryResponse> {
     // CNAME (5)
     if *offset + rdlength as usize > response.len() {
-        return Err(anyhow!(
-            "Malformed DNS response: CNAME record domain name incomplete"
-        ));
+        return Err(Error::ProtocolData(
+            "Malformed DNS response: CNAME record domain name incomplete".to_owned(),
+        )
+        .into());
     }
 
     let mut cname_target = String::new();
@@ -423,9 +447,10 @@ fn parse_cname_record(response: &[u8], offset: &mut usize, rdlength: u16) -> Res
 fn parse_txt_record(response: &[u8], offset: &mut usize, rdlength: u16) -> Result<QueryResponse> {
     // TXT (16)
     if *offset + rdlength as usize > response.len() {
-        return Err(anyhow!(
-            "Malformed DNS response: TXT record data incomplete"
-        ));
+        return Err(Error::ProtocolData(
+            "Malformed DNS response: TXT record incomplete".to_owned(),
+        )
+        .into());
     }
 
     let txt_data_length = response[*offset];
@@ -448,9 +473,10 @@ fn parse_txt_record(response: &[u8], offset: &mut usize, rdlength: u16) -> Resul
 fn parse_soa_record(response: &[u8], offset: &mut usize, rdlength: u16) -> Result<QueryResponse> {
     // SOA (6)
     if *offset + rdlength as usize > response.len() {
-        return Err(anyhow!(
-            "Malformed DNS response: SOA record data incomplete"
-        ));
+        return Err(Error::ProtocolData(
+            "Malformed DNS response: SOA record incomplete".to_owned(),
+        )
+        .into());
     }
 
     let read_domain_name = |data: &[u8], offset: &mut usize| -> Result<String> {
@@ -488,9 +514,10 @@ fn parse_soa_record(response: &[u8], offset: &mut usize, rdlength: u16) -> Resul
 
             // Ensure there's enough data to read the label
             if *offset + length + 1 > data.len() {
-                return Err(anyhow!(
-                    "Malformed DNS response: Domain name data incomplete"
-                ));
+                return Err(Error::ProtocolData(
+                    "Malformed DNS response: Domain name data incomplete".to_owned(),
+                )
+                .into());
             }
 
             // Append a dot between labels
@@ -506,7 +533,8 @@ fn parse_soa_record(response: &[u8], offset: &mut usize, rdlength: u16) -> Resul
         }
 
         // Convert the domain name from Vec<u8> to String
-        String::from_utf8(domain_name).map_err(|e| anyhow!("Invalid UTF-8 sequence: {}", e))
+        String::from_utf8(domain_name)
+            .map_err(|e| Error::InvalidData(format!("Invalid UTF-8 sequence: {e}")).into())
     };
 
     let mname_data = read_domain_name(response, offset)?;
@@ -573,9 +601,9 @@ fn parse_soa_record(response: &[u8], offset: &mut usize, rdlength: u16) -> Resul
 fn parse_ns_record(response: &[u8], offset: &mut usize, rdlength: u16) -> Result<QueryResponse> {
     // NS (2)
     if *offset + rdlength as usize > response.len() {
-        return Err(anyhow!(
-            "Malformed DNS response: NS record domain name incomplete"
-        ));
+        return Err(
+            Error::ProtocolData("Malformed DNS response: NS record incomplete".to_owned()).into(),
+        );
     }
 
     let mut ns_target = String::new();
