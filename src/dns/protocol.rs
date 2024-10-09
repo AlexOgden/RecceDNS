@@ -181,8 +181,8 @@ impl DnsQuestion {
 
     pub fn read(&mut self, buffer: &mut PacketBuffer) -> Result<()> {
         buffer.read_qname(&mut self.domain)?;
-        self.qtype = QueryType::from_number(buffer.read_u16()?); // qtype
-        let _class = buffer.read_u16()?;
+        self.qtype = QueryType::from_number(buffer.read_u16()?);
+        let _qclass = buffer.read_u16()?;
 
         Ok(())
     }
