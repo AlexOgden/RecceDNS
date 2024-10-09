@@ -1,5 +1,5 @@
 use crate::{
-    dns::types::QueryType,
+    dns::protocol::QueryType,
     io::validate::{dns_resolver_list, domain},
     network::types::TransportProtocol,
 };

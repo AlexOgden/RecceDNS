@@ -2,12 +2,12 @@ use colored::Colorize;
 
 use crate::{
     dns::{
+        protocol::{DnsQueryResponse, DnsRecord, QueryType},
         resolver::resolve_domain,
-        types::{QueryResponse, QueryType, ResponseType},
     },
     io::cli::CommandArgs,
 };
-use anyhow::{anyhow, Result};
+use anyhow::Result;
 use std::collections::HashSet;
 
 pub fn enumerate_records(args: &CommandArgs, dns_resolvers: &[&str]) -> Result<()> {
@@ -28,9 +28,12 @@ pub fn enumerate_records(args: &CommandArgs, dns_resolvers: &[&str]) -> Result<(
                 process_response(&mut seen_cnames, &response, resolver, args)?;
             }
             Err(err) => {
-                if err.to_string() != "No record found" {
-                    eprintln!("{err}");
-                    return Err(anyhow!("Error querying with resolver {resolver}"));
+                if !matches!(
+                    err.downcast_ref::<crate::dns::error::Error>(),
+                    Some(crate::dns::error::Error::NoRecordsFound)
+                ) {
+                    // Handle other errors
+                    eprintln!("{query_type} {err}");
                 }
             }
         }
@@ -53,12 +56,12 @@ fn get_query_types() -> Vec<QueryType> {
 
 fn process_response(
     seen_cnames: &mut HashSet<String>,
-    response: &[QueryResponse],
+    response: &[DnsQueryResponse],
     resolver: &str,
     args: &CommandArgs,
 ) -> Result<()> {
     for record in response {
-        if let ResponseType::CNAME(ref cname) = record.response_content {
+        if let DnsRecord::CNAME(ref cname) = record.response_content {
             if !seen_cnames.insert(cname.clone()) {
                 continue; // Skip if CNAME is already seen
             }
@@ -89,40 +92,46 @@ fn handle_ns_response(
         &args.transport_protocol,
     )?;
     for a_record in a_records {
-        if let ResponseType::IPv4(ip) = a_record.response_content {
-            result.push_str(&format!(" [{} {}]", "A".bold(), ip));
+        if let DnsRecord::A(record) = a_record.response_content {
+            result.push_str(&format!(" [{} {}]", "A".bold(), record.addr));
         }
     }
     for aaaa_record in aaaa_records {
-        if let ResponseType::IPv6(ip) = aaaa_record.response_content {
-            result.push_str(&format!(" [{} {}]", "AAAA".bold(), ip));
+        if let DnsRecord::AAAA(record) = aaaa_record.response_content {
+            result.push_str(&format!(" [{} {}]", "AAAA".bold(), record.addr));
         }
     }
     Ok(result)
 }
 
 fn create_query_response_string(
-    query_response: &QueryResponse,
+    query_response: &DnsQueryResponse,
     resolver: &str,
     args: &CommandArgs,
 ) -> Result<String> {
     let query_type_formatted = query_response.query_type.to_string().bold().bright_cyan();
     match &query_response.response_content {
-        ResponseType::IPv4(ip) => Ok(format_response(&query_type_formatted, &ip.to_string())),
-        ResponseType::IPv6(ip) => Ok(format_response(&query_type_formatted, &ip.to_string())),
-        ResponseType::TXT(txt_data) => Ok(format_response(&query_type_formatted, txt_data)),
-        ResponseType::CNAME(domain) | ResponseType::NS(domain) => {
-            if let ResponseType::NS(ns_domain) = &query_response.response_content {
+        DnsRecord::A(record) => Ok(format_response(
+            &query_type_formatted,
+            &record.addr.to_string(),
+        )),
+        DnsRecord::AAAA(record) => Ok(format_response(
+            &query_type_formatted,
+            &record.addr.to_string(),
+        )),
+        DnsRecord::TXT(txt_data) => Ok(format_response(&query_type_formatted, txt_data)),
+        DnsRecord::CNAME(domain) | DnsRecord::NS(domain) => {
+            if let DnsRecord::NS(ns_domain) = &query_response.response_content {
                 handle_ns_response(&query_type_formatted, domain, resolver, ns_domain, args)
             } else {
                 Ok(format_response(&query_type_formatted, domain))
             }
         }
-        ResponseType::MX(mx) => Ok(format!(
+        DnsRecord::MX(mx) => Ok(format!(
             "[{} {} {}]",
             query_type_formatted, mx.priority, mx.domain
         )),
-        ResponseType::SOA(soa) => Ok(format!(
+        DnsRecord::SOA(soa) => Ok(format!(
             "[{} {} {} {} {} {} {} {}]",
             query_type_formatted,
             soa.mname,

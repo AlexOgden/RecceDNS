@@ -8,6 +8,4 @@ pub enum Error {
     Network(String),
     #[error("Invalid data: {0}")]
     InvalidData(String),
-    #[error("Protocol error: {0}")]
-    ProtocolData(String),
 }
