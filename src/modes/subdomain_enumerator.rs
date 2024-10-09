@@ -7,9 +7,9 @@ use std::time::Duration;
 
 use crate::dns::resolver_selector;
 use crate::dns::{
+    protocol::{DnsQueryResponse, DnsRecord, QueryType},
     resolver::resolve_domain,
     resolver_selector::ResolverSelector,
-    types::{QueryResponse, QueryType, ResponseType},
 };
 use crate::io::{cli, cli::CommandArgs, wordlist};
 
@@ -134,22 +134,22 @@ fn check_wildcard_domain(args: &CommandArgs, dns_resolvers: &[&str]) -> Result<b
     Ok(true) // All random subdomains resolved, indicating a wildcard domain
 }
 
-fn create_query_response_string(query_result: &[QueryResponse]) -> String {
+fn create_query_response_string(query_result: &[DnsQueryResponse]) -> String {
     let query_responses: String = query_result
         .iter()
         .map(|response| {
             let query_type_formatted = response.query_type.to_string().bold();
             match &response.response_content {
-                ResponseType::IPv4(ip) => format!("[{query_type_formatted} {ip}]"),
-                ResponseType::IPv6(ip) => format!("[{query_type_formatted} {ip}]"),
-                ResponseType::TXT(txt_data) => format!("[{query_type_formatted} {txt_data}]"),
-                ResponseType::CNAME(domain) | ResponseType::NS(domain) => {
+                DnsRecord::A(record) => format!("[{} {}]", query_type_formatted, record.addr),
+                DnsRecord::AAAA(record) => format!("[{} {}]", query_type_formatted, record.addr),
+                DnsRecord::TXT(txt_data) => format!("[{query_type_formatted} {txt_data}]"),
+                DnsRecord::CNAME(domain) | DnsRecord::NS(domain) => {
                     format!("[{query_type_formatted} {domain}]")
                 }
-                ResponseType::MX(mx) => {
+                DnsRecord::MX(mx) => {
                     format!("[{} {} {}]", query_type_formatted, mx.priority, mx.domain)
                 }
-                ResponseType::SOA(soa) => format!(
+                DnsRecord::SOA(soa) => format!(
                     "[{} {} {} {} {} {} {} {}]",
                     query_type_formatted,
                     soa.mname,

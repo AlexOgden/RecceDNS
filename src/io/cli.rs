@@ -1,6 +1,7 @@
 use crate::{
-    dns::types::{QueryType, TransportProtocol},
+    dns::protocol::QueryType,
     io::validate::{dns_resolver_list, domain},
+    network::types::TransportProtocol,
 };
 use clap::{Parser, ValueEnum};
 use colored::Colorize;

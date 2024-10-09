@@ -1,11 +1,12 @@
 mod dns;
 mod io;
 mod modes;
+mod network;
 
 use anyhow::{ensure, Result};
 use colored::Colorize;
-use dns::network_check;
 use io::cli::{CommandArgs, OperationMode};
+use network::net_check;
 
 fn main() -> Result<()> {
     let args = io::cli::get_parsed_args();
@@ -36,7 +37,7 @@ fn validate_dns_resolvers<'a>(args: &'a CommandArgs, dns_resolvers: Vec<&'a str>
     if args.no_dns_check {
         dns_resolvers
     } else {
-        match network_check::check_server_list(&dns_resolvers, &args.transport_protocol) {
+        match net_check::check_server_list(&dns_resolvers, &args.transport_protocol) {
             Ok(()) => {
                 let status = format!("[{}]", "OK".green());
                 println!("DNS Resolvers: {:>width$}\n", status, width = 16);
