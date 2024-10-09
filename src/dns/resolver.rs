@@ -1,7 +1,7 @@
 use anyhow::{Context, Result};
 
 use crate::dns::error::Error;
-use crate::dns::protocol::{DnsQueryResponse, DnsRecord, QueryType};
+use crate::dns::protocol::{DnsQueryResponse, QueryType};
 use crate::io::packet_buffer::PacketBuffer;
 use crate::network::types::TransportProtocol;
 use once_cell::sync::Lazy;
