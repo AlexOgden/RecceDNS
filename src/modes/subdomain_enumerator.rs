@@ -142,9 +142,9 @@ fn create_query_response_string(query_result: &[DnsQueryResponse]) -> String {
             match &response.response_content {
                 DnsRecord::A(record) => format!("[{} {}]", query_type_formatted, record.addr),
                 DnsRecord::AAAA(record) => format!("[{} {}]", query_type_formatted, record.addr),
-                DnsRecord::TXT(txt_data) => format!("[{query_type_formatted} {txt_data}]"),
+                DnsRecord::TXT(txt_data) => format!("[{query_type_formatted} {0}]", txt_data.data),
                 DnsRecord::CNAME(domain) | DnsRecord::NS(domain) => {
-                    format!("[{query_type_formatted} {domain}]")
+                    format!("[{query_type_formatted} {0}]", domain.data)
                 }
                 DnsRecord::MX(mx) => {
                     format!("[{} {} {}]", query_type_formatted, mx.priority, mx.domain)

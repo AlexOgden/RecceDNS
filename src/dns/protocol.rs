@@ -200,13 +200,13 @@ impl DnsQuestion {
 
 #[derive(Clone, Eq, PartialEq, Hash, Debug)]
 pub enum DnsRecord {
-    A(ARecord),
-    AAAA(AAAARecord),
-    MX(MxRecord),
-    TXT(String),
-    CNAME(String),
-    SOA(SoaRecord),
-    NS(String),
+    A(DnsRecordA),
+    AAAA(DnsRecordAAAA),
+    MX(DnsRecordMX),
+    TXT(DnsRecordTxt),
+    CNAME(DnsRecordTxt),
+    SOA(DnsRecordSOA),
+    NS(DnsRecordTxt),
 }
 
 impl DnsRecord {
@@ -226,9 +226,9 @@ impl DnsRecord {
             QueryType::A => Self::parse_a_record(buffer, domain, ttl),
             QueryType::AAAA => Self::parse_aaaa_record(buffer, domain, ttl),
             QueryType::MX => Self::parse_mx_record(buffer, ttl),
-            QueryType::TXT => Self::parse_txt_record(buffer),
-            QueryType::CNAME => Self::parse_cname_record(buffer),
-            QueryType::NS => Self::parse_ns_record(buffer),
+            QueryType::TXT => Self::parse_txt_record(buffer, ttl),
+            QueryType::CNAME => Self::parse_cname_record(buffer, ttl),
+            QueryType::NS => Self::parse_ns_record(buffer, ttl),
             QueryType::SOA => Self::parse_soa_record(buffer),
             QueryType::Any => Err(anyhow!("Unsupported query type {qtype}")),
         }
@@ -238,7 +238,7 @@ impl DnsRecord {
         let start_pos = buffer.pos();
 
         match *self {
-            Self::A(ARecord {
+            Self::A(DnsRecordA {
                 ref domain,
                 ref addr,
                 ttl,
@@ -276,7 +276,7 @@ impl DnsRecord {
 
         Ok(DnsQueryResponse {
             query_type: QueryType::A,
-            response_content: Self::A(ARecord { domain, addr, ttl }),
+            response_content: Self::A(DnsRecordA { domain, addr, ttl }),
         })
     }
 
@@ -302,7 +302,7 @@ impl DnsRecord {
 
         Ok(DnsQueryResponse {
             query_type: QueryType::AAAA,
-            response_content: Self::AAAA(AAAARecord { domain, addr, ttl }),
+            response_content: Self::AAAA(DnsRecordAAAA { domain, addr, ttl }),
         })
     }
 
@@ -313,7 +313,7 @@ impl DnsRecord {
 
         Ok(DnsQueryResponse {
             query_type: QueryType::MX,
-            response_content: Self::MX(MxRecord {
+            response_content: Self::MX(DnsRecordMX {
                 ttl,
                 priority,
                 domain: mx_domain,
@@ -321,7 +321,7 @@ impl DnsRecord {
         })
     }
 
-    fn parse_txt_record(buffer: &mut PacketBuffer) -> Result<DnsQueryResponse> {
+    fn parse_txt_record(buffer: &mut PacketBuffer, ttl: u32) -> Result<DnsQueryResponse> {
         let mut txt_data = String::new();
 
         let data_len = buffer.read_u8()?;
@@ -331,27 +331,33 @@ impl DnsRecord {
 
         Ok(DnsQueryResponse {
             query_type: QueryType::TXT,
-            response_content: Self::TXT(txt_data),
+            response_content: Self::TXT(DnsRecordTxt {
+                ttl,
+                data: txt_data,
+            }),
         })
     }
 
-    fn parse_cname_record(buffer: &mut PacketBuffer) -> Result<DnsQueryResponse> {
+    fn parse_cname_record(buffer: &mut PacketBuffer, ttl: u32) -> Result<DnsQueryResponse> {
         let mut cname = String::new();
         buffer.read_qname(&mut cname)?;
 
         Ok(DnsQueryResponse {
             query_type: QueryType::CNAME,
-            response_content: Self::CNAME(cname),
+            response_content: Self::CNAME(DnsRecordTxt { ttl, data: cname }),
         })
     }
 
-    fn parse_ns_record(buffer: &mut PacketBuffer) -> Result<DnsQueryResponse> {
+    fn parse_ns_record(buffer: &mut PacketBuffer, ttl: u32) -> Result<DnsQueryResponse> {
         let mut ns_domain = String::new();
         buffer.read_qname(&mut ns_domain)?;
 
         Ok(DnsQueryResponse {
             query_type: QueryType::NS,
-            response_content: Self::NS(ns_domain),
+            response_content: Self::NS(DnsRecordTxt {
+                ttl,
+                data: ns_domain,
+            }),
         })
     }
 
@@ -370,7 +376,7 @@ impl DnsRecord {
 
         Ok(DnsQueryResponse {
             query_type: QueryType::SOA,
-            response_content: Self::SOA(SoaRecord {
+            response_content: Self::SOA(DnsRecordSOA {
                 mname,
                 rname,
                 serial,
@@ -384,28 +390,28 @@ impl DnsRecord {
 }
 
 #[derive(Clone, Eq, PartialEq, Hash, Debug)]
-pub struct ARecord {
+pub struct DnsRecordA {
     pub domain: String,
     pub addr: Ipv4Addr,
     pub ttl: u32,
 }
 
 #[derive(Clone, Eq, PartialEq, Hash, Debug)]
-pub struct AAAARecord {
+pub struct DnsRecordAAAA {
     pub domain: String,
     pub addr: Ipv6Addr,
     pub ttl: u32,
 }
 
 #[derive(Clone, Eq, PartialEq, Hash, Debug)]
-pub struct MxRecord {
+pub struct DnsRecordMX {
     pub ttl: u32,
     pub priority: u16,
     pub domain: String,
 }
 
 #[derive(Clone, Eq, PartialEq, Hash, Debug)]
-pub struct SoaRecord {
+pub struct DnsRecordSOA {
     pub mname: String,
     pub rname: String,
     pub serial: u32,
@@ -413,6 +419,12 @@ pub struct SoaRecord {
     pub retry: u32,
     pub expire: u32,
     pub minimum: u32,
+}
+
+#[derive(Clone, Eq, PartialEq, Hash, Debug)]
+pub struct DnsRecordTxt {
+    pub ttl: u32,
+    pub data: String,
 }
 
 #[derive(Clone, Eq, PartialEq, Hash, Debug)]
@@ -580,7 +592,7 @@ mod tests {
     #[test]
     fn test_dns_record_read_write() {
         let mut buffer = PacketBuffer::new();
-        let record = DnsRecord::A(ARecord {
+        let record = DnsRecord::A(DnsRecordA {
             domain: "example.com".to_string(),
             addr: Ipv4Addr::new(127, 0, 0, 1),
             ttl: 3600,
@@ -603,7 +615,7 @@ mod tests {
             .push(DnsQuestion::new("example.com".to_string(), QueryType::A));
         packet.answers.push(DnsQueryResponse {
             query_type: QueryType::A,
-            response_content: DnsRecord::A(ARecord {
+            response_content: DnsRecord::A(DnsRecordA {
                 domain: "example.com".to_string(),
                 addr: Ipv4Addr::new(127, 0, 0, 1),
                 ttl: 3600,

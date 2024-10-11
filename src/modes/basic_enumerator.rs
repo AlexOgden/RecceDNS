@@ -62,7 +62,7 @@ fn process_response(
 ) -> Result<()> {
     for record in response {
         if let DnsRecord::CNAME(ref cname) = record.response_content {
-            if !seen_cnames.insert(cname.clone()) {
+            if !seen_cnames.insert(cname.data.clone()) {
                 continue; // Skip if CNAME is already seen
             }
         }
@@ -119,14 +119,15 @@ fn create_query_response_string(
             &query_type_formatted,
             &record.addr.to_string(),
         )),
-        DnsRecord::TXT(txt_data) => Ok(format_response(&query_type_formatted, txt_data)),
-        DnsRecord::CNAME(domain) | DnsRecord::NS(domain) => {
-            if let DnsRecord::NS(ns_domain) = &query_response.response_content {
-                handle_ns_response(&query_type_formatted, domain, resolver, ns_domain, args)
-            } else {
-                Ok(format_response(&query_type_formatted, domain))
-            }
-        }
+        DnsRecord::TXT(txt_data) => Ok(format_response(&query_type_formatted, &txt_data.data)),
+        DnsRecord::CNAME(cname) => Ok(format_response(&query_type_formatted, &cname.data)),
+        DnsRecord::NS(domain) => handle_ns_response(
+            &query_type_formatted,
+            &domain.data,
+            resolver,
+            &domain.data,
+            args,
+        ),
         DnsRecord::MX(mx) => Ok(format!(
             "[{} {} {}]",
             query_type_formatted, mx.priority, mx.domain
