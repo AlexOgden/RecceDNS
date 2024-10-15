@@ -14,26 +14,13 @@ use crate::dns::{
 use crate::io::{cli, cli::CommandArgs, wordlist};
 
 pub fn enumerate_subdomains(args: &CommandArgs, dns_resolvers: &[&str]) -> Result<()> {
-    let record_query_type = &args.query_type;
-    let subdomains: Vec<String>;
-
-    if let Some(wordlist_path) = &args.wordlist {
-        subdomains = wordlist::read_from_file(wordlist_path)?;
-    } else {
-        return Err(anyhow!(
-            "Wordlist path is required for subdomain enumeration"
-        ));
-    }
-
     if handle_wildcard_domain(args, dns_resolvers)? {
         return Ok(());
     }
 
-    let mut resolver_selector: Box<dyn ResolverSelector> = if args.use_random {
-        Box::new(resolver_selector::Random)
-    } else {
-        Box::new(resolver_selector::Sequential::new())
-    };
+    let record_query_type = &args.query_type;
+    let subdomains: Vec<String> = read_wordlist(&args.wordlist)?;
+    let mut resolver_selector = setup_resolver_selector(args);
 
     let total_subdomains = subdomains.len() as u64;
     let progress_bar = cli::setup_progress_bar(subdomains.len() as u64);
@@ -80,6 +67,24 @@ pub fn enumerate_subdomains(args: &CommandArgs, dns_resolvers: &[&str]) -> Resul
 
     println!("\nDone! Found {found_count} subdomains");
     Ok(())
+}
+
+fn setup_resolver_selector(args: &CommandArgs) -> Box<dyn ResolverSelector> {
+    if args.use_random {
+        Box::new(resolver_selector::Random)
+    } else {
+        Box::new(resolver_selector::Sequential::new())
+    }
+}
+
+fn read_wordlist(wordlist_path: &Option<String>) -> Result<Vec<String>> {
+    if let Some(path) = wordlist_path {
+        Ok(wordlist::read_from_file(path)?)
+    } else {
+        Err(anyhow!(
+            "Wordlist path is required for subdomain enumeration"
+        ))
+    }
 }
 
 fn handle_wildcard_domain(args: &CommandArgs, dns_resolvers: &[&str]) -> Result<bool> {
