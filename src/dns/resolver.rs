@@ -45,7 +45,7 @@ pub fn resolve_domain(
     transport_protocol: &TransportProtocol,
 ) -> Result<Vec<DnsQueryResponse>> {
     let mut all_results = HashSet::new();
-    let socket = initialize_udp_socket()?;
+    let udp_socket = initialize_udp_socket()?;
 
     let query_types: Vec<&QueryType> = match query_type {
         QueryType::Any => vec![
@@ -58,7 +58,8 @@ pub fn resolve_domain(
     };
 
     for qt in query_types {
-        let query_result = execute_dns_query(&socket, transport_protocol, dns_server, domain, qt)?;
+        let query_result =
+            execute_dns_query(&udp_socket, transport_protocol, dns_server, domain, qt)?;
 
         for response in query_result.answers {
             all_results.insert(response);
