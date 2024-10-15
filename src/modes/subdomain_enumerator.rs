@@ -5,6 +5,7 @@ use std::io::{self, Write};
 use std::thread;
 use std::time::Duration;
 
+use crate::dns::error::DnsError;
 use crate::dns::resolver_selector;
 use crate::dns::{
     protocol::{DnsQueryResponse, DnsRecord, QueryType},
@@ -195,23 +196,27 @@ fn print_query_result(args: &CommandArgs, subdomain: &str, resolver: &str, respo
     }
 }
 
-fn print_query_error(args: &CommandArgs, subdomain: &str, resolver: &str, err: &anyhow::Error) {
+fn print_query_error(args: &CommandArgs, subdomain: &str, resolver: &str, error: &DnsError) {
+    let domain = format!(
+        "{}.{}",
+        subdomain.red().bold(),
+        args.target_domain.blue().italic()
+    );
+
     if args.verbose {
-        let domain = format!(
-            "{}.{}",
-            subdomain.red().bold(),
-            args.target_domain.blue().italic()
-        );
         if args.show_resolver {
             eprintln!(
-                "\r[{}] {} [resolver: {}] {:?}",
+                "\r[{}] {} [resolver: {}] {}",
                 "-".red(),
                 domain,
                 resolver.magenta(),
-                err
+                error
             );
         } else {
-            eprintln!("\r[{}] {} {:?}", "-".red(), domain, err);
+            eprintln!("\r[{}] {} {}", "-".red(), domain, error);
         }
+    } else if !matches!(error, DnsError::NoRecordsFound) {
+        // Print the error message if it's not NoRecordsFound, even if verbose is off
+        eprintln!("\r[{}] {} {}", "-".red(), domain, error);
     }
 }

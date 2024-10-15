@@ -1,6 +1,6 @@
 use anyhow::{Context, Result};
 
-use crate::dns::error::Error;
+use crate::dns::error::DnsError;
 use crate::dns::protocol::{DnsQueryResponse, QueryType};
 use crate::io::packet_buffer::PacketBuffer;
 use crate::network::types::TransportProtocol;
@@ -43,9 +43,10 @@ pub fn resolve_domain(
     domain: &str,
     query_type: &QueryType,
     transport_protocol: &TransportProtocol,
-) -> Result<Vec<DnsQueryResponse>> {
+) -> Result<Vec<DnsQueryResponse>, DnsError> {
     let mut all_results = HashSet::new();
-    let udp_socket = initialize_udp_socket()?;
+    let udp_socket =
+        initialize_udp_socket().map_err(|error| DnsError::Network(error.to_string()))?;
 
     let query_types: Vec<&QueryType> = match query_type {
         QueryType::Any => vec![
@@ -67,7 +68,7 @@ pub fn resolve_domain(
     }
 
     if all_results.is_empty() {
-        Err(Error::NoRecordsFound.into())
+        Err(DnsError::NoRecordsFound)
     } else {
         Ok(all_results.into_iter().collect())
     }
@@ -79,7 +80,7 @@ fn execute_dns_query(
     dns_server: &str,
     domain: &str,
     query_type: &QueryType,
-) -> Result<DnsPacket> {
+) -> Result<DnsPacket, DnsError> {
     let dns_server_address = format!("{dns_server}:{DNS_PORT}");
 
     let mut query = build_dns_query(domain, query_type)?;
@@ -96,9 +97,13 @@ fn execute_dns_query(
     parse_dns_response(&response)
 }
 
-fn send_dns_query_udp(socket: &UdpSocket, query: &[u8], dns_server: &str) -> Result<Vec<u8>> {
+fn send_dns_query_udp(
+    socket: &UdpSocket,
+    query: &[u8],
+    dns_server: &str,
+) -> Result<Vec<u8>, DnsError> {
     socket.send_to(query, dns_server).map_err(|error| {
-        Error::Network(format!(
+        DnsError::Network(format!(
             "Failed to send query to {dns_server} (UDP): {error}"
         ))
     })?;
@@ -106,38 +111,48 @@ fn send_dns_query_udp(socket: &UdpSocket, query: &[u8], dns_server: &str) -> Res
     let mut response_buffer = [0; UDP_BUFFER_SIZE];
     let (bytes_received, _) = socket
         .recv_from(&mut response_buffer)
-        .map_err(|error| Error::Network(format!("Failed to receive response (UDP): {error}")))?;
+        .map_err(|error| DnsError::Network(format!("Failed to receive response (UDP): {error}")))?;
 
     Ok(response_buffer[..bytes_received].to_vec())
 }
 
-fn send_dns_query_tcp(query: &[u8], dns_server: &str) -> Result<Vec<u8>> {
+fn send_dns_query_tcp(query: &[u8], dns_server: &str) -> Result<Vec<u8>, DnsError> {
     let mut stream = TcpStream::connect(dns_server).map_err(|error| {
-        Error::Network(format!("Failed to connect to {dns_server} (TCP): {error}"))
+        DnsError::Network(format!("Failed to connect to {dns_server} (TCP): {error}"))
     })?;
 
     // Prefix the query with its length (2 bytes, big-endian)
     let query_len = u16::try_from(query.len())
-        .map_err(|_| Error::InvalidData("Query length exceeds u16 maximum value".to_owned()))?
+        .map_err(|_| DnsError::InvalidData("Query length exceeds u16 maximum value".to_owned()))?
         .to_be_bytes();
-    stream.write_all(&query_len)?;
-    stream.write_all(query)?;
+    stream
+        .write_all(&query_len)
+        .map_err(|error| DnsError::Network(format!("Failed to write query length: {error}")))?;
+    stream
+        .write_all(query)
+        .map_err(|error| DnsError::Network(format!("Failed to write query: {error}")))?;
 
     // Read the length of the response (2 bytes, big-endian)
     let mut len_buffer = [0; 2];
-    stream.read_exact(&mut len_buffer)?;
+    stream
+        .read_exact(&mut len_buffer)
+        .map_err(|_| DnsError::Network("Failed to read response length".to_owned()))?;
     let response_len = u16::from_be_bytes(len_buffer) as usize;
 
     // Read the response
     let mut response_buffer = vec![0; response_len];
-    stream.read_exact(&mut response_buffer)?;
+    stream
+        .read_exact(&mut response_buffer)
+        .map_err(|_| DnsError::Network("Failed to read response".to_owned()))?;
 
     Ok(response_buffer)
 }
 
-fn build_dns_query(domain: &str, query_type: &QueryType) -> Result<DnsPacket> {
+fn build_dns_query(domain: &str, query_type: &QueryType) -> Result<DnsPacket, DnsError> {
     if domain.is_empty() {
-        return Err(Error::InvalidData("Domain name cannot be empty".to_owned()).into());
+        return Err(DnsError::InvalidData(
+            "Domain name cannot be empty".to_owned(),
+        ));
     }
 
     let mut packet = DnsPacket::new();
@@ -151,9 +166,11 @@ fn build_dns_query(domain: &str, query_type: &QueryType) -> Result<DnsPacket> {
     Ok(packet)
 }
 
-fn parse_dns_response(response: &[u8]) -> Result<DnsPacket> {
+fn parse_dns_response(response: &[u8]) -> Result<DnsPacket, DnsError> {
     let mut packet_buffer = PacketBuffer::new();
-    packet_buffer.set_data(response)?;
+    packet_buffer
+        .set_data(response)
+        .map_err(|_| DnsError::InvalidData("Invalid response".to_owned()))?;
 
     let dns_packet = DnsPacket::from_buffer(&mut packet_buffer)?;
 

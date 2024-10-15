@@ -2,6 +2,7 @@ use colored::Colorize;
 
 use crate::{
     dns::{
+        error::DnsError,
         protocol::{DnsQueryResponse, DnsRecord, QueryType},
         resolver::resolve_domain,
     },
@@ -28,10 +29,7 @@ pub fn enumerate_records(args: &CommandArgs, dns_resolvers: &[&str]) -> Result<(
                 process_response(&mut seen_cnames, &response, resolver, args)?;
             }
             Err(err) => {
-                if !matches!(
-                    err.downcast_ref::<crate::dns::error::Error>(),
-                    Some(crate::dns::error::Error::NoRecordsFound)
-                ) {
+                if !matches!(err, crate::dns::error::DnsError::NoRecordsFound) {
                     // Handle other errors
                     eprintln!("{query_type} {err}");
                 }
@@ -82,25 +80,38 @@ fn handle_ns_response(
     resolver: &str,
     ns_domain: &str,
     args: &CommandArgs,
-) -> Result<String> {
+) -> Result<String, DnsError> {
     let mut result = format_response(query_type_formatted, domain);
-    let a_records = resolve_domain(resolver, ns_domain, &QueryType::A, &args.transport_protocol)?;
-    let aaaa_records = resolve_domain(
+
+    match resolve_domain(resolver, ns_domain, &QueryType::A, &args.transport_protocol) {
+        Ok(a_records) => {
+            for a_record in a_records {
+                if let DnsRecord::A(record) = a_record.response_content {
+                    result.push_str(&format!(" [{} {}]", "A".bold(), record.addr));
+                }
+            }
+        }
+        Err(DnsError::NoRecordsFound) => {}
+        Err(err) => return Err(err),
+    }
+
+    match resolve_domain(
         resolver,
         ns_domain,
         &QueryType::AAAA,
         &args.transport_protocol,
-    )?;
-    for a_record in a_records {
-        if let DnsRecord::A(record) = a_record.response_content {
-            result.push_str(&format!(" [{} {}]", "A".bold(), record.addr));
+    ) {
+        Ok(aaaa_records) => {
+            for aaaa_record in aaaa_records {
+                if let DnsRecord::AAAA(record) = aaaa_record.response_content {
+                    result.push_str(&format!(" [{} {}]", "AAAA".bold(), record.addr));
+                }
+            }
         }
+        Err(DnsError::NoRecordsFound) => {}
+        Err(err) => return Err(err),
     }
-    for aaaa_record in aaaa_records {
-        if let DnsRecord::AAAA(record) = aaaa_record.response_content {
-            result.push_str(&format!(" [{} {}]", "AAAA".bold(), record.addr));
-        }
-    }
+
     Ok(result)
 }
 
@@ -121,13 +132,13 @@ fn create_query_response_string(
         )),
         DnsRecord::TXT(txt_data) => Ok(format_response(&query_type_formatted, &txt_data.data)),
         DnsRecord::CNAME(cname) => Ok(format_response(&query_type_formatted, &cname.data)),
-        DnsRecord::NS(domain) => handle_ns_response(
+        DnsRecord::NS(domain) => Ok(handle_ns_response(
             &query_type_formatted,
             &domain.data,
             resolver,
             &domain.data,
             args,
-        ),
+        )?),
         DnsRecord::MX(mx) => Ok(format!(
             "[{} {} {}]",
             query_type_formatted, mx.priority, mx.domain

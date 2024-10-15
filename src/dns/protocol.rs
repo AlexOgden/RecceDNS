@@ -8,6 +8,8 @@ use strum_macros::Display;
 
 use crate::io::packet_buffer::PacketBuffer;
 
+use super::error::DnsError;
+
 trait MapFromNumber {
     fn from_number(num: u16) -> Self;
     fn to_number(&self) -> u16;
@@ -453,56 +455,71 @@ impl DnsPacket {
         }
     }
 
-    pub fn from_buffer(buffer: &mut PacketBuffer) -> Result<Self> {
+    pub fn from_buffer(buffer: &mut PacketBuffer) -> Result<Self, DnsError> {
         let mut result = Self::new();
         result
             .header
             .read(buffer)
-            .context("Failed to read DNS header")?;
+            .map_err(|_| DnsError::ProtocolData("Failed to read DNS header".to_owned()))?;
 
         for _ in 0..result.header.questions {
             let mut question = DnsQuestion::new(String::new(), QueryType::Any);
             question
                 .read(buffer)
-                .context("Failed to read DNS question")?;
+                .map_err(|_| DnsError::ProtocolData("Failed to read DNS question".to_owned()))?;
             result.questions.push(question);
         }
 
         for _ in 0..result.header.answers {
-            let rec = DnsRecord::read(buffer).context("Failed to read DNS answer")?;
+            let rec = DnsRecord::read(buffer)
+                .map_err(|_| DnsError::ProtocolData("Failed to read DNS answer".to_owned()))?;
             result.answers.push(rec);
         }
         for _ in 0..result.header.authoritative_entries {
-            let rec = DnsRecord::read(buffer).context("Failed to read DNS authoritative entry")?;
+            let rec = DnsRecord::read(buffer).map_err(|_| {
+                DnsError::ProtocolData("Failed to read DNS authoritative entry".to_owned())
+            })?;
             result.authorities.push(rec);
         }
         for _ in 0..result.header.resource_entries {
-            let rec = DnsRecord::read(buffer).context("Failed to read DNS resource entry")?;
+            let rec = DnsRecord::read(buffer).map_err(|_| {
+                DnsError::ProtocolData("Failed to read DNS resource entry".to_owned())
+            })?;
             result.resources.push(rec);
         }
 
         Ok(result)
     }
 
-    pub fn write(&mut self, buffer: &mut PacketBuffer) -> Result<()> {
+    pub fn write(&mut self, buffer: &mut PacketBuffer) -> Result<(), DnsError> {
         self.header.questions = u16::try_from(self.questions.len()).unwrap_or(0);
         self.header.answers = u16::try_from(self.answers.len()).unwrap_or(0);
         self.header.authoritative_entries = u16::try_from(self.authorities.len()).unwrap_or(0);
         self.header.resource_entries = u16::try_from(self.resources.len()).unwrap_or(0);
 
-        self.header.write(buffer)?;
+        self.header
+            .write(buffer)
+            .map_err(|_| DnsError::ProtocolData("Failed to write DNS header".to_owned()))?;
 
         for question in &self.questions {
-            question.write(buffer)?;
+            question
+                .write(buffer)
+                .map_err(|_| DnsError::ProtocolData("Failed to write DNS question".to_owned()))?;
         }
         for rec in &self.answers {
-            rec.response_content.write(buffer)?;
+            rec.response_content
+                .write(buffer)
+                .map_err(|_| DnsError::ProtocolData("Failed to write DNS answer".to_owned()))?;
         }
         for rec in &self.authorities {
-            rec.response_content.write(buffer)?;
+            rec.response_content.write(buffer).map_err(|_| {
+                DnsError::ProtocolData("Failed to write DNS authoritative entry".to_owned())
+            })?;
         }
         for rec in &self.resources {
-            rec.response_content.write(buffer)?;
+            rec.response_content.write(buffer).map_err(|_| {
+                DnsError::ProtocolData("Failed to write DNS resource entry".to_owned())
+            })?;
         }
 
         Ok(())
