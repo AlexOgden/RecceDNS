@@ -1,6 +1,7 @@
 use anyhow::{anyhow, Result};
 use colored::Colorize;
 use rand::Rng;
+use std::collections::VecDeque;
 use std::io::{self, Write};
 use std::thread;
 use std::time::Duration;
@@ -27,6 +28,7 @@ pub fn enumerate_subdomains(args: &CommandArgs, dns_resolvers: &[&str]) -> Resul
     let progress_bar = cli::setup_progress_bar(subdomains.len() as u64);
 
     let mut found_count: u32 = 0;
+    let mut failed_queries: VecDeque<String> = VecDeque::new();
 
     for (index, subdomain) in subdomains.iter().enumerate() {
         let query_resolver = resolver_selector.select(dns_resolvers)?;
@@ -51,7 +53,10 @@ pub fn enumerate_subdomains(args: &CommandArgs, dns_resolvers: &[&str]) -> Resul
                 found_count += 1;
             }
             Err(err) => {
-                print_query_error(args, subdomain, query_resolver, &err);
+                if !matches!(err, DnsError::NoRecordsFound) {
+                    failed_queries.push_back(fqdn.clone());
+                }
+                print_query_error(args, subdomain, query_resolver, &err, false);
             }
         }
 
@@ -64,9 +69,56 @@ pub fn enumerate_subdomains(args: &CommandArgs, dns_resolvers: &[&str]) -> Resul
         }
     }
 
-    progress_bar.finish_and_clear();
+    // Retry failed queries
+    if !failed_queries.is_empty() {
+        let count = failed_queries.len();
+        progress_bar.finish_and_clear();
+        println!(
+            "\n[{}] Retrying {} failed queries",
+            "!".bright_yellow(),
+            count.to_string().bold()
+        );
+    }
+    let mut retry_failed_count: u32 = 0;
+    while let Some(fqdn) = failed_queries.pop_front() {
+        println!(
+            "[{}] Retrying failed query: {}",
+            "!".bright_yellow(),
+            fqdn.bold()
+        );
 
-    println!("\nDone! Found {found_count} subdomains");
+        let query_resolver = resolver_selector.select(dns_resolvers)?;
+
+        match resolve_domain(
+            query_resolver,
+            &fqdn,
+            record_query_type,
+            &args.transport_protocol,
+        ) {
+            Ok(mut response) => {
+                response.sort_by(|a, b| a.query_type.cmp(&b.query_type));
+
+                let response_data_string = create_query_response_string(&response);
+                print_query_result(args, &fqdn, query_resolver, &response_data_string);
+                found_count += 1;
+            }
+            Err(err) => {
+                if !matches!(err, DnsError::NoRecordsFound) {
+                    retry_failed_count += 1;
+                }
+                print_query_error(args, &fqdn, query_resolver, &err, true);
+            }
+        }
+    }
+
+    println!(
+        "\n[{}] Done! Found {} subdomains",
+        "~".green(),
+        found_count.to_string().bold()
+    );
+    if retry_failed_count > 0 {
+        println!("Failed to resolve {retry_failed_count} subdomains after retries");
+    }
     Ok(())
 }
 
@@ -196,14 +248,20 @@ fn print_query_result(args: &CommandArgs, subdomain: &str, resolver: &str, respo
     }
 }
 
-fn print_query_error(args: &CommandArgs, subdomain: &str, resolver: &str, error: &DnsError) {
+fn print_query_error(
+    args: &CommandArgs,
+    subdomain: &str,
+    resolver: &str,
+    error: &DnsError,
+    retry: bool,
+) {
     let domain = format!(
         "{}.{}",
         subdomain.red().bold(),
         args.target_domain.blue().italic()
     );
 
-    if args.verbose {
+    if args.verbose || retry {
         if args.show_resolver {
             eprintln!(
                 "\r[{}] {} [resolver: {}] {}",
