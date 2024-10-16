@@ -55,6 +55,10 @@ pub struct CommandArgs {
     #[arg(long)]
     pub no_dns_check: bool,
 
+    /// Don't retry failed queries
+    #[arg(long)]
+    pub no_retry: bool,
+
     /// Don't print a summary of selected options
     #[arg(long)]
     pub no_print_options: bool,

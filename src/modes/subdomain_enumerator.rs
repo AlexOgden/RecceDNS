@@ -48,7 +48,7 @@ pub fn enumerate_subdomains(args: &CommandArgs, dns_resolvers: &[&str]) -> Resul
                 found_count += 1;
             }
             Err(err) => {
-                if !matches!(err, DnsError::NoRecordsFound) {
+                if !matches!(err, DnsError::NoRecordsFound) && !args.no_retry {
                     failed_queries.push_back(subdomain.clone());
                 }
                 print_query_error(args, subdomain, query_resolver, &err, false);
