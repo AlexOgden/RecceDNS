@@ -32,12 +32,7 @@ pub fn enumerate_subdomains(args: &CommandArgs, dns_resolvers: &[&str]) -> Resul
 
     for (index, subdomain) in subdomains.iter().enumerate() {
         let query_resolver = resolver_selector.select(dns_resolvers)?;
-
-        let fqdn = if subdomain.is_empty() {
-            args.target_domain.clone()
-        } else {
-            format!("{}.{}", subdomain, args.target_domain)
-        };
+        let fqdn = format!("{}.{}", subdomain, args.target_domain);
 
         match resolve_domain(
             query_resolver,
@@ -54,7 +49,7 @@ pub fn enumerate_subdomains(args: &CommandArgs, dns_resolvers: &[&str]) -> Resul
             }
             Err(err) => {
                 if !matches!(err, DnsError::NoRecordsFound) {
-                    failed_queries.push_back(fqdn.clone());
+                    failed_queries.push_back(subdomain.clone());
                 }
                 print_query_error(args, subdomain, query_resolver, &err, false);
             }
@@ -80,14 +75,9 @@ pub fn enumerate_subdomains(args: &CommandArgs, dns_resolvers: &[&str]) -> Resul
         );
     }
     let mut retry_failed_count: u32 = 0;
-    while let Some(fqdn) = failed_queries.pop_front() {
-        println!(
-            "[{}] Retrying failed query: {}",
-            "!".bright_yellow(),
-            fqdn.bold()
-        );
-
+    while let Some(subdomain) = failed_queries.pop_front() {
         let query_resolver = resolver_selector.select(dns_resolvers)?;
+        let fqdn = format!("{}.{}", subdomain, args.target_domain);
 
         match resolve_domain(
             query_resolver,
@@ -99,14 +89,14 @@ pub fn enumerate_subdomains(args: &CommandArgs, dns_resolvers: &[&str]) -> Resul
                 response.sort_by(|a, b| a.query_type.cmp(&b.query_type));
 
                 let response_data_string = create_query_response_string(&response);
-                print_query_result(args, &fqdn, query_resolver, &response_data_string);
+                print_query_result(args, &subdomain, query_resolver, &response_data_string);
                 found_count += 1;
             }
             Err(err) => {
                 if !matches!(err, DnsError::NoRecordsFound) {
                     retry_failed_count += 1;
                 }
-                print_query_error(args, &fqdn, query_resolver, &err, true);
+                print_query_error(args, &subdomain, query_resolver, &err, true);
             }
         }
     }
