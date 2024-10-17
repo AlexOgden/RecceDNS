@@ -82,36 +82,49 @@ fn handle_ns_response(
     ns_domain: &str,
     args: &CommandArgs,
 ) -> Result<String, DnsError> {
-    let mut result = format_response(query_type_formatted, domain);
-
-    match resolve_domain(resolver, ns_domain, &QueryType::A, &args.transport_protocol) {
-        Ok(a_records) => {
-            for a_record in a_records {
-                if let DnsRecord::A(record) = a_record.response_content {
-                    result.push_str(&format!(" [{} {}]", "A".bold(), record.addr));
+    fn append_records(
+        result: &mut String,
+        resolver: &str,
+        ns_domain: &str,
+        query_type: &QueryType,
+        transport_protocol: &TransportProtocol,
+    ) -> Result<(), DnsError> {
+        match resolve_domain(resolver, ns_domain, query_type, transport_protocol) {
+            Ok(records) => {
+                for record in records {
+                    match record.response_content {
+                        DnsRecord::A(record) => {
+                            result.push_str(&format!(" [{} {}]", "A".bold(), record.addr));
+                        }
+                        DnsRecord::AAAA(record) => {
+                            result.push_str(&format!(" [{} {}]", "AAAA".bold(), record.addr));
+                        }
+                        _ => {}
+                    }
                 }
+                Ok(())
             }
+            Err(DnsError::NoRecordsFound) => Ok(()),
+            Err(err) => Err(err),
         }
-        Err(DnsError::NoRecordsFound) => {}
-        Err(err) => return Err(err),
     }
 
-    match resolve_domain(
+    let mut result = format_response(query_type_formatted, domain);
+
+    append_records(
+        &mut result,
+        resolver,
+        ns_domain,
+        &QueryType::A,
+        &args.transport_protocol,
+    )?;
+    append_records(
+        &mut result,
         resolver,
         ns_domain,
         &QueryType::AAAA,
         &args.transport_protocol,
-    ) {
-        Ok(aaaa_records) => {
-            for aaaa_record in aaaa_records {
-                if let DnsRecord::AAAA(record) = aaaa_record.response_content {
-                    result.push_str(&format!(" [{} {}]", "AAAA".bold(), record.addr));
-                }
-            }
-        }
-        Err(DnsError::NoRecordsFound) => {}
-        Err(err) => return Err(err),
-    }
+    )?;
 
     Ok(result)
 }
