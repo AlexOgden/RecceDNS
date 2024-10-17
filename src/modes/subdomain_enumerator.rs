@@ -226,15 +226,26 @@ fn print_query_result(args: &CommandArgs, subdomain: &str, resolver: &str, respo
     let status = "+".green();
 
     if args.verbose || args.show_resolver {
-        println!(
-            "\r[{}] {} [resolver: {}] {}",
-            status,
-            domain,
-            resolver.magenta(),
-            response
-        );
+        if args.no_print_records {
+            println!(
+                "\r\x1b[2K[{}] {} [resolver: {}]",
+                status,
+                domain,
+                resolver.magenta()
+            );
+        } else {
+            println!(
+                "\r\x1b[2K[{}] {} [resolver: {}] {}",
+                status,
+                domain,
+                resolver.magenta(),
+                response
+            );
+        }
+    } else if args.no_print_records {
+        println!("\r\x1b[2K[{status}] {domain}");
     } else {
-        println!("\r[{status}] {domain} {response}");
+        println!("\r\x1b[2K[{status}] {domain} {response}");
     }
 }
 
@@ -254,17 +265,17 @@ fn print_query_error(
     if args.verbose || retry {
         if args.show_resolver {
             eprintln!(
-                "\r[{}] {} [resolver: {}] {}",
+                "\r\x1b[2K[{}] {} [resolver: {}] {}",
                 "-".red(),
                 domain,
                 resolver.magenta(),
                 error
             );
         } else {
-            eprintln!("\r[{}] {} {}", "-".red(), domain, error);
+            eprintln!("\r\x1b[2K[{}] {} {}", "-".red(), domain, error);
         }
     } else if !matches!(error, DnsError::NoRecordsFound) {
         // Print the error message if it's not NoRecordsFound, even if verbose is off
-        eprintln!("\r[{}] {} {}", "-".red(), domain, error);
+        eprintln!("\r\x1b[2K[{}] {} {}", "-".red(), domain, error);
     }
 }

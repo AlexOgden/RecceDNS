@@ -7,6 +7,7 @@ use crate::{
         resolver::resolve_domain,
     },
     io::cli::CommandArgs,
+    network::types::TransportProtocol,
 };
 use anyhow::Result;
 use std::collections::HashSet;

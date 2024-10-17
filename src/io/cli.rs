@@ -63,6 +63,10 @@ pub struct CommandArgs {
     #[arg(long)]
     pub no_print_options: bool,
 
+    /// Don't print the DNS records in subdomain enumeration, only show the subdomains
+    #[arg(long)]
+    pub no_print_records: bool,
+
     /// Print which resolver was used for each query
     #[arg(long)]
     pub show_resolver: bool,
