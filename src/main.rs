@@ -13,7 +13,6 @@ fn main() -> Result<()> {
 
     if !args.no_welcome {
         io::cli::print_ascii_art();
-        io::cli::print_options(&args);
     }
 
     let dns_resolvers = args.dns_resolvers.split(',').collect();

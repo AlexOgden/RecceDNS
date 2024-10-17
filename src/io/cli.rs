@@ -59,10 +59,6 @@ pub struct CommandArgs {
     #[arg(long)]
     pub no_retry: bool,
 
-    /// Don't print a summary of selected options
-    #[arg(long)]
-    pub no_print_options: bool,
-
     /// Don't print the DNS records in subdomain enumeration, only show the subdomains
     #[arg(long)]
     pub no_print_records: bool,
@@ -106,31 +102,6 @@ pub fn get_parsed_args() -> CommandArgs {
     args
 }
 
-pub fn print_options(args: &CommandArgs) {
-    if args.no_print_options {
-        return;
-    }
-    println!("Starting with options:");
-    println!(
-        "{}: {}",
-        "Operation Mode".bright_blue(),
-        match args.operation_mode {
-            OperationMode::BasicEnumeration => "Basic Enumeration",
-            OperationMode::SubdomainEnumeration => "Subdomain Enumeration",
-        }
-    );
-    println!("{}: {}", "Domain".bright_blue(), args.target_domain);
-    if let Some(wordlist) = &args.wordlist {
-        println!("{}: {}", "Wordlist".bright_blue(), wordlist);
-    }
-    println!("{}: {}", "Records".bright_blue(), args.query_type);
-    println!("{}: {}", "Resolvers".bright_blue(), args.dns_resolvers);
-    println!("{}: {}", "Show-resolver".bright_blue(), args.show_resolver);
-    if let Some(delay_ms) = args.delay {
-        println!("{}: {}ms\n", "Delay".bright_blue(), delay_ms);
-    }
-}
-
 pub fn print_ascii_art() {
     let title_art = r"
     ____                      ____  _   _______
@@ -141,7 +112,7 @@ pub fn print_ascii_art() {
 ";
     println!("{}", title_art.cyan());
     println!(
-        "Version: {} | Developer: Alex Ogden\n",
+        "Version: {} | github.com/AlexOgden/RecceDNS\n",
         env!("CARGO_PKG_VERSION")
     );
 }
