@@ -99,6 +99,7 @@ pub fn enumerate_subdomains(args: &CommandArgs, dns_resolvers: &[&str]) -> Resul
                 print_query_error(args, &subdomain, query_resolver, &err, true);
             }
         }
+        thread::sleep(Duration::from_millis(50));
     }
 
     println!(
