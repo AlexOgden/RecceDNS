@@ -94,10 +94,10 @@ fn handle_ns_response(
                 for record in records {
                     match record.response_content {
                         DnsRecord::A(record) => {
-                            result.push_str(&format!(" [{} {}]", "A".bold(), record.addr));
+                            result.push_str(&format!(" [{} {}]", "A".bold().bright_cyan(), record.addr));
                         }
                         DnsRecord::AAAA(record) => {
-                            result.push_str(&format!(" [{} {}]", "AAAA".bold(), record.addr));
+                            result.push_str(&format!(" [{} {}]", "AAAA".bold().bright_cyan(), record.addr));
                         }
                         _ => {}
                     }
