@@ -209,6 +209,10 @@ fn create_query_response_string(query_result: &[DnsQueryResponse]) -> String {
                     soa.expire,
                     soa.minimum
                 ),
+                DnsRecord::SRV(srv) => format!(
+                    "[{} {} {} {} {}]",
+                    query_type_formatted, srv.priority, srv.weight, srv.port, srv.target
+                ),
             }
         })
         .collect::<Vec<_>>()

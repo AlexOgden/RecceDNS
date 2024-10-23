@@ -51,11 +51,13 @@ pub enum QueryType {
     SOA = 6,
     #[strum(to_string = "NS")]
     NS = 2,
+    #[strum(to_string = "SRV")]
+    SRV = 33,
     #[strum(to_string = "any")]
     Any = 255,
 }
 
-map_from_number!(QueryType, 1 => A, 28 => AAAA, 15 => MX, 16 => TXT, 5 => CNAME, 6 => SOA, 2 => NS, 255 => Any);
+map_from_number!(QueryType, 1 => A, 28 => AAAA, 15 => MX, 16 => TXT, 5 => CNAME, 6 => SOA, 2 => NS, 33 => SRV, 255 => Any);
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum ResultCode {
@@ -205,10 +207,11 @@ pub enum DnsRecord {
     A(DnsRecordA),
     AAAA(DnsRecordAAAA),
     MX(DnsRecordMX),
-    TXT(DnsRecordTxt),
-    CNAME(DnsRecordTxt),
+    TXT(DnsRecordTXT),
+    CNAME(DnsRecordName),
     SOA(DnsRecordSOA),
-    NS(DnsRecordTxt),
+    NS(DnsRecordName),
+    SRV(DnsRecordSRV),
 }
 
 impl DnsRecord {
@@ -232,6 +235,7 @@ impl DnsRecord {
             QueryType::CNAME => Self::parse_cname_record(buffer, ttl),
             QueryType::NS => Self::parse_ns_record(buffer, ttl),
             QueryType::SOA => Self::parse_soa_record(buffer),
+            QueryType::SRV => Self::parse_srv_record(buffer),
             QueryType::Any => Err(anyhow!("Unsupported query type {qtype}")),
         }
     }
@@ -333,7 +337,7 @@ impl DnsRecord {
 
         Ok(DnsQueryResponse {
             query_type: QueryType::TXT,
-            response_content: Self::TXT(DnsRecordTxt {
+            response_content: Self::TXT(DnsRecordTXT {
                 ttl,
                 data: txt_data,
             }),
@@ -346,7 +350,7 @@ impl DnsRecord {
 
         Ok(DnsQueryResponse {
             query_type: QueryType::CNAME,
-            response_content: Self::CNAME(DnsRecordTxt { ttl, data: cname }),
+            response_content: Self::CNAME(DnsRecordTXT { ttl, data: cname }),
         })
     }
 
@@ -356,7 +360,7 @@ impl DnsRecord {
 
         Ok(DnsQueryResponse {
             query_type: QueryType::NS,
-            response_content: Self::NS(DnsRecordTxt {
+            response_content: Self::NS(DnsRecordTXT {
                 ttl,
                 data: ns_domain,
             }),
@@ -386,6 +390,24 @@ impl DnsRecord {
                 retry,
                 expire,
                 minimum,
+            }),
+        })
+    }
+
+    fn parse_srv_record(buffer: &mut PacketBuffer) -> Result<DnsQueryResponse> {
+        let priority = buffer.read_u16()?;
+        let weight = buffer.read_u16()?;
+        let port = buffer.read_u16()?;
+        let mut target = String::new();
+        buffer.read_qname(&mut target)?;
+
+        Ok(DnsQueryResponse {
+            query_type: QueryType::SRV,
+            response_content: Self::SRV(DnsRecordSRV {
+                priority,
+                weight,
+                port,
+                target,
             }),
         })
     }
@@ -424,9 +446,19 @@ pub struct DnsRecordSOA {
 }
 
 #[derive(Clone, Eq, PartialEq, Hash, Debug)]
-pub struct DnsRecordTxt {
+pub struct DnsRecordTXT {
     pub ttl: u32,
     pub data: String,
+}
+
+pub type DnsRecordName = DnsRecordTXT;
+
+#[derive(Clone, Eq, PartialEq, Hash, Debug)]
+pub struct DnsRecordSRV {
+    pub priority: u16,
+    pub weight: u16,
+    pub port: u16,
+    pub target: String,
 }
 
 #[derive(Clone, Eq, PartialEq, Hash, Debug)]
