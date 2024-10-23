@@ -1,12 +1,12 @@
-use anyhow::{anyhow, Context, Result};
-use once_cell::sync::Lazy;
+use anyhow::{anyhow, ensure, Context, Result};
+use lazy_static::lazy_static;
 use regex::Regex;
 use std::net::Ipv4Addr;
 
-static DOMAIN_REGEX: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r"^(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$")
-        .expect("Failed to create domain regex")
-});
+lazy_static! {
+    static ref DOMAIN_REGEX: Regex =
+        Regex::new(r"^(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$").unwrap();
+}
 
 pub fn domain(domain: &str) -> Result<String> {
     if DOMAIN_REGEX.is_match(domain) {
@@ -19,13 +19,12 @@ pub fn domain(domain: &str) -> Result<String> {
 pub fn dns_resolver_list(servers: &str) -> Result<String> {
     let server_list: Vec<&str> = servers.split(',').collect();
 
-    if server_list.iter().all(|&server| ipv4(server).is_ok()) {
-        Ok(servers.to_string())
-    } else {
-        Err(anyhow!(
-            "DNS Resolver(s) invalid. Comma-seperated IPv4 only."
-        ))
-    }
+    ensure!(
+        server_list.iter().all(|&server| ipv4(server).is_ok()),
+        "DNS Resolver(s) invalid. Comma-separated IPv4 only."
+    );
+
+    Ok(servers.to_string())
 }
 
 pub fn ipv4(ip: &str) -> Result<String> {

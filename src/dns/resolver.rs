@@ -4,7 +4,7 @@ use crate::dns::error::DnsError;
 use crate::dns::protocol::{DnsQueryResponse, QueryType};
 use crate::io::packet_buffer::PacketBuffer;
 use crate::network::types::TransportProtocol;
-use once_cell::sync::Lazy;
+use lazy_static::lazy_static;
 use rand::Rng;
 use std::collections::HashSet;
 use std::io::{Read, Write};
@@ -14,7 +14,9 @@ use std::time::Duration;
 
 use super::protocol::{DnsPacket, DnsQuestion};
 
-static UDP_SOCKET: Lazy<Mutex<Option<Arc<UdpSocket>>>> = Lazy::new(|| Mutex::new(None));
+lazy_static! {
+    static ref UDP_SOCKET: Mutex<Option<Arc<UdpSocket>>> = Mutex::new(None);
+}
 const DNS_PORT: u8 = 53;
 const UDP_BUFFER_SIZE: usize = 512;
 
