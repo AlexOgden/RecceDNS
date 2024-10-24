@@ -120,12 +120,12 @@ pub fn print_ascii_art() {
 pub fn setup_progress_bar(total: u64) -> ProgressBar {
     let pb = ProgressBar::new(total);
     let style = ProgressStyle::default_bar()
-        .template("{prefix:.bold.dim} {spinner} {wide_msg}")
+        .template("{prefix:.bold.dim} {spinner:.cyan} {wide_msg:.white} [{bar:75.cyan/blue}]")
         .unwrap()
         .tick_chars(PROGRESS_TICK_CHARS);
     pb.set_style(style);
     pb.set_prefix(format!("[{}/{}]", 0, total));
-    pb.set_message("Enumerating subdomains...");
+    pb.set_message("Enumerating...");
     pb
 }
 
