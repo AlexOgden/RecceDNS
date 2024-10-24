@@ -47,9 +47,9 @@ fn get_query_types() -> Vec<QueryType> {
         QueryType::AAAA,
         QueryType::CNAME,
         QueryType::MX,
+        QueryType::TXT,
         QueryType::NS,
         QueryType::SOA,
-        QueryType::TXT,
     ]
 }
 
@@ -94,10 +94,18 @@ fn handle_ns_response(
                 for record in records {
                     match record.response_content {
                         DnsRecord::A(record) => {
-                            result.push_str(&format!(" [{} {}]", "A".bold().bright_cyan(), record.addr));
+                            result.push_str(&format!(
+                                " [{} {}]",
+                                "A".bold().bright_cyan(),
+                                record.addr
+                            ));
                         }
                         DnsRecord::AAAA(record) => {
-                            result.push_str(&format!(" [{} {}]", "AAAA".bold().bright_cyan(), record.addr));
+                            result.push_str(&format!(
+                                " [{} {}]",
+                                "AAAA".bold().bright_cyan(),
+                                record.addr
+                            ));
                         }
                         _ => {}
                     }
@@ -167,6 +175,10 @@ fn create_query_response_string(
             soa.retry,
             soa.expire,
             soa.minimum
+        )),
+        DnsRecord::SRV(srv) => Ok(format!(
+            "[{} {} {} {} {}]",
+            query_type_formatted, srv.priority, srv.weight, srv.port, srv.target
         )),
     }
 }

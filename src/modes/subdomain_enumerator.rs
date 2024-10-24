@@ -102,8 +102,9 @@ pub fn enumerate_subdomains(args: &CommandArgs, dns_resolvers: &[&str]) -> Resul
         thread::sleep(Duration::from_millis(50));
     }
 
+    println!("\r\x1b[2K"); // Clear the progress bar
     println!(
-        "\n[{}] Done! Found {} subdomains",
+        "[{}] Done! Found {} subdomains",
         "~".green(),
         found_count.to_string().bold()
     );
@@ -155,32 +156,28 @@ fn check_wildcard_domain(args: &CommandArgs, dns_resolvers: &[&str]) -> Result<b
     let max_label_length: u8 = 63;
     let attempts: u8 = 3;
 
-    if dns_resolvers.is_empty() {
-        return Err(anyhow!("No DNS resolvers available"));
-    }
+    dns_resolvers.first().map_or_else(
+        || Err(anyhow!("No DNS resolvers available")),
+        |query_resolver| {
+            let is_wildcard = (0..attempts).any(|_| {
+                let random_length = rng.gen_range(10..=max_label_length);
+                let random_subdomain: String = (0..random_length)
+                    .map(|_| rng.gen_range('a'..='z'))
+                    .collect();
+                let fqdn = format!("{}.{}", random_subdomain, args.target_domain);
 
-    let query_resolver = dns_resolvers.first().unwrap();
+                resolve_domain(
+                    query_resolver,
+                    &fqdn,
+                    &QueryType::A,
+                    &args.transport_protocol,
+                )
+                .is_err()
+            });
 
-    for _ in 0..attempts {
-        let random_length = rng.gen_range(10..=max_label_length);
-        let random_subdomain: String = (0..random_length)
-            .map(|_| rng.gen_range('a'..='z'))
-            .collect();
-        let fqdn = format!("{}.{}", random_subdomain, args.target_domain);
-
-        if resolve_domain(
-            query_resolver,
-            &fqdn,
-            &QueryType::A,
-            &args.transport_protocol,
-        )
-        .is_err()
-        {
-            return Ok(false); // If any random subdomain fails to resolve, it's not a wildcard domain
-        }
-    }
-
-    Ok(true) // All random subdomains resolved, indicating a wildcard domain
+            Ok(!is_wildcard) // If any random subdomain fails to resolve, it's not a wildcard domain
+        },
+    )
 }
 
 fn create_query_response_string(query_result: &[DnsQueryResponse]) -> String {
@@ -208,6 +205,10 @@ fn create_query_response_string(query_result: &[DnsQueryResponse]) -> String {
                     soa.retry,
                     soa.expire,
                     soa.minimum
+                ),
+                DnsRecord::SRV(srv) => format!(
+                    "[{} {} {} {} {}]",
+                    query_type_formatted, srv.priority, srv.weight, srv.port, srv.target
                 ),
             }
         })
@@ -243,7 +244,10 @@ fn print_query_result(args: &CommandArgs, subdomain: &str, resolver: &str, respo
                 response
             );
         }
-    } else if args.no_print_records {
+        return;
+    }
+
+    if args.no_print_records {
         println!("\r\x1b[2K[{status}] {domain}");
     } else {
         println!("\r\x1b[2K[{status}] {domain} {response}");
@@ -263,20 +267,19 @@ fn print_query_error(
         args.target_domain.blue().italic()
     );
 
-    if args.verbose || retry {
-        if args.show_resolver {
-            eprintln!(
-                "\r\x1b[2K[{}] {} [resolver: {}] {}",
-                "-".red(),
-                domain,
-                resolver.magenta(),
-                error
-            );
-        } else {
-            eprintln!("\r\x1b[2K[{}] {} {}", "-".red(), domain, error);
-        }
-    } else if !matches!(error, DnsError::NoRecordsFound) {
-        // Print the error message if it's not NoRecordsFound, even if verbose is off
+    if !args.verbose && !retry && matches!(error, DnsError::NoRecordsFound) {
+        return;
+    }
+
+    if args.show_resolver {
+        eprintln!(
+            "\r\x1b[2K[{}] {} [resolver: {}] {}",
+            "-".red(),
+            domain,
+            resolver.magenta(),
+            error
+        );
+    } else {
         eprintln!("\r\x1b[2K[{}] {} {}", "-".red(), domain, error);
     }
 }
