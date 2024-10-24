@@ -102,8 +102,9 @@ pub fn enumerate_subdomains(args: &CommandArgs, dns_resolvers: &[&str]) -> Resul
         thread::sleep(Duration::from_millis(50));
     }
 
+    println!("\r\x1b[2K"); // Clear the progress bar
     println!(
-        "\n[{}] Done! Found {} subdomains",
+        "[{}] Done! Found {} subdomains",
         "~".green(),
         found_count.to_string().bold()
     );
