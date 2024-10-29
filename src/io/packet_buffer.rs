@@ -197,3 +197,115 @@ impl PacketBuffer {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_new() {
+        let buffer = PacketBuffer::new();
+        assert_eq!(buffer.pos, 0);
+        assert_eq!(buffer.buf.len(), 512);
+    }
+
+    #[test]
+    fn test_set_data() {
+        let mut buffer = PacketBuffer::new();
+        let data = [1, 2, 3, 4, 5];
+        buffer.set_data(&data).unwrap();
+        assert_eq!(&buffer.buf[0..5], &data);
+        assert_eq!(buffer.pos, 0);
+    }
+
+    #[test]
+    fn test_read_u8() {
+        let mut buffer = PacketBuffer::new();
+        buffer.set_data(&[1, 2, 3]).unwrap();
+        assert_eq!(buffer.read_u8().unwrap(), 1);
+        assert_eq!(buffer.read_u8().unwrap(), 2);
+        assert_eq!(buffer.read_u8().unwrap(), 3);
+    }
+
+    #[test]
+    fn test_read_u16() {
+        let mut buffer = PacketBuffer::new();
+        buffer.set_data(&[0x12, 0x34]).unwrap();
+        assert_eq!(buffer.read_u16().unwrap(), 0x1234);
+    }
+
+    #[test]
+    fn test_read_u32() {
+        let mut buffer = PacketBuffer::new();
+        buffer.set_data(&[0x12, 0x34, 0x56, 0x78]).unwrap();
+        assert_eq!(buffer.read_u32().unwrap(), 0x1234_5678);
+    }
+
+    #[test]
+    fn test_write_u8() {
+        let mut buffer = PacketBuffer::new();
+        buffer.write_u8(0x12).unwrap();
+        assert_eq!(buffer.buf[0], 0x12);
+    }
+
+    #[test]
+    fn test_write_u16() {
+        let mut buffer = PacketBuffer::new();
+        buffer.write_u16(0x1234).unwrap();
+        assert_eq!(buffer.buf[0], 0x12);
+        assert_eq!(buffer.buf[1], 0x34);
+    }
+
+    #[test]
+    fn test_write_u32() {
+        let mut buffer = PacketBuffer::new();
+        buffer.write_u32(0x1234_5678).unwrap();
+        assert_eq!(buffer.buf[0], 0x12);
+        assert_eq!(buffer.buf[1], 0x34);
+        assert_eq!(buffer.buf[2], 0x56);
+        assert_eq!(buffer.buf[3], 0x78);
+    }
+
+    #[test]
+    fn test_write_qname() {
+        let mut buffer = PacketBuffer::new();
+        buffer.write_qname("example.com").unwrap();
+        assert_eq!(buffer.buf[0], 7); // length of "example"
+        assert_eq!(&buffer.buf[1..8], b"example");
+        assert_eq!(buffer.buf[8], 3); // length of "com"
+        assert_eq!(&buffer.buf[9..12], b"com");
+        assert_eq!(buffer.buf[12], 0); // null terminator
+    }
+
+    #[test]
+    fn test_read_qname() {
+        let mut buffer = PacketBuffer::new();
+        buffer.write_qname("example.com").unwrap();
+        buffer.set_pos(0).unwrap();
+        let mut outstr = String::new();
+        buffer.read_qname(&mut outstr).unwrap();
+        assert_eq!(outstr, "example.com");
+    }
+
+    #[test]
+    fn test_step() {
+        let mut buffer = PacketBuffer::new();
+        buffer.step(5).unwrap();
+        assert_eq!(buffer.pos, 5);
+    }
+
+    #[test]
+    fn test_set_pos() {
+        let mut buffer = PacketBuffer::new();
+        buffer.set_pos(10).unwrap();
+        assert_eq!(buffer.pos, 10);
+    }
+
+    #[test]
+    fn test_get_buffer_to_pos() {
+        let mut buffer = PacketBuffer::new();
+        buffer.set_data(&[1, 2, 3, 4, 5]).unwrap();
+        buffer.set_pos(3).unwrap();
+        assert_eq!(buffer.get_buffer_to_pos(), &[1, 2, 3]);
+    }
+}
