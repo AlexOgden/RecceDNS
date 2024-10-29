@@ -14,6 +14,7 @@ use crate::dns::{
     resolver_selector::ResolverSelector,
 };
 use crate::io::{cli, cli::CommandArgs, wordlist};
+use std::time::Instant;
 
 pub fn enumerate_subdomains(args: &CommandArgs, dns_resolvers: &[&str]) -> Result<()> {
     if handle_wildcard_domain(args, dns_resolvers)? {
@@ -29,6 +30,8 @@ pub fn enumerate_subdomains(args: &CommandArgs, dns_resolvers: &[&str]) -> Resul
 
     let mut found_count: u32 = 0;
     let mut failed_queries: VecDeque<String> = VecDeque::new();
+
+    let start_time = Instant::now();
 
     for (index, subdomain) in subdomains.iter().enumerate() {
         let query_resolver = resolver_selector.select(dns_resolvers)?;
@@ -102,11 +105,14 @@ pub fn enumerate_subdomains(args: &CommandArgs, dns_resolvers: &[&str]) -> Resul
         thread::sleep(Duration::from_millis(50));
     }
 
+    let elapsed_time = start_time.elapsed();
+
     println!("\r\x1b[2K"); // Clear the progress bar
     println!(
-        "[{}] Done! Found {} subdomains",
+        "[{}] Done! Found {} subdomains in {:.2?}",
         "~".green(),
-        found_count.to_string().bold()
+        found_count.to_string().bold(),
+        elapsed_time
     );
     if retry_failed_count > 0 {
         println!("Failed to resolve {retry_failed_count} subdomains after retries");
@@ -133,17 +139,20 @@ fn read_wordlist(wordlist_path: &Option<String>) -> Result<Vec<String>> {
 }
 
 fn handle_wildcard_domain(args: &CommandArgs, dns_resolvers: &[&str]) -> Result<bool> {
-    let is_wildcard = check_wildcard_domain(args, dns_resolvers)?;
-    if is_wildcard {
+    if check_wildcard_domain(args, dns_resolvers)? {
         println!(
             "[{}] Warning: Wildcard domain detected. Results may include false positives!",
             "!".yellow()
         );
         print!("[{}] Do you want to continue? (y/n): ", "?".cyan());
-        io::stdout().flush()?; // Ensure the prompt is displayed before reading input
+        io::stdout().flush().expect("Failed to flush stdout");
+
         let mut input = String::new();
-        io::stdin().read_line(&mut input)?;
-        if input.trim().to_lowercase() != "y" {
+        io::stdin()
+            .read_line(&mut input)
+            .expect("Failed to read input");
+
+        if !matches!(input.trim().to_lowercase().as_str(), "y") {
             println!("[{}] Aborting due to wildcard domain detection.", "!".red());
             return Ok(true);
         }
