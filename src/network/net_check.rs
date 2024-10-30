@@ -4,7 +4,7 @@ use rand::{distributions::Alphanumeric, thread_rng, Rng};
 use crate::dns::{protocol::QueryType, resolver::resolve_domain};
 use crate::network::types::TransportProtocol;
 
-const ROOT_SERVER: &str = "a.rootservers.net";
+const ROOT_SERVER: &str = "rootservers.net";
 
 fn generate_random_domain() -> String {
     let random_string: String = thread_rng()
@@ -52,7 +52,10 @@ pub fn check_dns_resolvers(
 
     for &server in dns_resolvers {
         let hijacking = check_nxdomain_hijacking(server, transport_protocol);
-        let normal_query = resolve_domain(server, ROOT_SERVER, &QueryType::A, transport_protocol);
+
+        let root_server_letter = thread_rng().gen_range(b'a'..b'm') as char;
+        let domain = format!("{root_server_letter}.{ROOT_SERVER}");
+        let normal_query = resolve_domain(server, &domain, &QueryType::A, transport_protocol);
 
         if hijacking {
             print_status(server, "FAIL");
