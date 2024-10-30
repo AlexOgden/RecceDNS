@@ -219,6 +219,9 @@ fn create_query_response_string(query_result: &[DnsQueryResponse]) -> String {
                     "[{} {} {} {} {}]",
                     query_type_formatted, srv.priority, srv.weight, srv.port, srv.target
                 ),
+                DnsRecord::DNSKEY(_dnskey) => {
+                    format!("[{} Enabled]", "DNSSEC".bold().bright_cyan())
+                }
             }
         })
         .collect::<Vec<_>>()
