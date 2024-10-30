@@ -26,10 +26,10 @@ fn check_nxdomain_hijacking(server_address: &str, transport_protocol: &Transport
     .is_ok()
 }
 
-fn print_status(server_address: &str, status: &str, color: &str) {
-    let colored_status = match color {
-        "green" => format!("[{}]", status.green()),
-        "red" => format!("[{}]", status.red()),
+fn print_status(server_address: &str, status: &str) {
+    let colored_status = match status {
+        "OK" => format!("[{}]", status.green()),
+        "FAIL" => format!("[{}]", status.red()),
         _ => status.to_string(),
     };
 
@@ -55,13 +55,13 @@ pub fn check_dns_resolvers(
         let normal_query = resolve_domain(server, ROOT_SERVER, &QueryType::A, transport_protocol);
 
         if hijacking {
-            print_status(server, "FAIL", "red");
+            print_status(server, "FAIL");
             failed_servers.push((server, "NXDOMAIN HIJACKING"));
         } else if normal_query.is_err() {
-            print_status(server, "FAIL", "red");
+            print_status(server, "FAIL");
             failed_servers.push((server, "No response"));
         } else {
-            print_status(server, "OK", "green");
+            print_status(server, "OK");
             working_servers.push(server.to_string());
         }
     }
