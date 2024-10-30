@@ -32,27 +32,24 @@ fn main() -> Result<()> {
     }
 }
 
-fn validate_dns_resolvers<'a>(args: &'a CommandArgs, dns_resolvers: Vec<&'a str>) -> Vec<&'a str> {
+fn validate_dns_resolvers<'a>(args: &CommandArgs, dns_resolvers: Vec<&'a str>) -> Vec<&'a str> {
     if args.no_dns_check {
         dns_resolvers
     } else {
-        match net_check::check_server_list(&dns_resolvers, &args.transport_protocol) {
-            Ok(()) => {
-                let status = format!("[{}]", "OK".green());
-                println!("DNS Resolvers: {:>width$}\n", status, width = 16);
-                dns_resolvers
-            }
-            Err(failed_servers) => {
-                println!(
-                    "{}: {}\n",
-                    "Removed resolvers with errors".yellow(),
-                    failed_servers.join(", ")
-                );
-                dns_resolvers
-                    .into_iter()
-                    .filter(|resolver| !failed_servers.contains(&(*resolver).to_string()))
-                    .collect()
-            }
+        // Get the list of working DNS resolvers
+        let transport_protocol = network::types::TransportProtocol::UDP;
+        let working_resolvers: Vec<String> =
+            net_check::check_dns_resolvers(&dns_resolvers, &transport_protocol);
+        if working_resolvers.is_empty() {
+            eprintln!(
+                "{}",
+                "No working DNS resolvers found! Please check your network connection.".red()
+            );
+            std::process::exit(1);
         }
+        dns_resolvers
+            .into_iter()
+            .filter(|resolver| working_resolvers.contains(&(*resolver).to_string()))
+            .collect()
     }
 }
