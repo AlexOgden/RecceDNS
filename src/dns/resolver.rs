@@ -6,13 +6,12 @@ use crate::io::packet_buffer::PacketBuffer;
 use crate::network::types::TransportProtocol;
 use lazy_static::lazy_static;
 use rand::Rng;
-use std::collections::HashSet;
 use std::io::{Read, Write};
 use std::net::{TcpStream, UdpSocket};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use super::protocol::{DnsPacket, DnsQuestion};
+use super::protocol::{DnsPacket, DnsQuestion, ResultCode};
 
 lazy_static! {
     static ref UDP_SOCKET: Mutex<Option<Arc<UdpSocket>>> = Mutex::new(None);
@@ -46,33 +45,30 @@ pub fn resolve_domain(
     query_type: &QueryType,
     transport_protocol: &TransportProtocol,
 ) -> Result<Vec<DnsQueryResponse>, DnsError> {
-    let mut all_results = HashSet::new();
     let udp_socket =
         initialize_udp_socket().map_err(|error| DnsError::Network(error.to_string()))?;
 
-    let query_types: Vec<&QueryType> = match query_type {
-        QueryType::Any => vec![
-            &QueryType::A,
-            &QueryType::AAAA,
-            &QueryType::MX,
-            &QueryType::TXT,
-        ],
-        _ => vec![query_type],
-    };
+    let query_result = execute_dns_query(
+        &udp_socket,
+        transport_protocol,
+        dns_server,
+        domain,
+        query_type,
+    )?;
 
-    for qt in query_types {
-        let query_result =
-            execute_dns_query(&udp_socket, transport_protocol, dns_server, domain, qt)?;
-
-        for response in query_result.answers {
-            all_results.insert(response);
+    match query_result.header.rescode {
+        ResultCode::NOERROR => {
+            if query_result.answers.is_empty() {
+                Err(DnsError::NoRecordsFound)
+            } else {
+                Ok(query_result.answers)
+            }
         }
-    }
-
-    if all_results.is_empty() {
-        Err(DnsError::NoRecordsFound)
-    } else {
-        Ok(all_results.into_iter().collect())
+        ResultCode::NXDOMAIN => Err(DnsError::NonExistentDomain),
+        ResultCode::SERVFAIL => Err(DnsError::NameserverError("Server failed".to_owned())),
+        ResultCode::NOTIMP => Err(DnsError::NameserverError("Not implemented".to_owned())),
+        ResultCode::REFUSED => Err(DnsError::NameserverError("Refused".to_owned())),
+        ResultCode::FORMERR => Err(DnsError::ProtocolData("Format error".to_owned())),
     }
 }
 
@@ -189,4 +185,34 @@ fn parse_dns_response(response: &[u8]) -> Result<DnsPacket, DnsError> {
     let dns_packet = DnsPacket::from_buffer(&mut packet_buffer)?;
 
     Ok(dns_packet)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_build_dns_query() {
+        let domain = "example.com";
+        let query_type = QueryType::A;
+        let dns_packet = build_dns_query(domain, &query_type).unwrap();
+
+        assert_eq!(dns_packet.header.questions, 1);
+        assert_eq!(dns_packet.questions.len(), 1);
+        assert_eq!(dns_packet.questions[0].domain, domain);
+        assert_eq!(dns_packet.questions[0].qtype, query_type);
+    }
+
+    #[test]
+    fn test_build_dns_query_empty_domain() {
+        let domain = "";
+        let query_type = QueryType::A;
+        let result = build_dns_query(domain, &query_type);
+
+        assert!(result.is_err());
+        assert_eq!(
+            result.unwrap_err().to_string(),
+            "Invalid data: Domain name cannot be empty"
+        );
+    }
 }

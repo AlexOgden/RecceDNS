@@ -1,7 +1,7 @@
 use anyhow::{anyhow, Result};
 use colored::Colorize;
 use rand::Rng;
-use std::collections::VecDeque;
+use std::collections::HashSet;
 use std::io::{self, Write};
 use std::thread;
 use std::time::Duration;
@@ -21,42 +21,36 @@ pub fn enumerate_subdomains(args: &CommandArgs, dns_resolvers: &[&str]) -> Resul
         return Ok(());
     }
 
-    let record_query_type = &args.query_type;
+    let query_types: Vec<QueryType> = get_query_types(&args.query_type);
     let subdomains: Vec<String> = read_wordlist(&args.wordlist)?;
     let mut resolver_selector = setup_resolver_selector(args);
 
     let total_subdomains = subdomains.len() as u64;
-    let progress_bar = cli::setup_progress_bar(subdomains.len() as u64);
+    let progress_bar = cli::setup_progress_bar(total_subdomains);
 
     let mut found_count: u32 = 0;
-    let mut failed_queries: VecDeque<String> = VecDeque::new();
+    let mut failed_queries: HashSet<String> = HashSet::new();
 
     let start_time = Instant::now();
 
+    let mut all_record_results = HashSet::new();
+    let mut response_data_vec: Vec<DnsQueryResponse> = Vec::new();
+
     for (index, subdomain) in subdomains.iter().enumerate() {
-        let query_resolver = resolver_selector.select(dns_resolvers)?;
-        let fqdn = format!("{}.{}", subdomain, args.target_domain);
-
-        match resolve_domain(
-            query_resolver,
-            &fqdn,
-            record_query_type,
-            &args.transport_protocol,
-        ) {
-            Ok(mut response) => {
-                response.sort_by(|a, b| a.query_type.cmp(&b.query_type));
-
-                let response_data_string = create_query_response_string(&response);
-                print_query_result(args, subdomain, query_resolver, &response_data_string);
-                found_count += 1;
-            }
-            Err(err) => {
-                if !matches!(err, DnsError::NoRecordsFound) && !args.no_retry {
-                    failed_queries.push_back(subdomain.clone());
-                }
-                print_query_error(args, subdomain, query_resolver, &err, false);
-            }
-        }
+        process_subdomain(
+            args,
+            dns_resolvers,
+            &mut *resolver_selector,
+            &query_types
+                .iter()
+                .map(std::clone::Clone::clone)
+                .collect::<Vec<_>>(),
+            subdomain,
+            &mut all_record_results,
+            &mut response_data_vec,
+            &mut failed_queries,
+            &mut found_count,
+        )?;
 
         cli::update_progress_bar(&progress_bar, index, total_subdomains);
 
@@ -67,43 +61,17 @@ pub fn enumerate_subdomains(args: &CommandArgs, dns_resolvers: &[&str]) -> Resul
         }
     }
 
-    // Retry failed queries
-    if !failed_queries.is_empty() {
-        let count = failed_queries.len();
-        progress_bar.finish_and_clear();
-        println!(
-            "\n[{}] Retrying {} failed queries",
-            "!".bright_yellow(),
-            count.to_string().bold()
-        );
-    }
-    let mut retry_failed_count: u32 = 0;
-    while let Some(subdomain) = failed_queries.pop_front() {
-        let query_resolver = resolver_selector.select(dns_resolvers)?;
-        let fqdn = format!("{}.{}", subdomain, args.target_domain);
-
-        match resolve_domain(
-            query_resolver,
-            &fqdn,
-            record_query_type,
-            &args.transport_protocol,
-        ) {
-            Ok(mut response) => {
-                response.sort_by(|a, b| a.query_type.cmp(&b.query_type));
-
-                let response_data_string = create_query_response_string(&response);
-                print_query_result(args, &subdomain, query_resolver, &response_data_string);
-                found_count += 1;
-            }
-            Err(err) => {
-                if !matches!(err, DnsError::NoRecordsFound) {
-                    retry_failed_count += 1;
-                }
-                print_query_error(args, &subdomain, query_resolver, &err, true);
-            }
-        }
-        thread::sleep(Duration::from_millis(50));
-    }
+    progress_bar.finish_and_clear();
+    retry_failed_queries(
+        args,
+        dns_resolvers,
+        &mut *resolver_selector,
+        &query_types,
+        &mut failed_queries,
+        &mut all_record_results,
+        &mut response_data_vec,
+        &mut found_count,
+    )?;
 
     let elapsed_time = start_time.elapsed();
 
@@ -114,10 +82,132 @@ pub fn enumerate_subdomains(args: &CommandArgs, dns_resolvers: &[&str]) -> Resul
         found_count.to_string().bold(),
         elapsed_time
     );
+
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn process_subdomain(
+    args: &CommandArgs,
+    dns_resolvers: &[&str],
+    resolver_selector: &mut dyn ResolverSelector,
+    query_types: &[QueryType],
+    subdomain: &String,
+    all_record_results: &mut HashSet<DnsQueryResponse>,
+    response_data_vec: &mut Vec<DnsQueryResponse>,
+    failed_queries: &mut HashSet<String>,
+    found_count: &mut u32,
+) -> Result<()> {
+    let query_resolver = resolver_selector.select(dns_resolvers)?;
+    let fqdn = format!("{}.{}", subdomain, args.target_domain);
+
+    all_record_results.clear();
+
+    for query_type in query_types {
+        match resolve_domain(query_resolver, &fqdn, query_type, &args.transport_protocol) {
+            Ok(response) => {
+                all_record_results.extend(response);
+            }
+            Err(err) => {
+                if matches!(err, DnsError::NonExistentDomain) {
+                    break;
+                } else if !matches!(err, DnsError::NoRecordsFound) {
+                    if !args.no_retry {
+                        failed_queries.insert(subdomain.clone());
+                    }
+                    print_query_error(args, subdomain, query_resolver, &err, false);
+                    break;
+                }
+            }
+        }
+    }
+
+    if !all_record_results.is_empty() {
+        response_data_vec.clear();
+        response_data_vec.extend(all_record_results.drain());
+        response_data_vec.sort_by(|a, b| a.query_type.cmp(&b.query_type));
+        let response_data_string = create_query_response_string(response_data_vec);
+        print_query_result(args, subdomain, query_resolver, &response_data_string);
+        *found_count += 1;
+    }
+
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn retry_failed_queries(
+    args: &CommandArgs,
+    dns_resolvers: &[&str],
+    resolver_selector: &mut dyn ResolverSelector,
+    query_types: &[QueryType],
+    failed_queries: &mut HashSet<String>,
+    all_record_results: &mut HashSet<DnsQueryResponse>,
+    response_data_vec: &mut Vec<DnsQueryResponse>,
+    found_count: &mut u32,
+) -> Result<()> {
+    if !failed_queries.is_empty() {
+        let count = failed_queries.len();
+        println!(
+            "\n[{}] Retrying {} failed queries",
+            "!".bright_yellow(),
+            count.to_string().bold()
+        );
+    }
+
+    let mut retry_failed_count: u32 = 0;
+    while let Some(subdomain) = failed_queries.iter().next().cloned() {
+        failed_queries.remove(&subdomain);
+        let query_resolver = resolver_selector.select(dns_resolvers)?;
+        let fqdn = format!("{}.{}", subdomain, args.target_domain);
+
+        all_record_results.clear();
+
+        for query_type in query_types {
+            match resolve_domain(query_resolver, &fqdn, query_type, &args.transport_protocol) {
+                Ok(response) => {
+                    all_record_results.extend(response);
+                }
+                Err(err) => {
+                    if !matches!(err, DnsError::NoRecordsFound | DnsError::NonExistentDomain) {
+                        retry_failed_count += 1;
+                        failed_queries.insert(subdomain.clone());
+                    }
+
+                    print_query_error(args, &subdomain, query_resolver, &err, true);
+
+                    if matches!(err, DnsError::NonExistentDomain) {
+                        break;
+                    }
+                }
+            }
+        }
+
+        if !all_record_results.is_empty() {
+            response_data_vec.clear();
+            response_data_vec.extend(all_record_results.drain());
+            response_data_vec.sort_by(|a, b| a.query_type.cmp(&b.query_type));
+            let response_data_string = create_query_response_string(response_data_vec);
+            print_query_result(args, &subdomain, query_resolver, &response_data_string);
+            *found_count += 1;
+        }
+
+        thread::sleep(Duration::from_millis(50));
+    }
+
     if retry_failed_count > 0 {
         println!("Failed to resolve {retry_failed_count} subdomains after retries");
     }
+
     Ok(())
+}
+
+fn get_query_types(query_type: &QueryType) -> Vec<QueryType> {
+    let query_types: Vec<QueryType> = match query_type {
+        QueryType::Any => vec![QueryType::A, QueryType::AAAA, QueryType::MX, QueryType::TXT],
+        _ => vec![query_type.clone()],
+    };
+
+    query_types
 }
 
 fn setup_resolver_selector(args: &CommandArgs) -> Box<dyn ResolverSelector> {
@@ -279,7 +369,13 @@ fn print_query_error(
         args.target_domain.blue().italic()
     );
 
-    if !args.verbose && !retry && matches!(error, DnsError::NoRecordsFound) {
+    if !args.verbose
+        && !retry
+        && matches!(
+            error,
+            DnsError::NoRecordsFound | DnsError::NonExistentDomain
+        )
+    {
         return;
     }
 

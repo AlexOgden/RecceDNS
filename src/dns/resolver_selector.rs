@@ -53,7 +53,7 @@ mod test {
         // Test 5 times
         for _ in 0..5 {
             let mut random = Random;
-            let dns_resolvers = ["9.9.9.9", "1.1.1.1", "8.8.8.8"];
+            let dns_resolvers = ["1.0.0.1", "1.1.1.1", "8.8.8.8"];
             let resolver = random.select(&dns_resolvers).unwrap();
             assert!(dns_resolvers.contains(&resolver));
         }
@@ -63,7 +63,7 @@ mod test {
     #[test]
     fn test_sequential_resolver_selector() {
         let mut sequential = Sequential::new();
-        let dns_resolvers = ["9.9.9.9", "1.1.1.1", "8.8.8.8"];
+        let dns_resolvers = ["1.1.1.1", "1.0.0.1", "8.8.8.8"];
         for resolver in &dns_resolvers {
             assert_eq!(sequential.select(&dns_resolvers).unwrap(), *resolver);
         }
@@ -91,7 +91,7 @@ mod test {
     #[test]
     fn test_sequential_resolver_selector_wrap_around() {
         let mut sequential = Sequential::new();
-        let dns_resolvers = ["9.9.9.9", "1.1.1.1", "8.8.8.8"];
+        let dns_resolvers = ["1.1.1.1", "1.0.0.1", "8.8.8.8"];
         for _ in 0..dns_resolvers.len() * 2 {
             for resolver in &dns_resolvers {
                 assert_eq!(sequential.select(&dns_resolvers).unwrap(), *resolver);
