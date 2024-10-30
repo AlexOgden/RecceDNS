@@ -5,6 +5,10 @@ use thiserror::Error;
 pub enum DnsError {
     #[error("No records found")]
     NoRecordsFound,
+    #[error("None existent domain")]
+    NonExistentDomain,
+    #[error("Nameserver error: {0}")]
+    NameserverError(String),
     #[error("Network error: {0}")]
     Network(String),
     #[error("Invalid data: {0}")]

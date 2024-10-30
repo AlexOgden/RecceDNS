@@ -48,7 +48,7 @@ pub fn enumerate_records(args: &CommandArgs, dns_resolvers: &[&str]) -> Result<(
                 process_response(&mut seen_cnames, &response, resolver, args)?;
             }
             Err(err) => {
-                if !matches!(err, DnsError::NoRecordsFound) {
+                if !matches!(err, DnsError::NoRecordsFound | DnsError::NonExistentDomain) {
                     // Handle other errors
                     eprintln!("{query_type} {err}");
                 }
