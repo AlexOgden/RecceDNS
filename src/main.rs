@@ -4,7 +4,6 @@ mod modes;
 mod network;
 
 use anyhow::{ensure, Result};
-use colored::Colorize;
 use io::cli::{CommandArgs, OperationMode};
 use network::net_check;
 
@@ -40,13 +39,6 @@ fn validate_dns_resolvers<'a>(args: &CommandArgs, dns_resolvers: Vec<&'a str>) -
         let transport_protocol = network::types::TransportProtocol::UDP;
         let working_resolvers: Vec<String> =
             net_check::check_dns_resolvers(&dns_resolvers, &transport_protocol);
-        if working_resolvers.is_empty() {
-            eprintln!(
-                "{}",
-                "No working DNS resolvers found! Please check your network connection.".red()
-            );
-            std::process::exit(1);
-        }
         dns_resolvers
             .into_iter()
             .filter(|resolver| working_resolvers.contains(&(*resolver).to_string()))
