@@ -45,8 +45,8 @@ pub fn check_dns_resolvers(
     dns_resolvers: &[&str],
     transport_protocol: &TransportProtocol,
 ) -> Vec<String> {
-    let mut working_servers = Vec::new();
-    let mut failed_servers = Vec::new();
+    let mut working_servers: Vec<String> = Vec::new();
+    let mut failed_servers: Vec<(&str, &str)> = Vec::new();
 
     println!("Checking DNS Servers...");
 
