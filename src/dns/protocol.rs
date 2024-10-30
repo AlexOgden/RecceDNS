@@ -53,11 +53,13 @@ pub enum QueryType {
     NS = 2,
     #[strum(to_string = "SRV")]
     SRV = 33,
+    #[strum(to_string = "DNSKEY")]
+    DNSKEY = 48,
     #[strum(to_string = "any")]
     Any = 255,
 }
 
-map_from_number!(QueryType, 1 => A, 28 => AAAA, 15 => MX, 16 => TXT, 5 => CNAME, 6 => SOA, 2 => NS, 33 => SRV, 255 => Any);
+map_from_number!(QueryType, 1 => A, 28 => AAAA, 15 => MX, 16 => TXT, 5 => CNAME, 6 => SOA, 2 => NS, 33 => SRV, 48 => DNSKEY, 255 => Any);
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum ResultCode {
@@ -208,10 +210,11 @@ pub enum DnsRecord {
     AAAA(DnsRecordAAAA),
     MX(DnsRecordMX),
     TXT(DnsRecordTXT),
-    CNAME(DnsRecordName),
+    CNAME(DnsRecordQNAME),
     SOA(DnsRecordSOA),
-    NS(DnsRecordName),
+    NS(DnsRecordQNAME),
     SRV(DnsRecordSRV),
+    DNSKEY(DnsRecordDNSKEY),
 }
 
 impl DnsRecord {
@@ -225,7 +228,7 @@ impl DnsRecord {
         let qtype = QueryType::from_number(qtype_num);
         let _class = buffer.read_u16().context("Failed to read class")?;
         let ttl = buffer.read_u32().context("Failed to read TTL")?;
-        let _data_len = buffer.read_u16().context("Failed to read data length")?;
+        let data_len = buffer.read_u16().context("Failed to read data length")?;
 
         match qtype {
             QueryType::A => Self::parse_a_record(buffer, domain, ttl),
@@ -236,6 +239,7 @@ impl DnsRecord {
             QueryType::NS => Self::parse_ns_record(buffer, ttl),
             QueryType::SOA => Self::parse_soa_record(buffer),
             QueryType::SRV => Self::parse_srv_record(buffer),
+            QueryType::DNSKEY => Self::parse_dnskey_record(buffer, data_len),
             QueryType::Any => Err(anyhow!("Unsupported query type {qtype}")),
         }
     }
@@ -411,6 +415,30 @@ impl DnsRecord {
             }),
         })
     }
+
+    fn parse_dnskey_record(buffer: &mut PacketBuffer, data_len: u16) -> Result<DnsQueryResponse> {
+        // Read flags (2 bytes)
+        let flags = buffer.read_u16()?;
+
+        // Read protocol (1 byte)
+        let protocol = buffer.read_u8()?;
+
+        // Read algorithm (1 byte)
+        let algorithm = buffer.read_u8()?;
+
+        // Read the remaining bytes as the public key
+        let public_key = buffer.read_bytes((data_len - 4).into())?;
+
+        Ok(DnsQueryResponse {
+            query_type: QueryType::DNSKEY,
+            response_content: Self::DNSKEY(DnsRecordDNSKEY {
+                flags,
+                protocol,
+                algorithm,
+                public_key,
+            }),
+        })
+    }
 }
 
 #[derive(Clone, Eq, PartialEq, Hash, Debug)]
@@ -451,7 +479,7 @@ pub struct DnsRecordTXT {
     pub data: String,
 }
 
-pub type DnsRecordName = DnsRecordTXT;
+pub type DnsRecordQNAME = DnsRecordTXT;
 
 #[derive(Clone, Eq, PartialEq, Hash, Debug)]
 pub struct DnsRecordSRV {
@@ -459,6 +487,14 @@ pub struct DnsRecordSRV {
     pub weight: u16,
     pub port: u16,
     pub target: String,
+}
+
+#[derive(Clone, Eq, PartialEq, Hash, Debug)]
+pub struct DnsRecordDNSKEY {
+    pub flags: u16,
+    pub protocol: u8,
+    pub algorithm: u8,
+    pub public_key: Vec<u8>,
 }
 
 #[derive(Clone, Eq, PartialEq, Hash, Debug)]
@@ -571,6 +607,8 @@ mod tests {
         assert_eq!(QueryType::from_number(5), QueryType::CNAME);
         assert_eq!(QueryType::from_number(6), QueryType::SOA);
         assert_eq!(QueryType::from_number(2), QueryType::NS);
+        assert_eq!(QueryType::from_number(33), QueryType::SRV);
+        assert_eq!(QueryType::from_number(48), QueryType::DNSKEY);
         assert_eq!(QueryType::from_number(255), QueryType::Any);
     }
 
@@ -583,6 +621,8 @@ mod tests {
         assert_eq!(QueryType::CNAME.to_number(), 5);
         assert_eq!(QueryType::SOA.to_number(), 6);
         assert_eq!(QueryType::NS.to_number(), 2);
+        assert_eq!(QueryType::SRV.to_number(), 33);
+        assert_eq!(QueryType::DNSKEY.to_number(), 48);
         assert_eq!(QueryType::Any.to_number(), 255);
     }
 
