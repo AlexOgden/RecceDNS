@@ -5,7 +5,7 @@ use std::{
     time::Duration,
 };
 
-use crate::dns::{resolver::resolve_domain, protocol::QueryType};
+use crate::dns::{protocol::QueryType, resolver::resolve_domain};
 use crate::network::types::TransportProtocol;
 
 const DNS_PORT: u16 = 53;
@@ -118,7 +118,7 @@ mod test {
 
     #[test]
     fn check_dns_server_9_9_9_9_udp() {
-        let result = check_dns_server("9.9.9.9", &TransportProtocol::UDP);
+        let result = check_dns_server("1.1.1.1", &TransportProtocol::UDP);
         assert!(result.is_ok() || result.is_err());
     }
 
@@ -130,7 +130,7 @@ mod test {
 
     #[test]
     fn check_dns_server_9_9_9_9_tcp() {
-        let result = check_dns_server("9.9.9.9", &TransportProtocol::TCP);
+        let result = check_dns_server("1.1.1.1", &TransportProtocol::TCP);
         assert!(result.is_ok() || result.is_err());
     }
 
@@ -142,7 +142,7 @@ mod test {
 
     #[test]
     fn check_server_list_with_valid_servers_udp() {
-        let server_list = vec!["9.9.9.9", "8.8.8.8"];
+        let server_list = vec!["1.1.1.1", "8.8.8.8"];
         let result = check_server_list(&server_list, &TransportProtocol::UDP);
         assert!(result.is_ok());
     }
@@ -156,7 +156,7 @@ mod test {
 
     #[test]
     fn check_server_list_with_valid_servers_tcp() {
-        let server_list = vec!["9.9.9.9", "8.8.8.8"];
+        let server_list = vec!["1.1.1.1", "8.8.8.8"];
         let result = check_server_list(&server_list, &TransportProtocol::TCP);
         assert!(result.is_ok());
     }

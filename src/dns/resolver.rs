@@ -186,3 +186,33 @@ fn parse_dns_response(response: &[u8]) -> Result<DnsPacket, DnsError> {
 
     Ok(dns_packet)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_build_dns_query() {
+        let domain = "example.com";
+        let query_type = QueryType::A;
+        let dns_packet = build_dns_query(domain, &query_type).unwrap();
+
+        assert_eq!(dns_packet.header.questions, 1);
+        assert_eq!(dns_packet.questions.len(), 1);
+        assert_eq!(dns_packet.questions[0].domain, domain);
+        assert_eq!(dns_packet.questions[0].qtype, query_type);
+    }
+
+    #[test]
+    fn test_build_dns_query_empty_domain() {
+        let domain = "";
+        let query_type = QueryType::A;
+        let result = build_dns_query(domain, &query_type);
+
+        assert!(result.is_err());
+        assert_eq!(
+            result.unwrap_err().to_string(),
+            "Invalid data: Domain name cannot be empty"
+        );
+    }
+}
