@@ -81,6 +81,16 @@ impl PacketBuffer {
         Ok(result)
     }
 
+    pub fn read_bytes(&mut self, len: usize) -> Result<Vec<u8>> {
+        if self.pos + len >= 512 {
+            return Err(anyhow!("End of buffer"));
+        }
+        let result = self.buf[self.pos..self.pos + len].to_vec();
+        self.pos += len;
+
+        Ok(result)
+    }
+
     pub fn read_qname(&mut self, outstr: &mut String) -> Result<()> {
         let mut pos = self.pos();
 

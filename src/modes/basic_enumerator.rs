@@ -23,6 +23,24 @@ pub fn enumerate_records(args: &CommandArgs, dns_resolvers: &[&str]) -> Result<(
     let query_types = get_query_types();
     let mut seen_cnames = HashSet::new();
 
+    // Check if the domain is using DNSSEC
+    match resolve_domain(
+        resolver,
+        domain,
+        &QueryType::DNSKEY,
+        &args.transport_protocol,
+    ) {
+        Ok(response) => {
+            if !response.is_empty() {
+                println!("{}", format_response("DNSSEC", "is enabled"));
+            }
+        }
+        Err(DnsError::NoRecordsFound) => {
+            println!("{}", format_response("DNSSEC", "is not enabled"));
+        }
+        Err(err) => return Err(err.into()),
+    }
+
     for query_type in query_types {
         match resolve_domain(resolver, domain, &query_type, &args.transport_protocol) {
             Ok(mut response) => {
@@ -180,5 +198,6 @@ fn create_query_response_string(
             "[{} {} {} {} {}]",
             query_type_formatted, srv.priority, srv.weight, srv.port, srv.target
         )),
+        DnsRecord::DNSKEY(_dnskey) => Ok(format!("[{} Enabled]", "DNSSEC".bold().bright_cyan())),
     }
 }
