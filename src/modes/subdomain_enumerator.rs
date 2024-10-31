@@ -92,7 +92,7 @@ fn process_subdomain(
     dns_resolvers: &[&str],
     resolver_selector: &mut dyn ResolverSelector,
     query_types: &[QueryType],
-    subdomain: &String,
+    subdomain: &str,
     all_record_results: &mut HashSet<DnsQueryResponse>,
     response_data_vec: &mut Vec<DnsQueryResponse>,
     failed_queries: &mut HashSet<String>,
@@ -108,16 +108,16 @@ fn process_subdomain(
             Ok(response) => {
                 all_record_results.extend(response);
             }
+            Err(DnsError::NonExistentDomain) => {
+                break;
+            }
+            Err(DnsError::NoRecordsFound) => {}
             Err(err) => {
-                if matches!(err, DnsError::NonExistentDomain) {
-                    break;
-                } else if !matches!(err, DnsError::NoRecordsFound) {
-                    if !args.no_retry {
-                        failed_queries.insert(subdomain.clone());
-                    }
-                    print_query_error(args, subdomain, query_resolver, &err, false);
-                    break;
+                if !args.no_retry {
+                    failed_queries.insert(subdomain.to_string());
                 }
+                print_query_error(args, subdomain, query_resolver, &err, false);
+                break;
             }
         }
     }
@@ -125,7 +125,7 @@ fn process_subdomain(
     if !all_record_results.is_empty() {
         response_data_vec.clear();
         response_data_vec.extend(all_record_results.drain());
-        response_data_vec.sort_by(|a, b| a.query_type.cmp(&b.query_type));
+        response_data_vec.sort_by_key(|r| r.query_type.clone());
         let response_data_string = create_query_response_string(response_data_vec);
         print_query_result(args, subdomain, query_resolver, &response_data_string);
         *found_count += 1;
@@ -167,17 +167,16 @@ fn retry_failed_queries(
                 Ok(response) => {
                     all_record_results.extend(response);
                 }
+                Err(DnsError::NoRecordsFound) => {}
+                Err(DnsError::NonExistentDomain) => {
+                    break;
+                }
                 Err(err) => {
-                    if !matches!(err, DnsError::NoRecordsFound | DnsError::NonExistentDomain) {
-                        retry_failed_count += 1;
-                        failed_queries.insert(subdomain.clone());
+                    retry_failed_count += 1;
+                    if !args.no_retry {
+                        failed_queries.insert(subdomain.to_string());
                     }
-
                     print_query_error(args, &subdomain, query_resolver, &err, true);
-
-                    if matches!(err, DnsError::NonExistentDomain) {
-                        break;
-                    }
                 }
             }
         }
@@ -185,7 +184,7 @@ fn retry_failed_queries(
         if !all_record_results.is_empty() {
             response_data_vec.clear();
             response_data_vec.extend(all_record_results.drain());
-            response_data_vec.sort_by(|a, b| a.query_type.cmp(&b.query_type));
+            response_data_vec.sort_by_key(|r| r.query_type.clone());
             let response_data_string = create_query_response_string(response_data_vec);
             print_query_result(args, &subdomain, query_resolver, &response_data_string);
             *found_count += 1;
@@ -202,12 +201,10 @@ fn retry_failed_queries(
 }
 
 fn get_query_types(query_type: &QueryType) -> Vec<QueryType> {
-    let query_types: Vec<QueryType> = match query_type {
+    match query_type {
         QueryType::Any => vec![QueryType::A, QueryType::AAAA, QueryType::MX, QueryType::TXT],
         _ => vec![query_type.clone()],
-    };
-
-    query_types
+    }
 }
 
 fn setup_resolver_selector(args: &CommandArgs) -> Box<dyn ResolverSelector> {
@@ -326,34 +323,17 @@ fn print_query_result(args: &CommandArgs, subdomain: &str, resolver: &str, respo
         subdomain.cyan().bold(),
         args.target_domain.blue().italic()
     );
-
     let status = "+".green();
+    let mut message = format!("\r\x1b[2K[{status}] {domain}");
 
     if args.verbose || args.show_resolver {
-        if args.no_print_records {
-            println!(
-                "\r\x1b[2K[{}] {} [resolver: {}]",
-                status,
-                domain,
-                resolver.magenta()
-            );
-        } else {
-            println!(
-                "\r\x1b[2K[{}] {} [resolver: {}] {}",
-                status,
-                domain,
-                resolver.magenta(),
-                response
-            );
-        }
-        return;
+        message.push_str(&format!(" [resolver: {}]", resolver.magenta()));
+    }
+    if !args.no_print_records {
+        message.push_str(&format!(" {response}"));
     }
 
-    if args.no_print_records {
-        println!("\r\x1b[2K[{status}] {domain}");
-    } else {
-        println!("\r\x1b[2K[{status}] {domain} {response}");
-    }
+    println!("{message}");
 }
 
 fn print_query_error(
@@ -363,12 +343,6 @@ fn print_query_error(
     error: &DnsError,
     retry: bool,
 ) {
-    let domain = format!(
-        "{}.{}",
-        subdomain.red().bold(),
-        args.target_domain.blue().italic()
-    );
-
     if !args.verbose
         && !retry
         && matches!(
@@ -379,15 +353,18 @@ fn print_query_error(
         return;
     }
 
+    let domain = format!(
+        "{}.{}",
+        subdomain.red().bold(),
+        args.target_domain.blue().italic()
+    );
+    let status = "-".red();
+    let mut message = format!("\r\x1b[2K[{status}] {domain}");
+
     if args.show_resolver {
-        eprintln!(
-            "\r\x1b[2K[{}] {} [resolver: {}] {}",
-            "-".red(),
-            domain,
-            resolver.magenta(),
-            error
-        );
-    } else {
-        eprintln!("\r\x1b[2K[{}] {} {}", "-".red(), domain, error);
+        message.push_str(&format!(" [resolver: {}]", resolver.magenta()));
     }
+    message.push_str(&format!(" {error}"));
+
+    eprintln!("{message}");
 }

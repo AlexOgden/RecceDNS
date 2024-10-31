@@ -37,7 +37,7 @@ fn print_status(server_address: &str, status: &str) {
         "{} {:>width$}",
         server_address.bright_blue(),
         colored_status,
-        width = 30 - server_address.len()
+        width = 32 - server_address.len()
     );
 }
 
