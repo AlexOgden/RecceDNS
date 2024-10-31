@@ -417,13 +417,8 @@ impl DnsRecord {
     }
 
     fn parse_dnskey_record(buffer: &mut PacketBuffer, data_len: u16) -> Result<DnsQueryResponse> {
-        // Read flags (2 bytes)
         let flags = buffer.read_u16()?;
-
-        // Read protocol (1 byte)
         let protocol = buffer.read_u8()?;
-
-        // Read algorithm (1 byte)
         let algorithm = buffer.read_u8()?;
 
         // Read the remaining bytes as the public key
@@ -718,8 +713,9 @@ mod tests {
         assert_eq!(packet, read_packet);
     }
 
+    // Test reading a DNS packet from a byte array with record type A
     #[test]
-    fn test_dns_packet_read_from_byte_array() {
+    fn test_dns_packet_read_response_a() {
         // Mock DNS response byte array
         let response_bytes: [u8; 45] = [
             0x12, 0x34, // ID
@@ -765,6 +761,462 @@ mod tests {
             assert_eq!(a_record.ttl, 3600);
         } else {
             panic!("Expected A record");
+        }
+    }
+
+    // Test reading a DNS packet from a byte array with record type AAAA
+    #[test]
+    fn test_dns_packet_read_response_aaaa() {
+        // Mock DNS response byte array with AAAA record
+        let response_bytes: [u8; 55] = [
+            0x12, 0x34, // ID
+            0x81, 0x80, // Flags
+            0x00, 0x01, // Questions
+            0x00, 0x01, // Answer RRs
+            0x00, 0x00, // Authority RRs
+            0x00, 0x00, // Additional RRs
+            // Question section
+            0x07, 0x65, 0x78, 0x61, 0x6d, 0x70, 0x6c, 0x65, // "example"
+            0x03, 0x63, 0x6f, 0x6d, 0x00, // "com"
+            0x00, 0x1c, // Type AAAA
+            0x00, 0x01, // Class IN
+            // Answer section
+            0xc0, 0x0c, // Name (pointer to offset 12)
+            0x00, 0x1c, // Type AAAA
+            0x00, 0x01, // Class IN
+            0x00, 0x00, 0x0e, 0x10, // TTL (3600 seconds)
+            0x00, 0x10, // Data length
+            0x20, 0x01, 0x0d, 0xb8, 0x85, 0xa3, 0x00,
+            0x00, // Address 2001:db8:85a3::8a2e:370:7334
+            0x8a, 0x2e, 0x03, 0x70, 0x73, 0x34,
+        ];
+
+        let mut buffer = PacketBuffer::new();
+        buffer.set_data(&response_bytes).unwrap();
+        let packet = DnsPacket::from_buffer(&mut buffer).unwrap();
+
+        // Assertions
+        assert_eq!(packet.header.id, 0x1234);
+        assert!(packet.header.recursion_desired);
+        assert_eq!(packet.header.questions, 1);
+        assert_eq!(packet.header.answers, 1);
+        assert_eq!(packet.header.authoritative_entries, 0);
+        assert_eq!(packet.header.resource_entries, 0);
+
+        assert_eq!(packet.questions.len(), 1);
+        assert_eq!(packet.questions[0].domain, "example.com");
+        assert_eq!(packet.questions[0].qtype, QueryType::AAAA);
+
+        assert_eq!(packet.answers.len(), 1);
+        if let DnsRecord::AAAA(ref aaaa_record) = packet.answers[0].response_content {
+            assert_eq!(aaaa_record.domain, "example.com");
+            assert_eq!(
+                aaaa_record.addr,
+                Ipv6Addr::new(0x2001, 0x0db8, 0x85a3, 0x0000, 0x8a2e, 0x0370, 0x7334, 0x0000)
+            );
+            assert_eq!(aaaa_record.ttl, 3600);
+        } else {
+            panic!("Expected AAAA record");
+        }
+    }
+
+    // Test reading a DNS packet from a byte array with record type MX
+    #[test]
+    fn test_dns_packet_read_response_mx() {
+        // Mock DNS response byte array with MX record
+        let response_bytes: [u8; 50] = [
+            0x12, 0x34, // ID
+            0x81, 0x80, // Flags
+            0x00, 0x01, // Questions
+            0x00, 0x01, // Answer RRs
+            0x00, 0x00, // Authority RRs
+            0x00, 0x00, // Additional RRs
+            // Question section
+            0x07, 0x65, 0x78, 0x61, 0x6d, 0x70, 0x6c, 0x65, // "example"
+            0x03, 0x63, 0x6f, 0x6d, 0x00, // "com"
+            0x00, 0x0f, // Type MX
+            0x00, 0x01, // Class IN
+            // Answer section
+            0xc0, 0x0c, // Name (pointer to offset 12)
+            0x00, 0x0f, // Type MX
+            0x00, 0x01, // Class IN
+            0x00, 0x00, 0x0e, 0x10, // TTL (3600 seconds)
+            0x00, 0x11, // Data length
+            0x00, 0x0a, // Preference
+            0x04, 0x6d, 0x61, 0x69, 0x6c, // "mail"
+            0xc0, 0x0c, // Pointer to "example.com"
+        ];
+
+        let mut buffer = PacketBuffer::new();
+        buffer.set_data(&response_bytes).unwrap();
+        let packet = DnsPacket::from_buffer(&mut buffer).unwrap();
+
+        // Assertions
+        assert_eq!(packet.header.id, 0x1234);
+        assert!(packet.header.recursion_desired);
+        assert_eq!(packet.header.questions, 1);
+        assert_eq!(packet.header.answers, 1);
+        assert_eq!(packet.header.authoritative_entries, 0);
+        assert_eq!(packet.header.resource_entries, 0);
+
+        assert_eq!(packet.questions.len(), 1);
+        assert_eq!(packet.questions[0].domain, "example.com");
+        assert_eq!(packet.questions[0].qtype, QueryType::MX);
+
+        assert_eq!(packet.answers.len(), 1);
+        if let DnsRecord::MX(ref mx_record) = packet.answers[0].response_content {
+            assert_eq!(mx_record.domain, "mail.example.com");
+            assert_eq!(mx_record.priority, 10);
+            assert_eq!(mx_record.ttl, 3600);
+        } else {
+            panic!("Expected MX record");
+        }
+    }
+
+    // Test reading a DNS packet from a byte array with record type TXT
+    #[test]
+    fn test_dns_packet_read_response_txt() {
+        // Mock DNS response byte array with TXT record
+        let response_bytes: [u8; 78] = [
+            0x12, 0x34, // ID
+            0x81, 0x80, // Flags
+            0x00, 0x01, // Questions
+            0x00, 0x01, // Answer RRs
+            0x00, 0x00, // Authority RRs
+            0x00, 0x00, // Additional RRs
+            // Question section
+            0x07, 0x65, 0x78, 0x61, 0x6d, 0x70, 0x6c, 0x65, // "example"
+            0x03, 0x63, 0x6f, 0x6d, 0x00, // "com"
+            0x00, 0x10, // Type TXT
+            0x00, 0x01, // Class IN
+            // Answer section
+            0xc0, 0x0c, // Name (pointer to offset 12)
+            0x00, 0x10, // Type TXT
+            0x00, 0x01, // Class IN
+            0x00, 0x00, 0x0e, 0x10, // TTL (3600 seconds)
+            0x00, 0x1c, // Data length (28 bytes)
+            0x24, // TXT data length (27 bytes)
+            0x76, 0x3d, 0x73, 0x70, 0x66, 0x31, 0x20, 0x69, // "v=spf1 i"
+            0x6e, 0x63, 0x6c, 0x75, 0x64, 0x65, 0x3a, 0x5f, // "nclude:_"
+            0x73, 0x70, 0x66, 0x2e, 0x65, 0x78, 0x61, 0x6d, // "spf.exam"
+            0x70, 0x6c, 0x65, 0x2e, 0x63, 0x6f, 0x6d, 0x20, // "ple.com "
+            0x7e, 0x61, 0x6c, 0x6c, // "~all"
+        ];
+
+        let mut buffer = PacketBuffer::new();
+        buffer.set_data(&response_bytes).unwrap();
+        let packet = DnsPacket::from_buffer(&mut buffer).unwrap();
+
+        // Assertions
+        assert_eq!(packet.header.id, 0x1234);
+        assert!(packet.header.recursion_desired);
+        assert_eq!(packet.header.questions, 1);
+        assert_eq!(packet.header.answers, 1);
+        assert_eq!(packet.header.authoritative_entries, 0);
+        assert_eq!(packet.header.resource_entries, 0);
+
+        assert_eq!(packet.questions.len(), 1);
+        assert_eq!(packet.questions[0].domain, "example.com");
+        assert_eq!(packet.questions[0].qtype, QueryType::TXT);
+
+        assert_eq!(packet.answers.len(), 1);
+        if let DnsRecord::TXT(ref txt_record) = packet.answers[0].response_content {
+            assert_eq!(txt_record.data, "v=spf1 include:_spf.example.com ~all");
+            assert_eq!(txt_record.ttl, 3600);
+        } else {
+            panic!("Expected TXT record");
+        }
+    }
+
+    // Test reading a DNS packet from a byte array with record type CNAME
+    #[test]
+    fn test_dns_packet_read_response_cname() {
+        // Mock DNS response byte array with CNAME record
+        let response_bytes: [u8; 58] = [
+            0x12, 0x34, // ID
+            0x81, 0x80, // Flags
+            0x00, 0x01, // Questions
+            0x00, 0x01, // Answer RRs
+            0x00, 0x00, // Authority RRs
+            0x00, 0x00, // Additional RRs
+            // Question section
+            0x07, 0x65, 0x78, 0x61, 0x6d, 0x70, 0x6c, 0x65, // "example"
+            0x03, 0x63, 0x6f, 0x6d, 0x00, // "com"
+            0x00, 0x05, // Type CNAME
+            0x00, 0x01, // Class IN
+            // Answer section
+            0xc0, 0x0c, // Name (pointer to offset 12)
+            0x00, 0x05, // Type CNAME
+            0x00, 0x01, // Class IN
+            0x00, 0x00, 0x0e, 0x10, // TTL (3600 seconds)
+            0x00, 0x0f, // Data length
+            0x03, 0x77, 0x77, 0x77, // "www"
+            0x07, 0x65, 0x78, 0x61, 0x6d, 0x70, 0x6c, 0x65, // "example"
+            0x03, 0x63, 0x6f, 0x6d, 0x00, // "com"
+        ];
+
+        let mut buffer = PacketBuffer::new();
+        buffer.set_data(&response_bytes).unwrap();
+        let packet = DnsPacket::from_buffer(&mut buffer).unwrap();
+
+        // Assertions
+        assert_eq!(packet.header.id, 0x1234);
+        assert!(packet.header.recursion_desired);
+        assert_eq!(packet.header.questions, 1);
+        assert_eq!(packet.header.answers, 1);
+        assert_eq!(packet.header.authoritative_entries, 0);
+        assert_eq!(packet.header.resource_entries, 0);
+
+        assert_eq!(packet.questions.len(), 1);
+        assert_eq!(packet.questions[0].domain, "example.com");
+        assert_eq!(packet.questions[0].qtype, QueryType::CNAME);
+
+        assert_eq!(packet.answers.len(), 1);
+        if let DnsRecord::CNAME(ref cname_record) = packet.answers[0].response_content {
+            assert_eq!(cname_record.data, "www.example.com");
+            assert_eq!(cname_record.ttl, 3600);
+        } else {
+            panic!("Expected CNAME record");
+        }
+    }
+
+    // Test reading a DNS packet from a byte array with record type SOA
+    #[test]
+    fn test_dns_packet_read_response_soa() {
+        // Mock DNS response byte array with SOA record
+        let response_bytes: [u8; 95] = [
+            0x12, 0x34, // ID
+            0x81, 0x80, // Flags
+            0x00, 0x01, // Questions
+            0x00, 0x01, // Answer RRs
+            0x00, 0x00, // Authority RRs
+            0x00, 0x00, // Additional RRs
+            // Question section
+            0x07, 0x65, 0x78, 0x61, 0x6d, 0x70, 0x6c, 0x65, // "example"
+            0x03, 0x63, 0x6f, 0x6d, 0x00, // "com"
+            0x00, 0x06, // Type SOA
+            0x00, 0x01, // Class IN
+            // Answer section
+            0xc0, 0x0c, // Name (pointer to offset 12)
+            0x00, 0x06, // Type SOA
+            0x00, 0x01, // Class IN
+            0x00, 0x00, 0x0e, 0x10, // TTL (3600 seconds)
+            0x00, 0x22, // Data length
+            0x03, 0x6e, 0x73, 0x31, // "ns1"
+            0x07, 0x65, 0x78, 0x61, 0x6d, 0x70, 0x6c, 0x65, // "example"
+            0x03, 0x63, 0x6f, 0x6d, 0x00, // "com"
+            0x03, 0x61, 0x64, 0x6d, // "adm"
+            0x07, 0x65, 0x78, 0x61, 0x6d, 0x70, 0x6c, 0x65, // "example"
+            0x03, 0x63, 0x6f, 0x6d, 0x00, // "com"
+            0x00, 0x00, 0x00, 0x01, // Serial
+            0x00, 0x00, 0x0e, 0x10, // Refresh
+            0x00, 0x00, 0x0e, 0x10, // Retry
+            0x00, 0x00, 0x0e, 0x10, // Expire
+            0x00, 0x00, 0x0e, 0x10, // Minimum
+        ];
+
+        let mut buffer = PacketBuffer::new();
+        buffer.set_data(&response_bytes).unwrap();
+        let packet = DnsPacket::from_buffer(&mut buffer).unwrap();
+
+        // Assertions
+        assert_eq!(packet.header.id, 0x1234);
+        assert!(packet.header.recursion_desired);
+        assert_eq!(packet.header.questions, 1);
+        assert_eq!(packet.header.answers, 1);
+        assert_eq!(packet.header.authoritative_entries, 0);
+        assert_eq!(packet.header.resource_entries, 0);
+
+        assert_eq!(packet.questions.len(), 1);
+        assert_eq!(packet.questions[0].domain, "example.com");
+        assert_eq!(packet.questions[0].qtype, QueryType::SOA);
+
+        assert_eq!(packet.answers.len(), 1);
+        if let DnsRecord::SOA(ref soa_record) = packet.answers[0].response_content {
+            assert_eq!(soa_record.mname, "ns1.example.com");
+            assert_eq!(soa_record.rname, "adm.example.com");
+            assert_eq!(soa_record.serial, 1);
+            assert_eq!(soa_record.refresh, 3600);
+            assert_eq!(soa_record.retry, 3600);
+            assert_eq!(soa_record.expire, 3600);
+            assert_eq!(soa_record.minimum, 3600);
+        } else {
+            panic!("Expected SOA record");
+        }
+    }
+
+    // Test reading a DNS packet from a byte array with record type NS
+    #[test]
+    fn test_dns_packet_read_response_ns() {
+        // Mock DNS response byte array with NS record
+        let response_bytes: [u8; 58] = [
+            0x12, 0x34, // ID
+            0x81, 0x80, // Flags
+            0x00, 0x01, // Questions
+            0x00, 0x01, // Answer RRs
+            0x00, 0x00, // Authority RRs
+            0x00, 0x00, // Additional RRs
+            // Question section
+            0x07, 0x65, 0x78, 0x61, 0x6d, 0x70, 0x6c, 0x65, // "example"
+            0x03, 0x63, 0x6f, 0x6d, 0x00, // "com"
+            0x00, 0x02, // Type NS
+            0x00, 0x01, // Class IN
+            // Answer section
+            0xc0, 0x0c, // Name (pointer to offset 12)
+            0x00, 0x02, // Type NS
+            0x00, 0x01, // Class IN
+            0x00, 0x00, 0x0e, 0x10, // TTL (3600 seconds)
+            0x00, 0x0f, // Data length
+            0x03, 0x6e, 0x73, 0x31, // "ns1"
+            0x07, 0x65, 0x78, 0x61, 0x6d, 0x70, 0x6c, 0x65, // "example"
+            0x03, 0x63, 0x6f, 0x6d, 0x00, // "com"
+        ];
+
+        let mut buffer = PacketBuffer::new();
+        buffer.set_data(&response_bytes).unwrap();
+        let packet = DnsPacket::from_buffer(&mut buffer).unwrap();
+
+        // Assertions
+        assert_eq!(packet.header.id, 0x1234);
+        assert!(packet.header.recursion_desired);
+        assert_eq!(packet.header.questions, 1);
+        assert_eq!(packet.header.answers, 1);
+        assert_eq!(packet.header.authoritative_entries, 0);
+        assert_eq!(packet.header.resource_entries, 0);
+
+        assert_eq!(packet.questions.len(), 1);
+        assert_eq!(packet.questions[0].domain, "example.com");
+        assert_eq!(packet.questions[0].qtype, QueryType::NS);
+
+        assert_eq!(packet.answers.len(), 1);
+        if let DnsRecord::NS(ref ns_record) = packet.answers[0].response_content {
+            assert_eq!(ns_record.data, "ns1.example.com");
+            assert_eq!(ns_record.ttl, 3600);
+        } else {
+            panic!("Expected NS record");
+        }
+    }
+
+    // Test reading a DNS packet from a byte array with record type SRV
+    #[test]
+    fn test_dns_packet_read_response_srv() {
+        // Mock DNS response byte array with SRV record
+        let response_bytes: [u8; 64] = [
+            0x12, 0x34, // ID
+            0x81, 0x80, // Flags
+            0x00, 0x01, // Questions
+            0x00, 0x01, // Answer RRs
+            0x00, 0x00, // Authority RRs
+            0x00, 0x00, // Additional RRs
+            // Question section
+            0x07, 0x65, 0x78, 0x61, 0x6d, 0x70, 0x6c, 0x65, // "example"
+            0x03, 0x63, 0x6f, 0x6d, 0x00, // "com"
+            0x00, 0x21, // Type SRV
+            0x00, 0x01, // Class IN
+            // Answer section
+            0xc0, 0x0c, // Name (pointer to offset 12)
+            0x00, 0x21, // Type SRV
+            0x00, 0x01, // Class IN
+            0x00, 0x00, 0x0e, 0x10, // TTL (3600 seconds)
+            0x00, 0x15, // Data length
+            0x00, 0x05, // Priority
+            0x00, 0x0a, // Weight
+            0x1f, 0x90, // Port (8080)
+            0x03, 0x77, 0x77, 0x77, // "www"
+            0x07, 0x65, 0x78, 0x61, 0x6d, 0x70, 0x6c, 0x65, // "example"
+            0x03, 0x63, 0x6f, 0x6d, 0x00, // "com"
+        ];
+
+        let mut buffer = PacketBuffer::new();
+        buffer.set_data(&response_bytes).unwrap();
+        let packet = DnsPacket::from_buffer(&mut buffer).unwrap();
+
+        // Assertions
+        assert_eq!(packet.header.id, 0x1234);
+        assert!(packet.header.recursion_desired);
+        assert_eq!(packet.header.questions, 1);
+        assert_eq!(packet.header.answers, 1);
+        assert_eq!(packet.header.authoritative_entries, 0);
+        assert_eq!(packet.header.resource_entries, 0);
+
+        assert_eq!(packet.questions.len(), 1);
+        assert_eq!(packet.questions[0].domain, "example.com");
+        assert_eq!(packet.questions[0].qtype, QueryType::SRV);
+
+        assert_eq!(packet.answers.len(), 1);
+        if let DnsRecord::SRV(ref srv_record) = packet.answers[0].response_content {
+            assert_eq!(srv_record.priority, 5);
+            assert_eq!(srv_record.weight, 10);
+            assert_eq!(srv_record.port, 8080);
+            assert_eq!(srv_record.target, "www.example.com");
+        } else {
+            panic!("Expected SRV record");
+        }
+    }
+
+    // Test reading a DNS packet from a byte array with record type DNSKEY
+    #[test]
+    fn test_dns_packet_read_response_dnskey() {
+        // Mock DNS response byte array with DNSKEY record
+        let response_bytes: [u8; 77] = [
+            0x12, 0x34, // ID
+            0x81, 0x80, // Flags
+            0x00, 0x01, // Questions
+            0x00, 0x01, // Answer RRs
+            0x00, 0x00, // Authority RRs
+            0x00, 0x00, // Additional RRs
+            // Question section
+            0x07, 0x65, 0x78, 0x61, 0x6d, 0x70, 0x6c, 0x65, // "example"
+            0x03, 0x63, 0x6f, 0x6d, 0x00, // "com"
+            0x00, 0x30, // Type DNSKEY
+            0x00, 0x01, // Class IN
+            // Answer section
+            0xc0, 0x0c, // Name (pointer to offset 12)
+            0x00, 0x30, // Type DNSKEY
+            0x00, 0x01, // Class IN
+            0x00, 0x00, 0x0e, 0x10, // TTL (3600 seconds)
+            0x00, 0x24, // Data length (36 bytes)
+            // DNSKEY data
+            0x01, 0x01, // Flags
+            0x03, // Protocol
+            0x08, // Algorithm (Ed25519)
+            // Key (32 bytes)
+            0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA,
+            0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA,
+            0xAA, 0xAA, 0xAA, 0xFF,
+        ];
+
+        let mut buffer = PacketBuffer::new();
+        buffer.set_data(&response_bytes).unwrap();
+        let packet = DnsPacket::from_buffer(&mut buffer).unwrap();
+
+        // Assertions
+        assert_eq!(packet.header.id, 0x1234);
+        assert!(packet.header.recursion_desired);
+        assert_eq!(packet.header.questions, 1);
+        assert_eq!(packet.header.answers, 1);
+        assert_eq!(packet.header.authoritative_entries, 0);
+        assert_eq!(packet.header.resource_entries, 0);
+
+        assert_eq!(packet.questions.len(), 1);
+        assert_eq!(packet.questions[0].domain, "example.com");
+        assert_eq!(packet.questions[0].qtype, QueryType::DNSKEY);
+
+        assert_eq!(packet.answers.len(), 1);
+        if let DnsRecord::DNSKEY(ref dnskey_record) = packet.answers[0].response_content {
+            assert_eq!(dnskey_record.flags, 0x0101);
+            assert_eq!(dnskey_record.protocol, 3);
+            assert_eq!(dnskey_record.algorithm, 8);
+            assert_eq!(
+                dnskey_record.public_key,
+                [
+                    0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA,
+                    0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA,
+                    0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xFF,
+                ]
+            );
+        } else {
+            panic!("Expected DNSKEY record");
         }
     }
 }
