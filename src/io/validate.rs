@@ -1,4 +1,4 @@
-use anyhow::{anyhow, Context, Result};
+use anyhow::{anyhow, ensure, Context, Result};
 use lazy_static::lazy_static;
 use regex::Regex;
 use std::net::Ipv4Addr;
@@ -10,35 +10,27 @@ lazy_static! {
 
 pub fn domain(domain: &str) -> Result<String> {
     if DOMAIN_REGEX.is_match(domain) {
-        Ok(domain.to_owned())
+        Ok(domain.to_string())
     } else {
-        Err(anyhow!("Invalid domain name: {}", domain))
+        Err(anyhow!("Invalid domain name: {domain}"))
     }
 }
 
-pub fn parse_dns_resolvers(servers: &str) -> Result<Vec<Ipv4Addr>> {
-    if servers.is_empty() {
-        return Err(anyhow!("No DNS resolvers provided"));
-    }
+pub fn dns_resolver_list(servers: &str) -> Result<String> {
+    let server_list: Vec<&str> = servers.split(',').collect();
 
-    let server_list = servers
-        .split(',')
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-        .collect::<Vec<&str>>();
+    ensure!(
+        server_list.iter().all(|&server| ipv4(server).is_ok()),
+        "DNS Resolver(s) invalid. Comma-separated IPv4 only."
+    );
 
-    let mut validated_resolvers = Vec::with_capacity(server_list.len());
-
-    for server in server_list {
-        validated_resolvers.push(ipv4(server)?);
-    }
-
-    Ok(validated_resolvers)
+    Ok(servers.to_string())
 }
 
-pub fn ipv4(ip: &str) -> Result<Ipv4Addr> {
+pub fn ipv4(ip: &str) -> Result<String> {
     ip.parse::<Ipv4Addr>()
         .with_context(|| format!("Invalid IPv4 address: {ip}"))
+        .map(|_| ip.to_string())
 }
 
 #[cfg(test)]
@@ -55,7 +47,7 @@ mod test {
             "0.0.0.0",
         ];
         for ip in valid_ips {
-            assert_eq!(ipv4(ip).unwrap(), ip.parse::<Ipv4Addr>().unwrap());
+            assert_eq!(ipv4(ip).unwrap(), ip);
         }
     }
 
@@ -78,29 +70,26 @@ mod test {
     #[test]
     fn valid_dns_resolver_list() {
         assert_eq!(
-            parse_dns_resolvers("192.0.2.1,8.8.8.8").unwrap(),
-            vec![
-                "192.0.2.1".parse::<Ipv4Addr>().unwrap(),
-                "8.8.8.8".parse::<Ipv4Addr>().unwrap()
-            ]
+            dns_resolver_list("192.0.2.1,8.8.8.8").unwrap(),
+            "192.0.2.1,8.8.8.8"
         );
     }
 
     #[test]
     fn invalid_dns_resolver_list() {
         // Test with invalid IP address
-        assert!(parse_dns_resolvers("192.0.2.1,256.0.0.1").is_err());
+        assert!(dns_resolver_list("192.0.2.1,256.0.0.1").is_err());
 
         // Test with non-IPv4 address
-        assert!(parse_dns_resolvers("192.0.2.1,example.com").is_err());
+        assert!(dns_resolver_list("192.0.2.1,example.com").is_err());
 
         // Test with invalid format
-        assert!(parse_dns_resolvers("192.0.2.1,8.8.8.8,invalid").is_err());
+        assert!(dns_resolver_list("192.0.2.1,8.8.8.8,invalid").is_err());
     }
 
     #[test]
     fn empty_dns_resolver_list() {
-        assert!(parse_dns_resolvers("").is_err());
+        assert!(dns_resolver_list("").is_err());
     }
 
     #[test]

@@ -167,16 +167,17 @@ fn retry_failed_queries(
                 Ok(response) => {
                     all_record_results.extend(response);
                 }
-                Err(DnsError::NoRecordsFound) => {}
-                Err(DnsError::NonExistentDomain) => {
-                    break;
-                }
                 Err(err) => {
-                    retry_failed_count += 1;
-                    if !args.no_retry {
-                        failed_queries.insert(subdomain.to_string());
+                    if !matches!(err, DnsError::NoRecordsFound | DnsError::NonExistentDomain) {
+                        retry_failed_count += 1;
+                        failed_queries.insert(subdomain.clone());
                     }
+
                     print_query_error(args, &subdomain, query_resolver, &err, true);
+
+                    if matches!(err, DnsError::NonExistentDomain) {
+                        break;
+                    }
                 }
             }
         }
