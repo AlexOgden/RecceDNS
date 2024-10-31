@@ -1,6 +1,6 @@
 use crate::{
     dns::protocol::QueryType,
-    io::validate::{dns_resolver_list, domain},
+    io::validate::{domain, parse_dns_resolvers},
     network::types::TransportProtocol,
 };
 use clap::{Parser, ValueEnum};
@@ -28,7 +28,7 @@ pub struct CommandArgs {
     pub target_domain: String,
 
     /// IPv4 Address of the DNS resolver(s) to use (comma-seperated). Multiple resolvers will selected either randomly or sequentially
-    #[arg(short, long, default_value = "1.1.1.1", value_parser = dns_resolver_list, required = false)]
+    #[arg(short, long, default_value = "1.1.1.1", value_parser = parse_dns_resolvers, required = false)]
     pub dns_resolvers: String,
 
     /// Transport protocol to use for DNS queries
