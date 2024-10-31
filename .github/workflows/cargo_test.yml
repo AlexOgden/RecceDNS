@@ -3,8 +3,16 @@ name: Run Tests
 on:
   push:
     branches: [ "master" ]
+    paths:
+      - '**/*.rs'          # Rust source files
+      - 'Cargo.toml'       # Cargo.toml file
+      - 'Cargo.lock'       # Cargo.lock file
   pull_request:
     branches: [ "master" ]
+    paths:
+      - '**/*.rs'          # Rust source files
+      - 'Cargo.toml'       # Cargo.toml file
+      - 'Cargo.lock'       # Cargo.lock file
 
 env:
   CARGO_TERM_COLOR: always
