@@ -14,8 +14,8 @@ fn main() -> Result<()> {
         io::cli::print_ascii_art();
     }
 
-    let dns_resolvers = args.dns_resolvers.split(',').collect();
-    let dns_resolvers = validate_dns_resolvers(&args, dns_resolvers);
+    let dns_resolvers: Vec<&str> = args.dns_resolvers.split(',').collect();
+    let dns_resolvers: Vec<&str> = validate_dns_resolvers(&args, &dns_resolvers);
     ensure!(
         !dns_resolvers.is_empty(),
         "No DNS Resolvers in list! At least one resolver must be working!"
@@ -31,17 +31,19 @@ fn main() -> Result<()> {
     }
 }
 
-fn validate_dns_resolvers<'a>(args: &CommandArgs, dns_resolvers: Vec<&'a str>) -> Vec<&'a str> {
+fn validate_dns_resolvers<'a>(args: &CommandArgs, dns_resolvers: &[&'a str]) -> Vec<&'a str> {
     if args.no_dns_check {
-        dns_resolvers
-    } else {
-        // Get the list of working DNS resolvers
-        let transport_protocol = network::types::TransportProtocol::UDP;
-        let working_resolvers: Vec<String> =
-            net_check::check_dns_resolvers(&dns_resolvers, &transport_protocol);
-        dns_resolvers
-            .into_iter()
-            .filter(|resolver| working_resolvers.contains(&(*resolver).to_string()))
-            .collect()
+        return dns_resolvers.to_vec();
     }
+
+    let transport_protocol = network::types::TransportProtocol::UDP;
+    let working_resolvers = net_check::check_dns_resolvers(dns_resolvers, &transport_protocol);
+
+    let filtered_resolvers: Vec<&'a str> = dns_resolvers
+        .iter()
+        .copied()
+        .filter(|resolver| working_resolvers.contains(resolver))
+        .collect();
+
+    filtered_resolvers
 }

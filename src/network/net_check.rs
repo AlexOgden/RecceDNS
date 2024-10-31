@@ -41,12 +41,12 @@ fn print_status(server_address: &str, status: &str) {
     );
 }
 
-pub fn check_dns_resolvers(
-    dns_resolvers: &[&str],
+pub fn check_dns_resolvers<'a>(
+    dns_resolvers: &[&'a str],
     transport_protocol: &TransportProtocol,
-) -> Vec<String> {
-    let mut working_servers: Vec<String> = Vec::new();
-    let mut failed_servers: Vec<(&str, &str)> = Vec::new();
+) -> Vec<&'a str> {
+    let mut working_servers: Vec<&'a str> = Vec::new();
+    let mut failed_servers: Vec<(&'a str, &str)> = Vec::new();
 
     println!("Checking DNS Servers...");
 
@@ -65,7 +65,7 @@ pub fn check_dns_resolvers(
             failed_servers.push((server, "No response"));
         } else {
             print_status(server, "OK");
-            working_servers.push(server.to_string());
+            working_servers.push(server); // Push &str directly
         }
     }
 
