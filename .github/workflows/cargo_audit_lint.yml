@@ -1,0 +1,42 @@
+name: Lint and Audit
+
+on:
+  push:
+    branches: [ "master" ]
+    paths:
+      - '**/*.rs'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+  pull_request:
+    branches: [ "master" ]
+    paths:
+      - '**/*.rs'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Rust
+      uses: actions-rs/toolchain@v1
+      with:
+        toolchain: stable
+        override: true
+
+    - name: Install Clippy and Audit
+      run: |
+        rustup component add clippy
+        cargo install cargo-audit
+
+    - name: Check Formatting
+      run: cargo fmt -- --check
+
+    - name: Run Clippy
+      run: cargo clippy --verbose -- -D warnings
+
+    - name: Run Audit
+      run: cargo audit
