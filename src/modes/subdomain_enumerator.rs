@@ -21,18 +21,18 @@ pub fn enumerate_subdomains(args: &CommandArgs, dns_resolvers: &[&str]) -> Resul
         return Ok(());
     }
 
-    let query_types: Vec<QueryType> = get_query_types(&args.query_type);
-    let subdomains: Vec<String> = read_wordlist(&args.wordlist)?;
+    let query_types = get_query_types(&args.query_type);
+    let subdomains = read_wordlist(&args.wordlist)?;
     let mut resolver_selector = setup_resolver_selector(args);
 
     let total_subdomains = subdomains.len() as u64;
     let progress_bar = cli::setup_progress_bar(total_subdomains);
 
     let mut found_count: u32 = 0;
-    let mut failed_queries: HashSet<String> = HashSet::new();
+    let mut failed_queries = HashSet::new();
 
     let mut all_record_results = HashSet::new();
-    let mut response_data_vec: Vec<DnsQueryResponse> = Vec::new();
+    let mut response_data_vec = Vec::new();
 
     let start_time = Instant::now();
 
