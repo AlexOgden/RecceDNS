@@ -4,15 +4,15 @@ on:
   push:
     branches: [ "master" ]
     paths:
-      - '**/*.rs'          # Rust source files
-      - 'Cargo.toml'       # Cargo.toml file
-      - 'Cargo.lock'       # Cargo.lock file
+      - '**/*.rs'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
   pull_request:
     branches: [ "master" ]
     paths:
-      - '**/*.rs'          # Rust source files
-      - 'Cargo.toml'       # Cargo.toml file
-      - 'Cargo.lock'       # Cargo.lock file
+      - '**/*.rs'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
 
 env:
   CARGO_TERM_COLOR: always
@@ -26,6 +26,24 @@ jobs:
 
     steps:
     - uses: actions/checkout@v4
+
+    - name: Cache Rust Toolchain
+      uses: actions/cache@v3
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+          ~/.rustup/toolchains
+        key: ${{ runner.os }}-rust-toolchain-${{ hashFiles('**/Cargo.lock') }}
+        restore-keys: |
+          ${{ runner.os }}-rust-toolchain-
+
+    - name: Set up Rust
+      uses: actions-rs/toolchain@v1
+      with:
+        toolchain: stable
+        override: true
+
     - name: Build
       run: cargo build --verbose
 
