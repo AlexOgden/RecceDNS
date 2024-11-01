@@ -3,6 +3,7 @@
 
 use anyhow::{anyhow, Context, Result};
 use clap::ValueEnum;
+use num_enum::{IntoPrimitive, TryFromPrimitive};
 use std::net::{Ipv4Addr, Ipv6Addr};
 use strum_macros::Display;
 
@@ -10,58 +11,35 @@ use crate::io::packet_buffer::PacketBuffer;
 
 use super::error::DnsError;
 
-trait MapFromNumber {
-    fn from_number(num: u16) -> Self;
-    fn to_number(&self) -> u16;
-}
-
-macro_rules! map_from_number {
-    ($enum_name:ident, $($num:expr => $variant:ident),*) => {
-        impl MapFromNumber for $enum_name {
-            fn from_number(num: u16) -> Self {
-                match num {
-                    $( $num => Self::$variant, )*
-                    _ => unimplemented!(),
-                }
-            }
-
-            fn to_number(&self) -> u16 {
-                match self {
-                    $( Self::$variant => $num, )*
-                }
-            }
-        }
-    };
-}
-
-// Enums and their implementations
-#[derive(Debug, PartialEq, Eq, Clone, ValueEnum, Display, Hash, PartialOrd, Ord)]
+#[derive(
+    Debug,
+    PartialEq,
+    Eq,
+    Clone,
+    ValueEnum,
+    Display,
+    Hash,
+    PartialOrd,
+    Ord,
+    IntoPrimitive,
+    TryFromPrimitive,
+)]
+#[repr(u16)]
 pub enum QueryType {
-    #[strum(to_string = "A")]
     A = 1,
-    #[strum(to_string = "AAAA")]
-    AAAA = 28,
-    #[strum(to_string = "MX")]
-    MX = 15,
-    #[strum(to_string = "TXT")]
-    TXT = 16,
-    #[strum(to_string = "CNAME")]
-    CNAME = 5,
-    #[strum(to_string = "SOA")]
-    SOA = 6,
-    #[strum(to_string = "NS")]
     NS = 2,
-    #[strum(to_string = "SRV")]
+    CNAME = 5,
+    SOA = 6,
+    MX = 15,
+    TXT = 16,
+    AAAA = 28,
     SRV = 33,
-    #[strum(to_string = "DNSKEY")]
     DNSKEY = 48,
-    #[strum(to_string = "any")]
-    Any = 255,
+    ANY = 255,
 }
 
-map_from_number!(QueryType, 1 => A, 28 => AAAA, 15 => MX, 16 => TXT, 5 => CNAME, 6 => SOA, 2 => NS, 33 => SRV, 48 => DNSKEY, 255 => Any);
-
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, IntoPrimitive, TryFromPrimitive)]
+#[repr(u8)]
 pub enum ResultCode {
     NOERROR = 0,
     FORMERR = 1,
@@ -70,8 +48,6 @@ pub enum ResultCode {
     NOTIMP = 4,
     REFUSED = 5,
 }
-
-map_from_number!(ResultCode, 0 => NOERROR, 1 => FORMERR, 2 => SERVFAIL, 3 => NXDOMAIN, 4 => NOTIMP, 5 => REFUSED);
 
 // Structs and their implementations
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -132,7 +108,7 @@ impl DnsHeader {
         self.opcode = (a >> 3) & 0x0F;
         self.response = (a & (1 << 7)) > 0;
 
-        self.rescode = ResultCode::from_number((b & 0x0F).into());
+        self.rescode = ResultCode::try_from(b & 0x0F)?;
         self.checking_disabled = (b & (1 << 4)) > 0;
         self.authed_data = (b & (1 << 5)) > 0;
         self.z = (b & (1 << 6)) > 0;
@@ -187,7 +163,7 @@ impl DnsQuestion {
 
     pub fn read(&mut self, buffer: &mut PacketBuffer) -> Result<()> {
         buffer.read_qname(&mut self.domain)?;
-        self.qtype = QueryType::from_number(buffer.read_u16()?);
+        self.qtype = QueryType::try_from(buffer.read_u16()?)?;
         let _qclass = buffer.read_u16()?;
 
         Ok(())
@@ -196,7 +172,7 @@ impl DnsQuestion {
     pub fn write(&self, buffer: &mut PacketBuffer) -> Result<()> {
         buffer.write_qname(&self.domain)?;
 
-        let typenum = self.qtype.to_number();
+        let typenum = self.qtype.clone() as u16;
         buffer.write_u16(typenum)?;
         buffer.write_u16(1)?;
 
@@ -225,7 +201,7 @@ impl DnsRecord {
             .context("Failed to read domain name")?;
 
         let qtype_num = buffer.read_u16().context("Failed to read query type")?;
-        let qtype = QueryType::from_number(qtype_num);
+        let qtype = QueryType::try_from(qtype_num)?;
         let _class = buffer.read_u16().context("Failed to read class")?;
         let ttl = buffer.read_u32().context("Failed to read TTL")?;
         let data_len = buffer.read_u16().context("Failed to read data length")?;
@@ -240,7 +216,7 @@ impl DnsRecord {
             QueryType::SOA => Self::parse_soa_record(buffer),
             QueryType::SRV => Self::parse_srv_record(buffer),
             QueryType::DNSKEY => Self::parse_dnskey_record(buffer, data_len),
-            QueryType::Any => Err(anyhow!("Unsupported query type {qtype}")),
+            QueryType::ANY => Err(anyhow!("Unsupported query type {qtype}")),
         }
     }
 
@@ -254,7 +230,7 @@ impl DnsRecord {
                 ttl,
             }) => {
                 buffer.write_qname(domain)?;
-                buffer.write_u16(QueryType::A.to_number())?;
+                buffer.write_u16(QueryType::A as u16)?;
                 buffer.write_u16(1)?;
                 buffer.write_u32(ttl)?;
                 buffer.write_u16(4)?;
@@ -526,7 +502,7 @@ impl DnsPacket {
             .map_err(|_| DnsError::ProtocolData("Failed to read DNS header".to_owned()))?;
 
         for _ in 0..result.header.questions {
-            let mut question = DnsQuestion::new(String::new(), QueryType::Any);
+            let mut question = DnsQuestion::new(String::new(), QueryType::ANY);
             question
                 .read(buffer)
                 .map_err(|_| DnsError::ProtocolData("Failed to read DNS question".to_owned()))?;
@@ -595,50 +571,50 @@ mod tests {
 
     #[test]
     fn test_query_type_from_number() {
-        assert_eq!(QueryType::from_number(1), QueryType::A);
-        assert_eq!(QueryType::from_number(28), QueryType::AAAA);
-        assert_eq!(QueryType::from_number(15), QueryType::MX);
-        assert_eq!(QueryType::from_number(16), QueryType::TXT);
-        assert_eq!(QueryType::from_number(5), QueryType::CNAME);
-        assert_eq!(QueryType::from_number(6), QueryType::SOA);
-        assert_eq!(QueryType::from_number(2), QueryType::NS);
-        assert_eq!(QueryType::from_number(33), QueryType::SRV);
-        assert_eq!(QueryType::from_number(48), QueryType::DNSKEY);
-        assert_eq!(QueryType::from_number(255), QueryType::Any);
+        assert_eq!(QueryType::try_from(1_u16).unwrap(), QueryType::A);
+        assert_eq!(QueryType::try_from(28_u16).unwrap(), QueryType::AAAA);
+        assert_eq!(QueryType::try_from(15_u16).unwrap(), QueryType::MX);
+        assert_eq!(QueryType::try_from(16_u16).unwrap(), QueryType::TXT);
+        assert_eq!(QueryType::try_from(5_u16).unwrap(), QueryType::CNAME);
+        assert_eq!(QueryType::try_from(6_u16).unwrap(), QueryType::SOA);
+        assert_eq!(QueryType::try_from(2_u16).unwrap(), QueryType::NS);
+        assert_eq!(QueryType::try_from(33_u16).unwrap(), QueryType::SRV);
+        assert_eq!(QueryType::try_from(48_u16).unwrap(), QueryType::DNSKEY);
+        assert_eq!(QueryType::try_from(255_u16).unwrap(), QueryType::ANY);
     }
 
     #[test]
     fn test_query_type_to_number() {
-        assert_eq!(QueryType::A.to_number(), 1);
-        assert_eq!(QueryType::AAAA.to_number(), 28);
-        assert_eq!(QueryType::MX.to_number(), 15);
-        assert_eq!(QueryType::TXT.to_number(), 16);
-        assert_eq!(QueryType::CNAME.to_number(), 5);
-        assert_eq!(QueryType::SOA.to_number(), 6);
-        assert_eq!(QueryType::NS.to_number(), 2);
-        assert_eq!(QueryType::SRV.to_number(), 33);
-        assert_eq!(QueryType::DNSKEY.to_number(), 48);
-        assert_eq!(QueryType::Any.to_number(), 255);
+        assert_eq!(QueryType::A as u16, 1);
+        assert_eq!(QueryType::NS as u16, 2);
+        assert_eq!(QueryType::CNAME as u16, 5);
+        assert_eq!(QueryType::SOA as u16, 6);
+        assert_eq!(QueryType::MX as u16, 15);
+        assert_eq!(QueryType::TXT as u16, 16);
+        assert_eq!(QueryType::AAAA as u16, 28);
+        assert_eq!(QueryType::SRV as u16, 33);
+        assert_eq!(QueryType::DNSKEY as u16, 48);
+        assert_eq!(QueryType::ANY as u16, 255);
     }
 
     #[test]
     fn test_result_code_from_number() {
-        assert_eq!(ResultCode::from_number(0), ResultCode::NOERROR);
-        assert_eq!(ResultCode::from_number(1), ResultCode::FORMERR);
-        assert_eq!(ResultCode::from_number(2), ResultCode::SERVFAIL);
-        assert_eq!(ResultCode::from_number(3), ResultCode::NXDOMAIN);
-        assert_eq!(ResultCode::from_number(4), ResultCode::NOTIMP);
-        assert_eq!(ResultCode::from_number(5), ResultCode::REFUSED);
+        assert_eq!(ResultCode::try_from(0).unwrap(), ResultCode::NOERROR);
+        assert_eq!(ResultCode::try_from(1).unwrap(), ResultCode::FORMERR);
+        assert_eq!(ResultCode::try_from(2).unwrap(), ResultCode::SERVFAIL);
+        assert_eq!(ResultCode::try_from(3).unwrap(), ResultCode::NXDOMAIN);
+        assert_eq!(ResultCode::try_from(4).unwrap(), ResultCode::NOTIMP);
+        assert_eq!(ResultCode::try_from(5).unwrap(), ResultCode::REFUSED);
     }
 
     #[test]
     fn test_result_code_to_number() {
-        assert_eq!(ResultCode::NOERROR.to_number(), 0);
-        assert_eq!(ResultCode::FORMERR.to_number(), 1);
-        assert_eq!(ResultCode::SERVFAIL.to_number(), 2);
-        assert_eq!(ResultCode::NXDOMAIN.to_number(), 3);
-        assert_eq!(ResultCode::NOTIMP.to_number(), 4);
-        assert_eq!(ResultCode::REFUSED.to_number(), 5);
+        assert_eq!(ResultCode::NOERROR as u8, 0);
+        assert_eq!(ResultCode::FORMERR as u8, 1);
+        assert_eq!(ResultCode::SERVFAIL as u8, 2);
+        assert_eq!(ResultCode::NXDOMAIN as u8, 3);
+        assert_eq!(ResultCode::NOTIMP as u8, 4);
+        assert_eq!(ResultCode::REFUSED as u8, 5);
     }
 
     #[test]
@@ -667,7 +643,7 @@ mod tests {
 
         question.write(&mut buffer).unwrap();
         buffer.set_pos(0).unwrap();
-        let mut read_question = DnsQuestion::new(String::new(), QueryType::Any);
+        let mut read_question = DnsQuestion::new(String::new(), QueryType::A);
         read_question.read(&mut buffer).unwrap();
 
         assert_eq!(question, read_question);

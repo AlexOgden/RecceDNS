@@ -108,12 +108,10 @@ fn process_subdomain(
             Ok(response) => {
                 all_record_results.extend(response);
             }
-            Err(DnsError::NonExistentDomain) => {
-                break;
-            }
-            Err(DnsError::NoRecordsFound) => {}
             Err(err) => {
-                if !args.no_retry {
+                if !args.no_retry
+                    && !matches!(err, DnsError::NoRecordsFound | DnsError::NonExistentDomain)
+                {
                     failed_queries.insert(subdomain.to_string());
                 }
                 print_query_error(args, subdomain, query_resolver, &err, false);
@@ -203,7 +201,7 @@ fn retry_failed_queries(
 
 fn get_query_types(query_type: &QueryType) -> Vec<QueryType> {
     match query_type {
-        QueryType::Any => vec![QueryType::A, QueryType::AAAA, QueryType::MX, QueryType::TXT],
+        QueryType::ANY => vec![QueryType::A, QueryType::AAAA, QueryType::MX, QueryType::TXT],
         _ => vec![query_type.clone()],
     }
 }
