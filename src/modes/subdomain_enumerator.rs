@@ -108,12 +108,10 @@ fn process_subdomain(
             Ok(response) => {
                 all_record_results.extend(response);
             }
-            Err(DnsError::NonExistentDomain) => {
-                break;
-            }
-            Err(DnsError::NoRecordsFound) => {}
             Err(err) => {
-                if !args.no_retry {
+                if !args.no_retry
+                    && !matches!(err, DnsError::NoRecordsFound | DnsError::NonExistentDomain)
+                {
                     failed_queries.insert(subdomain.to_string());
                 }
                 print_query_error(args, subdomain, query_resolver, &err, false);
@@ -337,7 +335,7 @@ fn print_query_result(args: &CommandArgs, subdomain: &str, resolver: &str, respo
     println!("{message}");
 }
 
-//TODO: Fix verbose mode
+//TODO: Fix verbose
 fn print_query_error(
     args: &CommandArgs,
     subdomain: &str,
