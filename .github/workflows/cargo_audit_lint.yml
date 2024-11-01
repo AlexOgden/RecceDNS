@@ -31,9 +31,9 @@ jobs:
           ~/.cargo/registry
           ~/.cargo/git
           ~/.rustup/toolchains
-        key: ${{ runner.os }}-rust-toolchain-${{ hashFiles('**/Cargo.lock') }}
+        key: rust-toolchain-${{ runner.os }}-v1
         restore-keys: |
-          ${{ runner.os }}-rust-toolchain-
+          rust-toolchain-${{ runner.os }}-v1
 
     - name: Set up Rust
       uses: actions-rs/toolchain@v1
@@ -41,20 +41,18 @@ jobs:
         toolchain: stable
         override: true
 
-    - name: Cache Clippy and Cargo Audit
+    - name: Cache Cargo Binaries
       uses: actions/cache@v3
       with:
-        path: |
-          ~/.cargo/bin/cargo-audit
-          ~/.cargo/bin/clippy
-        key: clippy-audit-${{ runner.os }}-v1
+        path: ~/.cargo/bin
+        key: cargo-binaries-${{ runner.os }}-v1
         restore-keys: |
-          clippy-audit-${{ runner.os }}-v1
+          cargo-binaries-${{ runner.os }}-v1
 
     - name: Install Clippy and Audit
       run: |
         rustup component add clippy
-        cargo install cargo-audit
+        cargo install cargo-audit || echo "Cargo Audit is already installed"
 
     - name: Check Formatting
       run: cargo fmt -- --check
