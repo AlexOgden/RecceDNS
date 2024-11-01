@@ -31,10 +31,10 @@ pub fn enumerate_subdomains(args: &CommandArgs, dns_resolvers: &[&str]) -> Resul
     let mut found_count: u32 = 0;
     let mut failed_queries: HashSet<String> = HashSet::new();
 
-    let start_time = Instant::now();
-
     let mut all_record_results = HashSet::new();
     let mut response_data_vec: Vec<DnsQueryResponse> = Vec::new();
+
+    let start_time = Instant::now();
 
     for (index, subdomain) in subdomains.iter().enumerate() {
         process_subdomain(
