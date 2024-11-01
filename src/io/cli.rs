@@ -1,9 +1,9 @@
-use crate::{dns::protocol::QueryType, io::validate::domain, network::types::TransportProtocol};
+use crate::{dns::protocol::QueryType, network::types::TransportProtocol};
 use clap::{Parser, ValueEnum};
 use colored::Colorize;
 use indicatif::{ProgressBar, ProgressStyle};
 
-use super::validate::dns_resolver_list;
+use super::validate::{self, dns_resolver_list};
 
 const PROGRESS_TICK_CHARS: &str = "⡈⠔⠢⢁";
 
@@ -22,7 +22,7 @@ pub struct CommandArgs {
     pub operation_mode: OperationMode,
 
     /// The target base domain name to probe
-    #[arg(short, long, required = true, value_parser = domain)]
+    #[arg(short, long, required = true, value_parser = validate::domain)]
     pub target_domain: String,
 
     /// IPv4 Address of the DNS resolver(s) to use (comma-seperated). Multiple resolvers will selected either randomly or sequentially

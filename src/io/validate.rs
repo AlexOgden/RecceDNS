@@ -20,14 +20,16 @@ pub fn dns_resolver_list(servers: &str) -> Result<String> {
     let server_list: Vec<&str> = servers.split(',').collect();
 
     ensure!(
-        server_list.iter().all(|&server| ipv4(server).is_ok()),
+        server_list
+            .iter()
+            .all(|&server| ipv4_address(server).is_ok()),
         "DNS Resolver(s) invalid. Comma-separated IPv4 only."
     );
 
     Ok(servers.to_string())
 }
 
-pub fn ipv4(ip: &str) -> Result<String> {
+pub fn ipv4_address(ip: &str) -> Result<String> {
     ip.parse::<Ipv4Addr>()
         .with_context(|| format!("Invalid IPv4 address: {ip}"))
         .map(|_| ip.to_string())
@@ -47,24 +49,24 @@ mod test {
             "0.0.0.0",
         ];
         for ip in valid_ips {
-            assert_eq!(ipv4(ip).unwrap(), ip);
+            assert_eq!(ipv4_address(ip).unwrap(), ip);
         }
     }
 
     #[test]
     fn invalid_ipv4() {
-        assert!(ipv4("256.0.0.1").is_err());
-        assert!(ipv4("127.0.0.1234").is_err());
+        assert!(ipv4_address("256.0.0.1").is_err());
+        assert!(ipv4_address("127.0.0.1234").is_err());
     }
 
     #[test]
     fn empty_ip() {
-        assert!(ipv4("").is_err());
+        assert!(ipv4_address("").is_err());
     }
 
     #[test]
     fn ipv4_with_invalid_characters() {
-        assert!(ipv4("192.0.2.abc").is_err());
+        assert!(ipv4_address("192.0.2.abc").is_err());
     }
 
     #[test]
