@@ -31,15 +31,25 @@ jobs:
           ~/.cargo/registry
           ~/.cargo/git
           ~/.rustup/toolchains
-        key: ${{ runner.os }}-rust-toolchain-${{ hashFiles('**/Cargo.lock') }}
+        key: rust-toolchain-${{ runner.os }}-v1
         restore-keys: |
-          ${{ runner.os }}-rust-toolchain-
+          rust-toolchain-${{ runner.os }}-v1
 
     - name: Set up Rust
       uses: actions-rs/toolchain@v1
       with:
         toolchain: stable
         override: true
+
+    - name: Cache Clippy and Cargo Audit
+      uses: actions/cache@v3
+      with:
+        path: |
+          ~/.cargo/bin/cargo-audit
+          ~/.cargo/bin/clippy
+        key: clippy-audit-${{ runner.os }}-v1
+        restore-keys: |
+          clippy-audit-${{ runner.os }}-v1
 
     - name: Install Clippy and Audit
       run: |
