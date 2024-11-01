@@ -335,7 +335,6 @@ fn print_query_result(args: &CommandArgs, subdomain: &str, resolver: &str, respo
     println!("{message}");
 }
 
-//TODO: Fix verbose
 fn print_query_error(
     args: &CommandArgs,
     subdomain: &str,
