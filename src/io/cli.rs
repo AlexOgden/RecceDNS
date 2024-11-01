@@ -42,7 +42,7 @@ pub struct CommandArgs {
     pub verbose: bool,
 
     /// What resource-record to query
-    #[arg(short, long, value_enum, default_value_t = QueryType::Any)]
+    #[arg(short, long, value_enum, default_value_t = QueryType::ANY)]
     pub query_type: QueryType,
 
     /// Don't show the welcome ASCII art

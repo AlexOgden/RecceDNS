@@ -203,7 +203,7 @@ fn retry_failed_queries(
 
 fn get_query_types(query_type: &QueryType) -> Vec<QueryType> {
     match query_type {
-        QueryType::Any => vec![QueryType::A, QueryType::AAAA, QueryType::MX, QueryType::TXT],
+        QueryType::ANY => vec![QueryType::A, QueryType::AAAA, QueryType::MX, QueryType::TXT],
         _ => vec![query_type.clone()],
     }
 }
@@ -337,6 +337,7 @@ fn print_query_result(args: &CommandArgs, subdomain: &str, resolver: &str, respo
     println!("{message}");
 }
 
+//TODO: Fix verbose mode
 fn print_query_error(
     args: &CommandArgs,
     subdomain: &str,
