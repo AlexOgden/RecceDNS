@@ -64,17 +64,7 @@ After building, you can find the executable in the `target/release` directory.
 
 - `-v, --verbose`: Print extra information. Default is `false`.
 
-- `-q, --query-type <QUERY_TYPE>`: What resource-record to query. Possible values are:
-  - `A`
-  - `AAAA`
-  - `CNAME`
-  - `MX`
-  - `TXT`
-  - `NS`
-  - `SOA`
-  - `SRV`
-  - `ANY` (default)
- when using subdomain enumeration ANY will use `A`, `AAA`, `MX`, `TXT`.
+- `-q, --query-type <QUERY_TYPE>`: What resource-record to query. Possible values are: `A`, `AAAA`, `CNAME`, `MX`, `TXT`, `NS`, `SOA`, `SRV`, `ANY` (default). When using subdomain enumeration, `ANY` will use `A`, `AAAA`, `MX`, `TXT`.
 
 - `--no-welcome`: Don't show the welcome ASCII art.
 
