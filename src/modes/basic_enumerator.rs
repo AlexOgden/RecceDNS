@@ -48,11 +48,18 @@ fn check_dnssec(resolver: &str, domain: &str, args: &CommandArgs) -> Result<()> 
         domain,
         &QueryType::DNSKEY,
         &args.transport_protocol,
-    )?;
-    if response.is_empty() {
-        println!("{}", format_response("DNSSEC", "is not enabled"));
-    } else {
-        println!("{}", format_response("DNSSEC", "is enabled"));
+    );
+    match response {
+        Ok(response) if response.is_empty() => {
+            println!("{}", format_response("DNSSEC", "is not enabled"));
+        }
+        Ok(_) => {
+            println!("{}", format_response("DNSSEC", "is enabled"));
+        }
+        Err(DnsError::NoRecordsFound) => {
+            println!("{}", format_response("DNSSEC", "is not enabled"));
+        }
+        Err(err) => return Err(err.into()),
     }
     Ok(())
 }

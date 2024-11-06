@@ -14,7 +14,7 @@ const PROGRESS_TICK_CHARS: &str = "⡈⠔⠢⢁";
 	name = "RecceDNS",
     author = "Alex Ogden",
     version = env!("CARGO_PKG_VERSION"),
-    about = "DNS Enumeration tool with advanced features",
+    about = "A DNS reconnaissance tool for enumerating subdomains and DNS records",
 )]
 pub struct CommandArgs {
     /// The operation mode to run, bruteforce subdomains or enumerate records
