@@ -31,9 +31,9 @@ jobs:
           ~/.cargo/registry
           ~/.cargo/git
           ~/.rustup/toolchains
-        key: rust-toolchain-${{ runner.os }}-v1
+        key: ${{ runner.os }}-rust-toolchain-${{ hashFiles('**/Cargo.lock') }}
         restore-keys: |
-          rust-toolchain-${{ runner.os }}-v1
+          ${{ runner.os }}-rust-toolchain-
 
     - name: Set up Rust
       uses: actions-rs/toolchain@v1
