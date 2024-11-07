@@ -57,8 +57,8 @@ After building, you can find the executable in the `target/release` directory.
 - `-d, --dns-resolvers <DNS_RESOLVERS>`: IPv4 Address of the DNS resolver(s) to use (comma-separated). Multiple resolvers will be selected either randomly or sequentially based on the presence of `-r`. Default is `1.1.1.1`.
 
 - `-p, --transport-protocol <TRANSPORT_PROTOCOL>`: *OPTIONAL*: Transport protocol to use for DNS queries. Possible values are:
-  - `UDP`: User Datagram Protocol **(default)**
-  - `TCP`: Transmission Control Protocol
+  - `UDP`: **(default)**
+  - `TCP`
 
 - `-w, --wordlist <WORDLIST>`: Path to subdomain wordlist. Required for enumeration mode.
 
