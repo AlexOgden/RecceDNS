@@ -111,20 +111,14 @@ fn handle_ns_response(
         match resolve_domain(resolver, ns_domain, &query_type, &args.transport_protocol) {
             Ok(records) => {
                 for record in records {
+                    result.push(' ');
                     match record.response_content {
                         DnsRecord::A(a_record) => {
-                            result.push_str(&format!(
-                                " [{} {}]",
-                                "A".bold().bright_cyan(),
-                                a_record.addr
-                            ));
+                            result.push_str(&format_response("A", &a_record.addr.to_string()));
                         }
                         DnsRecord::AAAA(aaaa_record) => {
-                            result.push_str(&format!(
-                                " [{} {}]",
-                                "AAAA".bold().bright_cyan(),
-                                aaaa_record.addr
-                            ));
+                            result
+                                .push_str(&format_response("AAAA", &aaaa_record.addr.to_string()));
                         }
                         _ => {}
                     }
