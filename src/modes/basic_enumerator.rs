@@ -30,12 +30,10 @@ pub fn enumerate_records(args: &CommandArgs, dns_resolvers: &[&str]) -> Result<(
                 response.sort_by(|a, b| a.query_type.cmp(&b.query_type));
                 process_response(&mut seen_cnames, &response, resolver, args)?;
             }
-            Err(err) => {
-                if !matches!(err, DnsError::NoRecordsFound | DnsError::NonExistentDomain) {
-                    // Handle other errors
-                    eprintln!("{query_type} {err}");
-                }
+            Err(err) if !matches!(err, DnsError::NoRecordsFound | DnsError::NonExistentDomain) => {
+                eprintln!("{query_type} {err}");
             }
+            _ => {}
         }
     }
 
