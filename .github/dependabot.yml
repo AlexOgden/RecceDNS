@@ -4,10 +4,8 @@ updates:
     directory: /
     target-branch: development
     schedule:
-      interval: "weekly"
-      day: "monday"
-      time: "12:00"
-      timezone: "UTC"
+      interval: weekly
+      time: "09:00"
     commit-message:
       prefix: build
       prefix-development: build
