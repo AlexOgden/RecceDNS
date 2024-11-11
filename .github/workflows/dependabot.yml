@@ -1,0 +1,14 @@
+version: 2
+updates:
+  - package-ecosystem: cargo
+    directory: /
+    target-branch: development
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "12:00"
+      timezone: "UTC"
+    commit-message:
+      prefix: build
+      prefix-development: build
+      include: scope
