@@ -57,7 +57,6 @@ pub fn enumerate_subdomains(args: &CommandArgs, dns_resolvers: &[&str]) -> Resul
         if let Some(delay_ms) = &args.delay {
             let sleep_delay = delay_ms.get_delay();
             if sleep_delay > 0 {
-                println!("[~] Delaying for {sleep_delay} ms");
                 thread::sleep(Duration::from_millis(sleep_delay));
             }
         }
