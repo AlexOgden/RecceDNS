@@ -37,7 +37,7 @@ fn print_status(server_address: &str, status: &str) {
         "{} {:>width$}",
         server_address.bright_blue(),
         colored_status,
-        width = 32 - server_address.len()
+        width = 33 - server_address.len()
     );
 }
 
@@ -48,7 +48,7 @@ pub fn check_dns_resolvers<'a>(
     let mut working_servers: Vec<&'a str> = Vec::new();
     let mut failed_servers: Vec<(&'a str, &str)> = Vec::new();
 
-    println!("Checking DNS Servers...");
+    println!("Checking DNS Resolvers...");
 
     for &server in dns_resolvers {
         let hijacking = check_nxdomain_hijacking(server, transport_protocol);
