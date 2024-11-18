@@ -1,7 +1,7 @@
 use rand::Rng;
 use std::str::FromStr;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum Delay {
     Single(u64),
     Range(u64, u64),

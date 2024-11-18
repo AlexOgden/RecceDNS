@@ -3,7 +3,10 @@ use clap::{Parser, ValueEnum};
 use colored::Colorize;
 use indicatif::{ProgressBar, ProgressStyle};
 
-use super::validate::{self, dns_resolver_list};
+use super::{
+    delay::Delay,
+    validate::{self, dns_resolver_list},
+};
 
 const PROGRESS_TICK_CHARS: &str = "⡈⠔⠢⢁";
 
@@ -66,8 +69,8 @@ pub struct CommandArgs {
     pub show_resolver: bool,
 
     /// Delay in milliseconds between DNS requests for subdomain enumeration
-    #[arg(long, required = false)]
-    pub delay: Option<u64>,
+    #[arg(long, required = false, value_parser = parse_delay)]
+    pub delay: Option<Delay>,
 
     /// Use a random resolver for each query, otherwise use them sequentially
     #[arg(short = 'r', long, required = false, default_value_t = false)]
@@ -81,6 +84,10 @@ impl CommandArgs {
         }
         Ok(())
     }
+}
+
+fn parse_delay(s: &str) -> Result<Delay, String> {
+    s.parse()
 }
 
 #[derive(ValueEnum, Clone, Debug, PartialEq, Eq)]
