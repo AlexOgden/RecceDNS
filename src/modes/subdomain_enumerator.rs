@@ -54,9 +54,11 @@ pub fn enumerate_subdomains(args: &CommandArgs, dns_resolvers: &[&str]) -> Resul
 
         cli::update_progress_bar(&progress_bar, index, total_subdomains);
 
-        if let Some(delay_ms) = args.delay {
-            if delay_ms > 0 {
-                thread::sleep(Duration::from_millis(delay_ms));
+        if let Some(delay_ms) = &args.delay {
+            let sleep_delay = delay_ms.get_delay();
+            if sleep_delay > 0 {
+                println!("[~] Delaying for {sleep_delay} ms");
+                thread::sleep(Duration::from_millis(sleep_delay));
             }
         }
     }
@@ -66,7 +68,7 @@ pub fn enumerate_subdomains(args: &CommandArgs, dns_resolvers: &[&str]) -> Resul
         args,
         dns_resolvers,
         &mut *resolver_selector,
-        &query_types,
+        query_types,
         &mut failed_queries,
         &mut all_record_results,
         &mut response_data_vec,
@@ -153,8 +155,10 @@ fn retry_failed_queries(
     }
 
     let mut retry_failed_count: u32 = 0;
-    while let Some(subdomain) = failed_queries.iter().next().cloned() {
-        failed_queries.remove(&subdomain);
+    let retries: Vec<String> = failed_queries.iter().cloned().collect();
+    failed_queries.clear();
+
+    for subdomain in retries {
         let query_resolver = resolver_selector.select(dns_resolvers)?;
         let fqdn = format!("{}.{}", subdomain, args.target_domain);
 
@@ -199,10 +203,10 @@ fn retry_failed_queries(
     Ok(())
 }
 
-fn get_query_types(query_type: &QueryType) -> Vec<QueryType> {
+const fn get_query_types(query_type: &QueryType) -> &[QueryType] {
     match query_type {
-        QueryType::ANY => vec![QueryType::A, QueryType::AAAA, QueryType::MX, QueryType::TXT],
-        _ => vec![query_type.clone()],
+        QueryType::ANY => &[QueryType::A, QueryType::AAAA, QueryType::MX, QueryType::TXT],
+        _ => std::slice::from_ref(query_type),
     }
 }
 

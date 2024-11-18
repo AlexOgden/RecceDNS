@@ -76,7 +76,7 @@ After building, you can find the executable in the `target/release` directory.
 
 - `--show-resolver`: Print which resolver was used for each query.
 
-- `--delay <MS>`: Delay in milliseconds to use between queries in subdomain enumeration. Default: `0`
+- `--delay <MS|RANGE>`: Delay in milliseconds to use between queries in subdomain enumeration. You can specify a single value (e.g., `1000` for a 1-second delay) or a range (e.g., `100-200` for a random delay between 100 and 200 milliseconds). Default: `0`
 
 - `-r` `--use-random`: When multiple resolvers are provided, randomly select from the list on each query in enumeration.
 
@@ -108,6 +108,10 @@ Multiple Resolvers - Random Selection
 
 `reccedns -m subdomain -d 1.1.1.1,9.9.9.9,8.8.8.8 --use-random ---show-resolver -q a -w .\subdomains-top1million-5000.txt -t github.com`
 
-With Delay
+With consistent delay
 
 `reccedns -m subdomain -d 1.1.1.1 -q a -w .\subdomains-top1million-5000.txt -t github.com --delay 50`
+
+With random-range delay
+
+`reccedns -m subdomain -d 1.1.1.1 -q a -w .\subdomains-top1million-5000.txt -t github.com --delay 50-900`
