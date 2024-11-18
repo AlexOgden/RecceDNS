@@ -8,7 +8,7 @@ edition = "2021"
 anyhow = "1.0.92"
 clap = { version = "4.5.21", features = ["derive"] }
 colored = "2.1.0"
-indicatif = "0.17.8"
+indicatif = "0.17.9"
 regex = "1.11.0"
 rand = "0.8.5"
 num_enum = "0.7.3"
