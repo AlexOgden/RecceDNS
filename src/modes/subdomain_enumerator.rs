@@ -16,45 +16,45 @@ use crate::dns::{
 use crate::io::{cli, cli::CommandArgs, wordlist};
 use std::time::Instant;
 
-pub fn enumerate_subdomains(args: &CommandArgs, dns_resolvers: &[&str]) -> Result<()> {
-    if handle_wildcard_domain(args, dns_resolvers)? {
+pub fn enumerate_subdomains(command_args: &CommandArgs, dns_resolver_list: &[&str]) -> Result<()> {
+    if handle_wildcard_domain(command_args, dns_resolver_list)? {
         return Ok(());
     }
 
-    let query_types = get_query_types(&args.query_type);
-    let subdomains = read_wordlist(&args.wordlist)?;
-    let mut resolver_selector = setup_resolver_selector(args);
+    let query_types = get_query_types(&command_args.query_type);
+    let subdomain_list = read_wordlist(&command_args.wordlist)?;
+    let mut resolver_selector_instance = setup_resolver_selector(command_args);
 
-    let total_subdomains = subdomains.len() as u64;
+    let total_subdomains = subdomain_list.len() as u64;
     let progress_bar = cli::setup_progress_bar(total_subdomains);
 
-    let mut found_count: u32 = 0;
-    let mut failed_queries = HashSet::new();
+    let mut found_subdomain_count: u32 = 0;
+    let mut failed_subdomains = HashSet::new();
 
-    let mut all_record_results = HashSet::new();
-    let mut response_data_vec = Vec::new();
+    let mut record_results = HashSet::new();
+    let mut response_data = Vec::new();
 
     let start_time = Instant::now();
 
-    for (index, subdomain) in subdomains.iter().enumerate() {
+    for (index, subdomain) in subdomain_list.iter().enumerate() {
         process_subdomain(
-            args,
-            dns_resolvers,
-            &mut *resolver_selector,
+            command_args,
+            dns_resolver_list,
+            &mut *resolver_selector_instance,
             &query_types
                 .iter()
                 .map(std::clone::Clone::clone)
                 .collect::<Vec<_>>(),
             subdomain,
-            &mut all_record_results,
-            &mut response_data_vec,
-            &mut failed_queries,
-            &mut found_count,
+            &mut record_results,
+            &mut response_data,
+            &mut failed_subdomains,
+            &mut found_subdomain_count,
         )?;
 
         cli::update_progress_bar(&progress_bar, index, total_subdomains);
 
-        if let Some(delay_ms) = &args.delay {
+        if let Some(delay_ms) = &command_args.delay {
             let sleep_delay = delay_ms.get_delay();
             if sleep_delay > 0 {
                 thread::sleep(Duration::from_millis(sleep_delay));
@@ -64,14 +64,14 @@ pub fn enumerate_subdomains(args: &CommandArgs, dns_resolvers: &[&str]) -> Resul
 
     progress_bar.finish_and_clear();
     retry_failed_queries(
-        args,
-        dns_resolvers,
-        &mut *resolver_selector,
+        command_args,
+        dns_resolver_list,
+        &mut *resolver_selector_instance,
         query_types,
-        &mut failed_queries,
-        &mut all_record_results,
-        &mut response_data_vec,
-        &mut found_count,
+        &mut failed_subdomains,
+        &mut record_results,
+        &mut response_data,
+        &mut found_subdomain_count,
     )?;
 
     let elapsed_time = start_time.elapsed();
@@ -80,7 +80,7 @@ pub fn enumerate_subdomains(args: &CommandArgs, dns_resolvers: &[&str]) -> Resul
     println!(
         "[{}] Done! Found {} subdomains in {:.2?}",
         "~".green(),
-        found_count.to_string().bold(),
+        found_subdomain_count.to_string().bold(),
         elapsed_time
     );
 
@@ -89,45 +89,55 @@ pub fn enumerate_subdomains(args: &CommandArgs, dns_resolvers: &[&str]) -> Resul
 
 #[allow(clippy::too_many_arguments)]
 fn process_subdomain(
-    args: &CommandArgs,
-    dns_resolvers: &[&str],
-    resolver_selector: &mut dyn ResolverSelector,
+    command_args: &CommandArgs,
+    dns_resolver_list: &[&str],
+    resolver_selector_instance: &mut dyn ResolverSelector,
     query_types: &[QueryType],
     subdomain: &str,
-    all_record_results: &mut HashSet<DnsQueryResponse>,
-    response_data_vec: &mut Vec<DnsQueryResponse>,
-    failed_queries: &mut HashSet<String>,
-    found_count: &mut u32,
+    record_results: &mut HashSet<DnsQueryResponse>,
+    response_data: &mut Vec<DnsQueryResponse>,
+    failed_subdomains: &mut HashSet<String>,
+    found_subdomain_count: &mut u32,
 ) -> Result<()> {
-    let query_resolver = resolver_selector.select(dns_resolvers)?;
-    let fqdn = format!("{}.{}", subdomain, args.target_domain);
+    let query_resolver = resolver_selector_instance.select(dns_resolver_list)?;
+    let fqdn = format!("{}.{}", subdomain, command_args.target_domain);
 
-    all_record_results.clear();
+    record_results.clear();
 
     for query_type in query_types {
-        match resolve_domain(query_resolver, &fqdn, query_type, &args.transport_protocol) {
+        match resolve_domain(
+            query_resolver,
+            &fqdn,
+            query_type,
+            &command_args.transport_protocol,
+        ) {
             Ok(response) => {
-                all_record_results.extend(response);
+                record_results.extend(response);
             }
             Err(err) => {
-                if !args.no_retry
+                if !command_args.no_retry
                     && !matches!(err, DnsError::NoRecordsFound | DnsError::NonExistentDomain)
                 {
-                    failed_queries.insert(subdomain.to_string());
+                    failed_subdomains.insert(subdomain.to_string());
                 }
-                print_query_error(args, subdomain, query_resolver, &err, false);
+                print_query_error(command_args, subdomain, query_resolver, &err, false);
                 break;
             }
         }
     }
 
-    if !all_record_results.is_empty() {
-        response_data_vec.clear();
-        response_data_vec.extend(all_record_results.drain());
-        response_data_vec.sort_by_key(|r| r.query_type.clone());
-        let response_data_string = create_query_response_string(response_data_vec);
-        print_query_result(args, subdomain, query_resolver, &response_data_string);
-        *found_count += 1;
+    if !record_results.is_empty() {
+        response_data.clear();
+        response_data.extend(record_results.drain());
+        response_data.sort_by_key(|r| r.query_type.clone());
+        let response_data_string = create_query_response_string(response_data);
+        print_query_result(
+            command_args,
+            subdomain,
+            query_resolver,
+            &response_data_string,
+        );
+        *found_subdomain_count += 1;
     }
 
     Ok(())
@@ -135,17 +145,17 @@ fn process_subdomain(
 
 #[allow(clippy::too_many_arguments)]
 fn retry_failed_queries(
-    args: &CommandArgs,
-    dns_resolvers: &[&str],
-    resolver_selector: &mut dyn ResolverSelector,
+    command_args: &CommandArgs,
+    dns_resolver_list: &[&str],
+    resolver_selector_instance: &mut dyn ResolverSelector,
     query_types: &[QueryType],
-    failed_queries: &mut HashSet<String>,
-    all_record_results: &mut HashSet<DnsQueryResponse>,
-    response_data_vec: &mut Vec<DnsQueryResponse>,
-    found_count: &mut u32,
+    failed_subdomains: &mut HashSet<String>,
+    record_results: &mut HashSet<DnsQueryResponse>,
+    response_data: &mut Vec<DnsQueryResponse>,
+    found_subdomain_count: &mut u32,
 ) -> Result<()> {
-    if !failed_queries.is_empty() {
-        let count = failed_queries.len();
+    if !failed_subdomains.is_empty() {
+        let count = failed_subdomains.len();
         println!(
             "\n[{}] Retrying {} failed queries",
             "!".bright_yellow(),
@@ -154,27 +164,32 @@ fn retry_failed_queries(
     }
 
     let mut retry_failed_count: u32 = 0;
-    let retries: Vec<String> = failed_queries.iter().cloned().collect();
-    failed_queries.clear();
+    let retries: Vec<String> = failed_subdomains.iter().cloned().collect();
+    failed_subdomains.clear();
 
     for subdomain in retries {
-        let query_resolver = resolver_selector.select(dns_resolvers)?;
-        let fqdn = format!("{}.{}", subdomain, args.target_domain);
+        let query_resolver = resolver_selector_instance.select(dns_resolver_list)?;
+        let fqdn = format!("{}.{}", subdomain, command_args.target_domain);
 
-        all_record_results.clear();
+        record_results.clear();
 
         for query_type in query_types {
-            match resolve_domain(query_resolver, &fqdn, query_type, &args.transport_protocol) {
+            match resolve_domain(
+                query_resolver,
+                &fqdn,
+                query_type,
+                &command_args.transport_protocol,
+            ) {
                 Ok(response) => {
-                    all_record_results.extend(response);
+                    record_results.extend(response);
                 }
                 Err(err) => {
                     if !matches!(err, DnsError::NoRecordsFound | DnsError::NonExistentDomain) {
                         retry_failed_count += 1;
-                        failed_queries.insert(subdomain.clone());
+                        failed_subdomains.insert(subdomain.clone());
                     }
 
-                    print_query_error(args, &subdomain, query_resolver, &err, true);
+                    print_query_error(command_args, &subdomain, query_resolver, &err, true);
 
                     if matches!(err, DnsError::NonExistentDomain) {
                         break;
@@ -183,13 +198,18 @@ fn retry_failed_queries(
             }
         }
 
-        if !all_record_results.is_empty() {
-            response_data_vec.clear();
-            response_data_vec.extend(all_record_results.drain());
-            response_data_vec.sort_by_key(|r| r.query_type.clone());
-            let response_data_string = create_query_response_string(response_data_vec);
-            print_query_result(args, &subdomain, query_resolver, &response_data_string);
-            *found_count += 1;
+        if !record_results.is_empty() {
+            response_data.clear();
+            response_data.extend(record_results.drain());
+            response_data.sort_by_key(|r| r.query_type.clone());
+            let response_data_string = create_query_response_string(response_data);
+            print_query_result(
+                command_args,
+                &subdomain,
+                query_resolver,
+                &response_data_string,
+            );
+            *found_subdomain_count += 1;
         }
 
         thread::sleep(Duration::from_millis(50));
