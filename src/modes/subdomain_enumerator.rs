@@ -54,9 +54,11 @@ pub fn enumerate_subdomains(args: &CommandArgs, dns_resolvers: &[&str]) -> Resul
 
         cli::update_progress_bar(&progress_bar, index, total_subdomains);
 
-        if let Some(delay_ms) = args.delay {
-            if delay_ms > 0 {
-                thread::sleep(Duration::from_millis(delay_ms));
+        if let Some(delay_ms) = &args.delay {
+            let sleep_delay = delay_ms.get_delay();
+            if sleep_delay > 0 {
+                println!("[~] Delaying for {sleep_delay} ms");
+                thread::sleep(Duration::from_millis(sleep_delay));
             }
         }
     }
