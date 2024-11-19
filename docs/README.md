@@ -49,8 +49,8 @@ After building, you can find the executable in the `target/release` directory.
 ## Arguments
 
 - `-m, --mode <MODE>`: The operation mode to run, bruteforce subdomains or enumerate records. Possible values are:
-  - `basic`: Basic Enumeration
-  - `subdomain`: Subdomain Enumeration
+  - `b`: Basic Enumeration
+  - `s`: Subdomain Enumeration
 
 - `-t, --target-domain <TARGET_DOMAIN>`: The target base domain name to probe.
 
@@ -84,34 +84,34 @@ After building, you can find the executable in the `target/release` directory.
 
 #### Basic Enumeration
 
-`reccedns -m basic -d 1.1.1.1 -t github.com`
+`reccedns -m b -d 1.1.1.1 -t github.com`
 
 #### Bruteforce Subdomains
 
 Any Records
 
-`reccedns -m subdomain -d 1.1.1.1 -q any -w .\subdomains-top1million-5000.txt -t github.com`
+`reccedns -m s -d 1.1.1.1 -q any -w .\subdomains-top1million-5000.txt -t github.com`
 
 A (IPv4) Only
 
-`reccedns -m subdomain -d 1.1.1.1 -q a -w .\subdomains-top1million-5000.txt -t github.com`
+`reccedns -m s -d 1.1.1.1 -q a -w .\subdomains-top1million-5000.txt -t github.com`
 
 SRV enumeration
 
-`reccedns -m subdomain -d 1.1.1.1 -q srv -w .\srv_names.txt -t github.com`
+`reccedns -m s -d 1.1.1.1 -q srv -w .\srv_names.txt -t github.com`
 
 Multiple Resolvers - Sequential Selection
 
-`reccedns -m subdomain -d 1.1.1.1,9.9.9.9,8.8.8.8 -q a -w .\subdomains-top1million-5000.txt -t github.com`
+`reccedns -m s -d 1.1.1.1,9.9.9.9,8.8.8.8 -q a -w .\subdomains-top1million-5000.txt -t github.com`
 
 Multiple Resolvers - Random Selection
 
-`reccedns -m subdomain -d 1.1.1.1,9.9.9.9,8.8.8.8 --use-random ---show-resolver -q a -w .\subdomains-top1million-5000.txt -t github.com`
+`reccedns -m s -d 1.1.1.1,9.9.9.9,8.8.8.8 --use-random ---show-resolver -q a -w .\subdomains-top1million-5000.txt -t github.com`
 
 With consistent delay
 
-`reccedns -m subdomain -d 1.1.1.1 -q a -w .\subdomains-top1million-5000.txt -t github.com --delay 50`
+`reccedns -m s -d 1.1.1.1 -q a -w .\subdomains-top1million-5000.txt -t github.com --delay 50`
 
 With random-range delay
 
-`reccedns -m subdomain -d 1.1.1.1 -q a -w .\subdomains-top1million-5000.txt -t github.com --delay 50-900`
+`reccedns -m s -d 1.1.1.1 -q a -w .\subdomains-top1million-5000.txt -t github.com --delay 50-900`
