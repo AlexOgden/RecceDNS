@@ -12,6 +12,16 @@ use anyhow::Result;
 use std::collections::HashSet;
 
 pub fn enumerate_records(args: &CommandArgs, dns_resolvers: &[&str]) -> Result<()> {
+    const QUERY_TYPES: &[QueryType] = &[
+        QueryType::A,
+        QueryType::AAAA,
+        QueryType::CNAME,
+        QueryType::MX,
+        QueryType::TXT,
+        QueryType::NS,
+        QueryType::SOA,
+    ];
+
     println!(
         "Enumerating records for target domain: {}\n",
         args.target_domain.bold().bright_blue()
@@ -19,13 +29,12 @@ pub fn enumerate_records(args: &CommandArgs, dns_resolvers: &[&str]) -> Result<(
 
     let resolver = dns_resolvers[0];
     let domain = &args.target_domain;
-    let query_types = get_query_types();
     let mut seen_cnames = HashSet::new();
 
     check_dnssec(resolver, domain, args)?;
 
-    for query_type in query_types {
-        match resolve_domain(resolver, domain, &query_type, &args.transport_protocol) {
+    for query_type in QUERY_TYPES {
+        match resolve_domain(resolver, domain, query_type, &args.transport_protocol) {
             Ok(mut response) => {
                 response.sort_by(|a, b| a.query_type.cmp(&b.query_type));
                 process_response(&mut seen_cnames, &response, resolver, args)?;
@@ -41,13 +50,12 @@ pub fn enumerate_records(args: &CommandArgs, dns_resolvers: &[&str]) -> Result<(
 }
 
 fn check_dnssec(resolver: &str, domain: &str, args: &CommandArgs) -> Result<()> {
-    let response = resolve_domain(
+    match resolve_domain(
         resolver,
         domain,
         &QueryType::DNSKEY,
         &args.transport_protocol,
-    );
-    match response {
+    ) {
         Ok(response) if response.is_empty() => {
             println!("{}", format_response("DNSSEC", "is not enabled"));
         }
@@ -60,18 +68,6 @@ fn check_dnssec(resolver: &str, domain: &str, args: &CommandArgs) -> Result<()> 
         Err(err) => return Err(err.into()),
     }
     Ok(())
-}
-
-fn get_query_types() -> Vec<QueryType> {
-    vec![
-        QueryType::A,
-        QueryType::AAAA,
-        QueryType::CNAME,
-        QueryType::MX,
-        QueryType::TXT,
-        QueryType::NS,
-        QueryType::SOA,
-    ]
 }
 
 fn process_response(

@@ -92,9 +92,9 @@ fn parse_delay(s: &str) -> Result<Delay, String> {
 
 #[derive(ValueEnum, Clone, Debug, PartialEq, Eq)]
 pub enum OperationMode {
-    #[value(name = "basic")]
+    #[value(name = "b")]
     BasicEnumeration,
-    #[value(name = "subdomain")]
+    #[value(name = "s")]
     SubdomainEnumeration,
 }
 
