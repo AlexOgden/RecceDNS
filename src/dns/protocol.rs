@@ -4,6 +4,7 @@
 use anyhow::{anyhow, Context, Result};
 use clap::ValueEnum;
 use num_enum::{IntoPrimitive, TryFromPrimitive};
+use serde::Serialize;
 use std::net::{Ipv4Addr, Ipv6Addr};
 use strum_macros::Display;
 
@@ -23,6 +24,7 @@ use super::error::DnsError;
     Ord,
     IntoPrimitive,
     TryFromPrimitive,
+    Serialize,
 )]
 #[repr(u16)]
 pub enum QueryType {
@@ -38,7 +40,7 @@ pub enum QueryType {
     ANY = 255,
 }
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq, IntoPrimitive, TryFromPrimitive)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, IntoPrimitive, TryFromPrimitive, Serialize)]
 #[repr(u8)]
 pub enum ResultCode {
     NOERROR = 0,
@@ -50,7 +52,7 @@ pub enum ResultCode {
 }
 
 // Structs and their implementations
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct DnsHeader {
     pub id: u16, // 16 bits
 
@@ -150,7 +152,7 @@ impl DnsHeader {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct DnsQuestion {
     pub domain: String,
     pub qtype: QueryType,
@@ -180,7 +182,7 @@ impl DnsQuestion {
     }
 }
 
-#[derive(Clone, Eq, PartialEq, Hash, Debug)]
+#[derive(Clone, Eq, PartialEq, Hash, Debug, Serialize)]
 pub enum DnsRecord {
     A(DnsRecordA),
     AAAA(DnsRecordAAAA),
@@ -262,7 +264,7 @@ impl DnsRecord {
 
         Ok(DnsQueryResponse {
             query_type: QueryType::A,
-            response_content: Self::A(DnsRecordA { domain, addr, ttl }),
+            response_content: Self::A(DnsRecordA { ttl, domain, addr }),
         })
     }
 
@@ -288,7 +290,7 @@ impl DnsRecord {
 
         Ok(DnsQueryResponse {
             query_type: QueryType::AAAA,
-            response_content: Self::AAAA(DnsRecordAAAA { domain, addr, ttl }),
+            response_content: Self::AAAA(DnsRecordAAAA { ttl, domain, addr }),
         })
     }
 
@@ -412,28 +414,28 @@ impl DnsRecord {
     }
 }
 
-#[derive(Clone, Eq, PartialEq, Hash, Debug)]
+#[derive(Clone, Eq, PartialEq, Hash, Debug, Serialize)]
 pub struct DnsRecordA {
+    pub ttl: u32,
     pub domain: String,
     pub addr: Ipv4Addr,
-    pub ttl: u32,
 }
 
-#[derive(Clone, Eq, PartialEq, Hash, Debug)]
+#[derive(Clone, Eq, PartialEq, Hash, Debug, Serialize)]
 pub struct DnsRecordAAAA {
+    pub ttl: u32,
     pub domain: String,
     pub addr: Ipv6Addr,
-    pub ttl: u32,
 }
 
-#[derive(Clone, Eq, PartialEq, Hash, Debug)]
+#[derive(Clone, Eq, PartialEq, Hash, Debug, Serialize)]
 pub struct DnsRecordMX {
     pub ttl: u32,
     pub priority: u16,
     pub domain: String,
 }
 
-#[derive(Clone, Eq, PartialEq, Hash, Debug)]
+#[derive(Clone, Eq, PartialEq, Hash, Debug, Serialize)]
 pub struct DnsRecordSOA {
     pub mname: String,
     pub rname: String,
@@ -444,7 +446,7 @@ pub struct DnsRecordSOA {
     pub minimum: u32,
 }
 
-#[derive(Clone, Eq, PartialEq, Hash, Debug)]
+#[derive(Clone, Eq, PartialEq, Hash, Debug, Serialize)]
 pub struct DnsRecordTXT {
     pub ttl: u32,
     pub data: String,
@@ -452,7 +454,7 @@ pub struct DnsRecordTXT {
 
 pub type DnsRecordQNAME = DnsRecordTXT;
 
-#[derive(Clone, Eq, PartialEq, Hash, Debug)]
+#[derive(Clone, Eq, PartialEq, Hash, Debug, Serialize)]
 pub struct DnsRecordSRV {
     pub priority: u16,
     pub weight: u16,
@@ -460,7 +462,7 @@ pub struct DnsRecordSRV {
     pub target: String,
 }
 
-#[derive(Clone, Eq, PartialEq, Hash, Debug)]
+#[derive(Clone, Eq, PartialEq, Hash, Debug, Serialize)]
 pub struct DnsRecordDNSKEY {
     pub flags: u16,
     pub protocol: u8,
@@ -468,13 +470,13 @@ pub struct DnsRecordDNSKEY {
     pub public_key: Vec<u8>,
 }
 
-#[derive(Clone, Eq, PartialEq, Hash, Debug)]
+#[derive(Clone, Eq, PartialEq, Hash, Debug, Serialize)]
 pub struct DnsQueryResponse {
     pub query_type: QueryType,
     pub response_content: DnsRecord,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct DnsPacket {
     pub header: DnsHeader,
     pub questions: Vec<DnsQuestion>,
