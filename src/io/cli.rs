@@ -1,12 +1,9 @@
-use crate::{dns::protocol::QueryType, network::types::TransportProtocol};
+use crate::{dns::protocol::QueryType, network::types::TransportProtocol, timing::delay::Delay};
 use clap::{Parser, ValueEnum};
 use colored::Colorize;
 use indicatif::{ProgressBar, ProgressStyle};
 
-use super::{
-    delay::Delay,
-    validate::{self, dns_resolver_list},
-};
+use super::validate::{self, dns_resolver_list};
 
 const PROGRESS_TICK_CHARS: &str = "⡈⠔⠢⢁";
 
@@ -63,6 +60,10 @@ pub struct CommandArgs {
     /// Don't print the DNS records in subdomain enumeration, only show the subdomains
     #[arg(long)]
     pub no_print_records: bool,
+
+    /// Don't print the DNS records in subdomain enumeration, only show the subdomains
+    #[arg(long)]
+    pub no_query_stats: bool,
 
     /// Print which resolver was used for each query
     #[arg(long)]
