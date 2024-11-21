@@ -2,6 +2,7 @@ mod dns;
 mod io;
 mod modes;
 mod network;
+mod timing;
 
 use anyhow::{ensure, Result};
 use io::cli::{CommandArgs, OperationMode};
