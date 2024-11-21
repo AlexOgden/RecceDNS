@@ -7,6 +7,7 @@ use crate::{
         resolver::resolve_domain,
     },
     io::cli::CommandArgs,
+    timing::stats::QueryTimer,
 };
 use anyhow::Result;
 use std::collections::HashSet;
@@ -33,8 +34,14 @@ pub fn enumerate_records(args: &CommandArgs, dns_resolvers: &[&str]) -> Result<(
 
     check_dnssec(resolver, domain, args)?;
 
+    let mut query_timer = QueryTimer::new(!args.no_query_stats);
+
     for query_type in QUERY_TYPES {
-        match resolve_domain(resolver, domain, query_type, &args.transport_protocol) {
+        query_timer.start();
+        let query_result = resolve_domain(resolver, domain, query_type, &args.transport_protocol);
+        query_timer.stop();
+
+        match query_result {
             Ok(mut response) => {
                 response.sort_by(|a, b| a.query_type.cmp(&b.query_type));
                 process_response(&mut seen_cnames, &response, resolver, args)?;
@@ -44,6 +51,13 @@ pub fn enumerate_records(args: &CommandArgs, dns_resolvers: &[&str]) -> Result<(
             }
             _ => {}
         }
+    }
+
+    if let Some(average_query_time) = query_timer.average() {
+        println!(
+            "\nAverage query time: {} ms",
+            average_query_time.to_string().bold().bright_yellow()
+        );
     }
 
     Ok(())
