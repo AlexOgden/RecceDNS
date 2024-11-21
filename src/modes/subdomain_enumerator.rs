@@ -13,6 +13,8 @@ use crate::dns::{
     resolver::resolve_domain,
     resolver_selector::ResolverSelector,
 };
+use crate::io::cli::OutputFormat;
+use crate::io::json::EnumerationJsonOuput;
 use crate::io::{cli, cli::CommandArgs, wordlist};
 use crate::timing::stats::QueryTimer;
 use std::time::Instant;
@@ -38,21 +40,26 @@ pub fn enumerate_subdomains(command_args: &CommandArgs, dns_resolver_list: &[&st
     let mut query_timer = QueryTimer::new(!command_args.no_query_stats);
     let start_time = Instant::now();
 
+    let mut enumeration_output = match command_args.output_format {
+        Some(OutputFormat::Json) => Some(EnumerationJsonOuput::new(
+            command_args.target_domain.clone(),
+        )),
+        _ => None,
+    };
+
     for (index, subdomain) in subdomain_list.iter().enumerate() {
         process_subdomain(
             command_args,
             dns_resolver_list,
             &mut *resolver_selector_instance,
-            &query_types
-                .iter()
-                .map(std::clone::Clone::clone)
-                .collect::<Vec<_>>(),
+            query_types,
             subdomain,
             &mut record_results,
             &mut response_data,
             &mut failed_subdomains,
             &mut found_subdomain_count,
             &mut query_timer,
+            &mut enumeration_output, // Pass enumeration_output
         )?;
 
         cli::update_progress_bar(&progress_bar, index, total_subdomains);
@@ -75,6 +82,7 @@ pub fn enumerate_subdomains(command_args: &CommandArgs, dns_resolver_list: &[&st
         &mut record_results,
         &mut response_data,
         &mut found_subdomain_count,
+        &mut enumeration_output, // Pass enumeration_output
     )?;
 
     let elapsed_time = start_time.elapsed();
@@ -94,6 +102,14 @@ pub fn enumerate_subdomains(command_args: &CommandArgs, dns_resolver_list: &[&st
         );
     }
 
+    // Write JSON output to file if specified
+    if let Some(output) = enumeration_output {
+        if let Some(output_file) = &command_args.output_file {
+            output.write_to_file(output_file)?;
+            println!("[{}] JSON output written to {}", "~".green(), output_file);
+        }
+    }
+
     Ok(())
 }
 
@@ -109,6 +125,7 @@ fn process_subdomain(
     failed_subdomains: &mut HashSet<String>,
     found_subdomain_count: &mut u32,
     query_timer: &mut QueryTimer,
+    enumeration_output: &mut Option<EnumerationJsonOuput>,
 ) -> Result<()> {
     let query_resolver = resolver_selector_instance.select(dns_resolver_list)?;
     let fqdn = format!("{}.{}", subdomain, command_args.target_domain);
@@ -146,6 +163,14 @@ fn process_subdomain(
         response_data.extend(record_results.drain());
         response_data.sort_by_key(|r| r.query_type.clone());
         let response_data_string = create_query_response_string(response_data);
+
+        // Add results to EnumerationOutput
+        if let Some(output) = enumeration_output {
+            for response in &*response_data {
+                output.add_result(response.clone());
+            }
+        }
+
         print_query_result(
             command_args,
             subdomain,
@@ -168,6 +193,7 @@ fn retry_failed_queries(
     record_results: &mut HashSet<DnsQueryResponse>,
     response_data: &mut Vec<DnsQueryResponse>,
     found_subdomain_count: &mut u32,
+    enumeration_output: &mut Option<EnumerationJsonOuput>,
 ) -> Result<()> {
     if !failed_subdomains.is_empty() {
         let count = failed_subdomains.len();
@@ -218,6 +244,14 @@ fn retry_failed_queries(
             response_data.extend(record_results.drain());
             response_data.sort_by_key(|r| r.query_type.clone());
             let response_data_string = create_query_response_string(response_data);
+
+            // Add results to EnumerationOutput
+            if let Some(output) = enumeration_output {
+                for response in &*response_data {
+                    output.add_result(response.clone());
+                }
+            }
+
             print_query_result(
                 command_args,
                 &subdomain,

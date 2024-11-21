@@ -45,6 +45,15 @@ pub struct CommandArgs {
     #[arg(short, long, value_enum, default_value_t = QueryType::ANY)]
     pub query_type: QueryType,
 
+    /// Output format to use for results output
+    /// Options: json, csv
+    #[arg(long, value_enum, required = false)]
+    pub output_format: Option<OutputFormat>,
+
+    /// Name of output file to write results to
+    #[arg(long, required = false)]
+    pub output_file: Option<String>,
+
     /// Don't show the welcome ASCII art
     #[arg(long)]
     pub no_welcome: bool,
@@ -97,6 +106,14 @@ pub enum OperationMode {
     BasicEnumeration,
     #[value(name = "s")]
     SubdomainEnumeration,
+}
+
+#[derive(ValueEnum, Clone, Debug, PartialEq, Eq)]
+pub enum OutputFormat {
+    #[value(name = "json")]
+    Json,
+    #[value(name = "csv")]
+    Csv,
 }
 
 pub fn get_parsed_args() -> CommandArgs {
