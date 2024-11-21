@@ -14,6 +14,7 @@ use crate::dns::{
     resolver_selector::ResolverSelector,
 };
 use crate::io::{cli, cli::CommandArgs, wordlist};
+use crate::timing::stats::QueryTimer;
 use std::time::Instant;
 
 pub fn enumerate_subdomains(command_args: &CommandArgs, dns_resolver_list: &[&str]) -> Result<()> {
@@ -34,6 +35,7 @@ pub fn enumerate_subdomains(command_args: &CommandArgs, dns_resolver_list: &[&st
     let mut record_results = HashSet::new();
     let mut response_data = Vec::new();
 
+    let mut query_timer = QueryTimer::new(!command_args.no_query_stats);
     let start_time = Instant::now();
 
     for (index, subdomain) in subdomain_list.iter().enumerate() {
@@ -50,6 +52,7 @@ pub fn enumerate_subdomains(command_args: &CommandArgs, dns_resolver_list: &[&st
             &mut response_data,
             &mut failed_subdomains,
             &mut found_subdomain_count,
+            &mut query_timer,
         )?;
 
         cli::update_progress_bar(&progress_bar, index, total_subdomains);
@@ -83,6 +86,13 @@ pub fn enumerate_subdomains(command_args: &CommandArgs, dns_resolver_list: &[&st
         found_subdomain_count.to_string().bold(),
         elapsed_time
     );
+    if let Some(query_average_ms) = query_timer.average() {
+        println!(
+            "[{}] Average query time: {} ms",
+            "~".green(),
+            query_average_ms.to_string().bold().bright_yellow()
+        );
+    }
 
     Ok(())
 }
@@ -98,6 +108,7 @@ fn process_subdomain(
     response_data: &mut Vec<DnsQueryResponse>,
     failed_subdomains: &mut HashSet<String>,
     found_subdomain_count: &mut u32,
+    query_timer: &mut QueryTimer,
 ) -> Result<()> {
     let query_resolver = resolver_selector_instance.select(dns_resolver_list)?;
     let fqdn = format!("{}.{}", subdomain, command_args.target_domain);
@@ -105,12 +116,16 @@ fn process_subdomain(
     record_results.clear();
 
     for query_type in query_types {
-        match resolve_domain(
+        query_timer.start();
+        let query_result = resolve_domain(
             query_resolver,
             &fqdn,
             query_type,
             &command_args.transport_protocol,
-        ) {
+        );
+        query_timer.stop();
+
+        match query_result {
             Ok(response) => {
                 record_results.extend(response);
             }

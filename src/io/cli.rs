@@ -61,7 +61,7 @@ pub struct CommandArgs {
     #[arg(long)]
     pub no_print_records: bool,
 
-    /// Don't print the DNS records in subdomain enumeration, only show the subdomains
+    /// Don't calculate average query time and print it at the end
     #[arg(long)]
     pub no_query_stats: bool,
 
