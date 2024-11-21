@@ -74,6 +74,8 @@ After building, you can find the executable in the `target/release` directory.
 
 - `--no-print-records`: Don't print the DNS records in subdomain enumeration, only show the subdomains.
 
+- `--no-query-stats`: Don't calculate and print the average query time.
+
 - `--show-resolver`: Print which resolver was used for each query.
 
 - `--delay <MS|RANGE>`: Delay in milliseconds to use between queries in subdomain enumeration. You can specify a single value (e.g., `1000` for a 1-second delay) or a range (e.g., `100-200` for a random delay between 100 and 200 milliseconds). Default: `0`
