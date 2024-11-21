@@ -5,15 +5,13 @@ use serde::Serialize;
 #[derive(Serialize)]
 pub struct EnumerationJsonOuput {
     pub target_domain: String,
-    pub resolvers: Vec<String>,
     pub results: Vec<DnsQueryResponse>,
 }
 
 impl EnumerationJsonOuput {
-    pub const fn new(target_domain: String, resolvers: Vec<String>) -> Self {
+    pub const fn new(target_domain: String) -> Self {
         Self {
             target_domain,
-            resolvers,
             results: Vec::new(),
         }
     }

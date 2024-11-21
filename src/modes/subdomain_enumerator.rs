@@ -43,7 +43,6 @@ pub fn enumerate_subdomains(command_args: &CommandArgs, dns_resolver_list: &[&st
     let mut enumeration_output = match command_args.output_format {
         Some(OutputFormat::Json) => Some(EnumerationJsonOuput::new(
             command_args.target_domain.clone(),
-            dns_resolver_list.iter().map(ToString::to_string).collect(),
         )),
         _ => None,
     };
