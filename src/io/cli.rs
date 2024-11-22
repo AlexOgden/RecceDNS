@@ -45,9 +45,9 @@ pub struct CommandArgs {
     #[arg(short, long, value_enum, default_value_t = QueryType::ANY)]
     pub query_type: QueryType,
 
-    /// Name of output file to write results to
+    /// Path of output file to write JSON results to. Extension is optional.
     #[arg(long, required = false)]
-    pub output_file: Option<String>,
+    pub json: Option<String>,
 
     /// Don't show the welcome ASCII art
     #[arg(long)]
