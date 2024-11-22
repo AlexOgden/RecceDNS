@@ -31,10 +31,9 @@ pub fn enumerate_records(args: &CommandArgs, dns_resolvers: &[&str]) -> Result<(
     let resolver = dns_resolvers[0];
     let domain = &args.target_domain;
     let mut seen_cnames = HashSet::new();
+    let mut query_timer = QueryTimer::new(!args.no_query_stats);
 
     check_dnssec(resolver, domain, args)?;
-
-    let mut query_timer = QueryTimer::new(!args.no_query_stats);
 
     for query_type in QUERY_TYPES {
         query_timer.start();

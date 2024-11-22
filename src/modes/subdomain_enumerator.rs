@@ -13,11 +13,18 @@ use crate::dns::{
     resolver::resolve_domain,
     resolver_selector::ResolverSelector,
 };
-use crate::io::cli::OutputFormat;
-use crate::io::json::EnumerationJsonOuput;
+use crate::io::json::EnumerationOutput;
 use crate::io::{cli, cli::CommandArgs, wordlist};
 use crate::timing::stats::QueryTimer;
 use std::time::Instant;
+
+struct EnumerationContext {
+    current_query_results: HashSet<DnsQueryResponse>,
+    all_query_responses: Vec<DnsQueryResponse>,
+    failed_subdomains: HashSet<String>,
+    found_subdomain_count: u32,
+    results_output: Option<EnumerationOutput>,
+}
 
 pub fn enumerate_subdomains(command_args: &CommandArgs, dns_resolver_list: &[&str]) -> Result<()> {
     if handle_wildcard_domain(command_args, dns_resolver_list)? {
@@ -31,20 +38,18 @@ pub fn enumerate_subdomains(command_args: &CommandArgs, dns_resolver_list: &[&st
     let total_subdomains = subdomain_list.len() as u64;
     let progress_bar = cli::setup_progress_bar(total_subdomains);
 
-    let mut found_subdomain_count: u32 = 0;
-    let mut failed_subdomains = HashSet::new();
-
-    let mut record_results = HashSet::new();
-    let mut response_data = Vec::new();
-
     let mut query_timer = QueryTimer::new(!command_args.no_query_stats);
     let start_time = Instant::now();
 
-    let mut enumeration_output = match command_args.output_format {
-        Some(OutputFormat::Json) => Some(EnumerationJsonOuput::new(
-            command_args.target_domain.clone(),
-        )),
-        _ => None,
+    let mut context = EnumerationContext {
+        current_query_results: HashSet::new(),
+        all_query_responses: Vec::new(),
+        failed_subdomains: HashSet::new(),
+        found_subdomain_count: 0,
+        results_output: command_args
+            .output_file
+            .as_ref()
+            .map(|_| EnumerationOutput::new(command_args.target_domain.clone())),
     };
 
     for (index, subdomain) in subdomain_list.iter().enumerate() {
@@ -54,12 +59,8 @@ pub fn enumerate_subdomains(command_args: &CommandArgs, dns_resolver_list: &[&st
             &mut *resolver_selector_instance,
             query_types,
             subdomain,
-            &mut record_results,
-            &mut response_data,
-            &mut failed_subdomains,
-            &mut found_subdomain_count,
             &mut query_timer,
-            &mut enumeration_output, // Pass enumeration_output
+            &mut context,
         )?;
 
         cli::update_progress_bar(&progress_bar, index, total_subdomains);
@@ -73,16 +74,14 @@ pub fn enumerate_subdomains(command_args: &CommandArgs, dns_resolver_list: &[&st
     }
 
     progress_bar.finish_and_clear();
+
     retry_failed_queries(
         command_args,
         dns_resolver_list,
         &mut *resolver_selector_instance,
         query_types,
-        &mut failed_subdomains,
-        &mut record_results,
-        &mut response_data,
-        &mut found_subdomain_count,
-        &mut enumeration_output, // Pass enumeration_output
+        &mut query_timer,
+        &mut context,
     )?;
 
     let elapsed_time = start_time.elapsed();
@@ -91,7 +90,7 @@ pub fn enumerate_subdomains(command_args: &CommandArgs, dns_resolver_list: &[&st
     println!(
         "[{}] Done! Found {} subdomains in {:.2?}",
         "~".green(),
-        found_subdomain_count.to_string().bold(),
+        context.found_subdomain_count.to_string().bold(),
         elapsed_time
     );
     if let Some(query_average_ms) = query_timer.average() {
@@ -102,35 +101,29 @@ pub fn enumerate_subdomains(command_args: &CommandArgs, dns_resolver_list: &[&st
         );
     }
 
-    // Write JSON output to file if specified
-    if let Some(output) = enumeration_output {
-        if let Some(output_file) = &command_args.output_file {
-            output.write_to_file(output_file)?;
-            println!("[{}] JSON output written to {}", "~".green(), output_file);
-        }
+    // Write the results to the specified output file if provided
+    if let (Some(output), Some(output_file)) = (&context.results_output, &command_args.output_file)
+    {
+        output.write_to_file(output_file)?;
+        println!("[{}] JSON output written to {}", "~".green(), output_file);
     }
 
     Ok(())
 }
 
-#[allow(clippy::too_many_arguments)]
 fn process_subdomain(
     command_args: &CommandArgs,
     dns_resolver_list: &[&str],
     resolver_selector_instance: &mut dyn ResolverSelector,
     query_types: &[QueryType],
     subdomain: &str,
-    record_results: &mut HashSet<DnsQueryResponse>,
-    response_data: &mut Vec<DnsQueryResponse>,
-    failed_subdomains: &mut HashSet<String>,
-    found_subdomain_count: &mut u32,
     query_timer: &mut QueryTimer,
-    enumeration_output: &mut Option<EnumerationJsonOuput>,
+    context: &mut EnumerationContext,
 ) -> Result<()> {
     let query_resolver = resolver_selector_instance.select(dns_resolver_list)?;
     let fqdn = format!("{}.{}", subdomain, command_args.target_domain);
 
-    record_results.clear();
+    context.current_query_results.clear();
 
     for query_type in query_types {
         query_timer.start();
@@ -144,13 +137,13 @@ fn process_subdomain(
 
         match query_result {
             Ok(response) => {
-                record_results.extend(response);
+                context.current_query_results.extend(response);
             }
             Err(err) => {
                 if !command_args.no_retry
                     && !matches!(err, DnsError::NoRecordsFound | DnsError::NonExistentDomain)
                 {
-                    failed_subdomains.insert(subdomain.to_string());
+                    context.failed_subdomains.insert(subdomain.to_string());
                 }
                 print_query_error(command_args, subdomain, query_resolver, &err, false);
                 break;
@@ -158,15 +151,17 @@ fn process_subdomain(
         }
     }
 
-    if !record_results.is_empty() {
-        response_data.clear();
-        response_data.extend(record_results.drain());
-        response_data.sort_by_key(|r| r.query_type.clone());
-        let response_data_string = create_query_response_string(response_data);
+    if !context.current_query_results.is_empty() {
+        context
+            .all_query_responses
+            .extend(context.current_query_results.drain());
+        context
+            .all_query_responses
+            .sort_by_key(|r| r.query_type.clone());
+        let response_data_string = create_query_response_string(&context.all_query_responses);
 
-        // Add results to EnumerationOutput
-        if let Some(output) = enumeration_output {
-            for response in &*response_data {
+        if let Some(output) = &mut context.results_output {
+            for response in &context.all_query_responses {
                 output.add_result(response.clone());
             }
         }
@@ -177,26 +172,22 @@ fn process_subdomain(
             query_resolver,
             &response_data_string,
         );
-        *found_subdomain_count += 1;
+        context.found_subdomain_count += 1;
     }
 
     Ok(())
 }
 
-#[allow(clippy::too_many_arguments)]
 fn retry_failed_queries(
     command_args: &CommandArgs,
     dns_resolver_list: &[&str],
     resolver_selector_instance: &mut dyn ResolverSelector,
     query_types: &[QueryType],
-    failed_subdomains: &mut HashSet<String>,
-    record_results: &mut HashSet<DnsQueryResponse>,
-    response_data: &mut Vec<DnsQueryResponse>,
-    found_subdomain_count: &mut u32,
-    enumeration_output: &mut Option<EnumerationJsonOuput>,
+    query_timer: &mut QueryTimer,
+    context: &mut EnumerationContext,
 ) -> Result<()> {
-    if !failed_subdomains.is_empty() {
-        let count = failed_subdomains.len();
+    if !context.failed_subdomains.is_empty() {
+        let count = context.failed_subdomains.len();
         println!(
             "\n[{}] Retrying {} failed queries",
             "!".bright_yellow(),
@@ -205,29 +196,33 @@ fn retry_failed_queries(
     }
 
     let mut retry_failed_count: u32 = 0;
-    let retries: Vec<String> = failed_subdomains.iter().cloned().collect();
-    failed_subdomains.clear();
+    let retries: Vec<String> = context.failed_subdomains.iter().cloned().collect();
+    context.failed_subdomains.clear();
 
     for subdomain in retries {
         let query_resolver = resolver_selector_instance.select(dns_resolver_list)?;
         let fqdn = format!("{}.{}", subdomain, command_args.target_domain);
 
-        record_results.clear();
+        context.current_query_results.clear();
 
         for query_type in query_types {
-            match resolve_domain(
+            query_timer.start();
+            let query_result = resolve_domain(
                 query_resolver,
                 &fqdn,
                 query_type,
                 &command_args.transport_protocol,
-            ) {
+            );
+            query_timer.stop();
+
+            match query_result {
                 Ok(response) => {
-                    record_results.extend(response);
+                    context.current_query_results.extend(response);
                 }
                 Err(err) => {
                     if !matches!(err, DnsError::NoRecordsFound | DnsError::NonExistentDomain) {
                         retry_failed_count += 1;
-                        failed_subdomains.insert(subdomain.clone());
+                        context.failed_subdomains.insert(subdomain.clone());
                     }
 
                     print_query_error(command_args, &subdomain, query_resolver, &err, true);
@@ -239,15 +234,18 @@ fn retry_failed_queries(
             }
         }
 
-        if !record_results.is_empty() {
-            response_data.clear();
-            response_data.extend(record_results.drain());
-            response_data.sort_by_key(|r| r.query_type.clone());
-            let response_data_string = create_query_response_string(response_data);
+        if !context.current_query_results.is_empty() {
+            context.all_query_responses.clear();
+            context
+                .all_query_responses
+                .extend(context.current_query_results.drain());
+            context
+                .all_query_responses
+                .sort_by_key(|r| r.query_type.clone());
+            let response_data_string = create_query_response_string(&context.all_query_responses);
 
-            // Add results to EnumerationOutput
-            if let Some(output) = enumeration_output {
-                for response in &*response_data {
+            if let Some(output) = &mut context.results_output {
+                for response in &context.all_query_responses {
                     output.add_result(response.clone());
                 }
             }
@@ -258,7 +256,7 @@ fn retry_failed_queries(
                 query_resolver,
                 &response_data_string,
             );
-            *found_subdomain_count += 1;
+            context.found_subdomain_count += 1;
         }
 
         thread::sleep(Duration::from_millis(50));
