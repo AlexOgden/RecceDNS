@@ -82,6 +82,8 @@ After building, you can find the executable in the `target/release` directory.
 
 - `-r` `--use-random`: When multiple resolvers are provided, randomly select from the list on each query in enumeration.
 
+- `--json <path>` : Output the results to a JSON file. '.json' will be appended as the extension is not provided.
+
 ## Example Usage
 
 #### Basic Enumeration
