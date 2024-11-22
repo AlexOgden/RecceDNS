@@ -91,7 +91,7 @@ pub fn enumerate_subdomains(command_args: &CommandArgs, dns_resolver_list: &[&st
 
     progress_bar.finish_and_clear();
 
-    if !interrupted.load(Ordering::SeqCst) { 
+    if !interrupted.load(Ordering::SeqCst) {
         retry_failed_queries(
             command_args,
             dns_resolver_list,
