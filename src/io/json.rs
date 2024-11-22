@@ -1,5 +1,6 @@
 use crate::dns::protocol::ResourceRecord;
 use anyhow::Result;
+use colored::Colorize;
 use serde::Serialize;
 
 #[derive(Serialize)]
@@ -30,8 +31,15 @@ impl EnumerationOutput {
             format!("{output_file}.json")
         };
 
+        let output_file_path = output_file.clone();
         let file = std::fs::File::create(output_file)?;
         serde_json::to_writer_pretty(file, self)?;
+
+        println!(
+            "[{}] JSON output written to: {}",
+            "~".green(),
+            output_file_path.bold().bright_yellow()
+        );
         Ok(())
     }
 }

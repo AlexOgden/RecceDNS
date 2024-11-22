@@ -48,7 +48,7 @@ pub fn enumerate_subdomains(command_args: &CommandArgs, dns_resolver_list: &[&st
         failed_subdomains: HashSet::new(),
         found_subdomain_count: 0,
         results_output: command_args
-            .output_file
+            .json
             .as_ref()
             .map(|_| EnumerationOutput::new(command_args.target_domain.clone())),
     };
@@ -103,10 +103,8 @@ pub fn enumerate_subdomains(command_args: &CommandArgs, dns_resolver_list: &[&st
     }
 
     // Write the results to the specified output file if provided
-    if let (Some(output), Some(output_file)) = (&context.results_output, &command_args.output_file)
-    {
+    if let (Some(output), Some(output_file)) = (&context.results_output, &command_args.json) {
         output.write_to_file(output_file)?;
-        println!("[{}] JSON output written to {}", "~".green(), output_file);
     }
 
     Ok(())
@@ -125,6 +123,7 @@ fn process_subdomain(
     let fqdn = format!("{}.{}", subdomain, command_args.target_domain);
 
     context.current_query_results.clear();
+    context.all_query_responses.clear();
 
     for query_type in query_types {
         query_timer.start();

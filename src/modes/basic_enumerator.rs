@@ -28,7 +28,7 @@ pub fn enumerate_records(args: &CommandArgs, dns_resolvers: &[&str]) -> Result<(
         args.target_domain.bold().bright_blue()
     );
 
-    let mut data_output = if args.output_file.is_some() {
+    let mut data_output = if args.json.is_some() {
         Some(crate::io::json::EnumerationOutput::new(
             args.target_domain.clone(),
         ))
@@ -69,17 +69,14 @@ pub fn enumerate_records(args: &CommandArgs, dns_resolvers: &[&str]) -> Result<(
 
     if let Some(average_query_time) = query_timer.average() {
         println!(
-            "\nAverage query time: {} ms",
+            "\n[{}] Average query time: {} ms",
+            "~".green(),
             average_query_time.to_string().bold().bright_yellow()
         );
     }
 
-    if let (Some(output_file), Some(data_output)) = (&args.output_file, data_output) {
+    if let (Some(output_file), Some(data_output)) = (&args.json, data_output) {
         data_output.write_to_file(output_file)?;
-        println!(
-            "\nResults written to: {}",
-            output_file.bold().bright_green()
-        );
     }
     Ok(())
 }
