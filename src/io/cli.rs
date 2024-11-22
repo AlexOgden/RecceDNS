@@ -134,7 +134,7 @@ pub fn clear_line() {
 pub fn setup_progress_bar(total: u64) -> ProgressBar {
     let pb = ProgressBar::new(total);
     let style = ProgressStyle::default_bar()
-        .template("{prefix:.bold.dim} {spinner:.cyan} {wide_msg:.white} [{bar:50.cyan/blue}] ETA {eta:.bold}")
+        .template("[{spinner:.cyan}] {prefix:.bold} {wide_msg:.white} [{bar:50.cyan/blue}] ETA {eta:.bold}")
         .unwrap()
         .progress_chars("##-")
         .tick_chars(PROGRESS_TICK_CHARS);
