@@ -29,9 +29,7 @@ pub fn enumerate_records(args: &CommandArgs, dns_resolvers: &[&str]) -> Result<(
     );
 
     let mut data_output = if args.json.is_some() {
-        Some(crate::io::json::EnumerationOutput::new(
-            args.target_domain.clone(),
-        ))
+        Some(EnumerationOutput::new(args.target_domain.clone()))
     } else {
         None
     };
