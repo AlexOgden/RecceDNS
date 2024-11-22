@@ -56,6 +56,15 @@ impl PacketBuffer {
         Ok(())
     }
 
+    pub fn set_u16(&mut self, pos: usize, val: u16) -> Result<()> {
+        if pos + 1 >= self.buf.len() {
+            return Err(anyhow!("Position out of bounds"));
+        }
+        self.buf[pos] = (val >> 8) as u8;
+        self.buf[pos + 1] = u8::try_from(val)?;
+        Ok(())
+    }
+
     pub fn read_u8(&mut self) -> Result<u8> {
         if self.pos >= self.buf.len() {
             return Err(anyhow!("End of buffer"));

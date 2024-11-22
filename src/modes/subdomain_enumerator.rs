@@ -7,9 +7,10 @@ use std::thread;
 use std::time::Duration;
 
 use crate::dns::error::DnsError;
+use crate::dns::protocol::RData;
 use crate::dns::resolver_selector;
 use crate::dns::{
-    protocol::{DnsQueryResponse, DnsRecord, QueryType},
+    protocol::{QueryType, ResourceRecord},
     resolver::resolve_domain,
     resolver_selector::ResolverSelector,
 };
@@ -19,8 +20,8 @@ use crate::timing::stats::QueryTimer;
 use std::time::Instant;
 
 struct EnumerationContext {
-    current_query_results: HashSet<DnsQueryResponse>,
-    all_query_responses: Vec<DnsQueryResponse>,
+    current_query_results: HashSet<ResourceRecord>,
+    all_query_responses: Vec<ResourceRecord>,
     failed_subdomains: HashSet<String>,
     found_subdomain_count: u32,
     results_output: Option<EnumerationOutput>,
@@ -137,7 +138,7 @@ fn process_subdomain(
 
         match query_result {
             Ok(response) => {
-                context.current_query_results.extend(response);
+                context.current_query_results.extend(response.answers);
             }
             Err(err) => {
                 if !command_args.no_retry
@@ -157,7 +158,7 @@ fn process_subdomain(
             .extend(context.current_query_results.drain());
         context
             .all_query_responses
-            .sort_by_key(|r| r.query_type.clone());
+            .sort_by_key(|r| r.data.to_qtype());
         let response_data_string = create_query_response_string(&context.all_query_responses);
 
         if let Some(output) = &mut context.results_output {
@@ -217,7 +218,7 @@ fn retry_failed_queries(
 
             match query_result {
                 Ok(response) => {
-                    context.current_query_results.extend(response);
+                    context.current_query_results.extend(response.answers);
                 }
                 Err(err) => {
                     if !matches!(err, DnsError::NoRecordsFound | DnsError::NonExistentDomain) {
@@ -241,7 +242,7 @@ fn retry_failed_queries(
                 .extend(context.current_query_results.drain());
             context
                 .all_query_responses
-                .sort_by_key(|r| r.query_type.clone());
+                .sort_by_key(|r| r.data.to_qtype());
             let response_data_string = create_query_response_string(&context.all_query_responses);
 
             if let Some(output) = &mut context.results_output {
@@ -345,38 +346,48 @@ fn check_wildcard_domain(args: &CommandArgs, dns_resolvers: &[&str]) -> Result<b
     )
 }
 
-fn create_query_response_string(query_result: &[DnsQueryResponse]) -> String {
+fn create_query_response_string(query_result: &[ResourceRecord]) -> String {
     let query_responses: String = query_result
         .iter()
         .map(|response| {
-            let query_type_formatted = response.query_type.to_string().bold();
-            match &response.response_content {
-                DnsRecord::A(record) => format!("[{} {}]", query_type_formatted, record.addr),
-                DnsRecord::AAAA(record) => format!("[{} {}]", query_type_formatted, record.addr),
-                DnsRecord::TXT(txt_data) => format!("[{query_type_formatted} {0}]", txt_data.data),
-                DnsRecord::CNAME(domain) | DnsRecord::NS(domain) => {
-                    format!("[{query_type_formatted} {0}]", domain.data)
+            let query_type_formatted = response.data.to_qtype().to_string().bold();
+            match &response.data {
+                RData::A(record) => format!("[{query_type_formatted} {record}]"),
+                RData::AAAA(record) => format!("[{query_type_formatted} {record}]"),
+                RData::TXT(txt_data) => format!("[{query_type_formatted} {txt_data}]"),
+                RData::CNAME(domain) | RData::NS(domain) => {
+                    format!("[{query_type_formatted} {domain}]")
                 }
-                DnsRecord::MX(mx) => {
-                    format!("[{} {} {}]", query_type_formatted, mx.priority, mx.domain)
+                RData::MX {
+                    preference,
+                    exchange,
+                } => {
+                    format!("[{query_type_formatted} {preference} {exchange}]")
                 }
-                DnsRecord::SOA(soa) => format!(
-                    "[{} {} {} {} {} {} {} {}]",
-                    query_type_formatted,
-                    soa.mname,
-                    soa.rname,
-                    soa.serial,
-                    soa.refresh,
-                    soa.retry,
-                    soa.expire,
-                    soa.minimum
+                RData::SOA {
+                    mname,
+                    rname,
+                    serial,
+                    refresh,
+                    retry,
+                    expire,
+                    minimum,
+                } => format!(
+                    "[{query_type_formatted} {mname} {rname} {serial} {refresh} {retry} {expire} {minimum}]"
                 ),
-                DnsRecord::SRV(srv) => format!(
-                    "[{} {} {} {} {}]",
-                    query_type_formatted, srv.priority, srv.weight, srv.port, srv.target
+                RData::SRV {
+                    priority,
+                    weight,
+                    port,
+                    target,
+                } => format!(
+                    "[{query_type_formatted} {priority} {weight} {port} {target}]"
                 ),
-                DnsRecord::DNSKEY(_dnskey) => {
+                RData::DNSKEY { .. } => {
                     format!("[{} Enabled]", "DNSSEC".bold().bright_cyan())
+                }
+                RData::Unknown { qtype, data_len } => {
+                    format!("[{qtype} Unknown {data_len} bytes]")
                 }
             }
         })

@@ -3,7 +3,7 @@ use colored::Colorize;
 use crate::{
     dns::{
         error::DnsError,
-        protocol::{DnsQueryResponse, DnsRecord, QueryType},
+        protocol::{QueryType, RData, ResourceRecord},
         resolver::resolve_domain,
     },
     io::cli::CommandArgs,
@@ -42,8 +42,10 @@ pub fn enumerate_records(args: &CommandArgs, dns_resolvers: &[&str]) -> Result<(
 
         match query_result {
             Ok(mut response) => {
-                response.sort_by(|a, b| a.query_type.cmp(&b.query_type));
-                process_response(&mut seen_cnames, &response, resolver, args)?;
+                response
+                    .answers
+                    .sort_by(|a, b| a.data.to_qtype().cmp(&b.data.to_qtype()));
+                process_response(&mut seen_cnames, &response.answers, resolver, args)?;
             }
             Err(err) if !matches!(err, DnsError::NoRecordsFound | DnsError::NonExistentDomain) => {
                 eprintln!("{query_type} {err}");
@@ -69,7 +71,7 @@ fn check_dnssec(resolver: &str, domain: &str, args: &CommandArgs) -> Result<()> 
         &QueryType::DNSKEY,
         &args.transport_protocol,
     ) {
-        Ok(response) if response.is_empty() => {
+        Ok(response) if response.answers.is_empty() => {
             println!("{}", format_response("DNSSEC", "is not enabled"));
         }
         Ok(_) => {
@@ -85,13 +87,13 @@ fn check_dnssec(resolver: &str, domain: &str, args: &CommandArgs) -> Result<()> 
 
 fn process_response(
     seen_cnames: &mut HashSet<String>,
-    response: &[DnsQueryResponse],
+    response: &[ResourceRecord],
     resolver: &str,
     args: &CommandArgs,
 ) -> Result<()> {
     for record in response {
-        if let DnsRecord::CNAME(ref cname) = record.response_content {
-            if !seen_cnames.insert(cname.data.clone()) {
+        if let RData::CNAME(ref cname) = record.data {
+            if !seen_cnames.insert(cname.clone()) {
                 continue; // Skip if CNAME is already seen
             }
         }
@@ -117,15 +119,14 @@ fn handle_ns_response(
     for query_type in [QueryType::A, QueryType::AAAA] {
         match resolve_domain(resolver, ns_domain, &query_type, &args.transport_protocol) {
             Ok(records) => {
-                for record in records {
+                for record in records.answers {
                     result.push(' ');
-                    match record.response_content {
-                        DnsRecord::A(a_record) => {
-                            result.push_str(&format_response("A", &a_record.addr.to_string()));
+                    match record.data {
+                        RData::A(a_record) => {
+                            result.push_str(&format_response("A", &a_record.to_string()));
                         }
-                        DnsRecord::AAAA(aaaa_record) => {
-                            result
-                                .push_str(&format_response("AAAA", &aaaa_record.addr.to_string()));
+                        RData::AAAA(aaaa_record) => {
+                            result.push_str(&format_response("AAAA", &aaaa_record.to_string()));
                         }
                         _ => {}
                     }
@@ -140,48 +141,54 @@ fn handle_ns_response(
 }
 
 fn create_query_response_string(
-    query_response: &DnsQueryResponse,
+    query_response: &ResourceRecord,
     resolver: &str,
     args: &CommandArgs,
 ) -> Result<String> {
-    let query_type_formatted = query_response.query_type.to_string().bold().bright_cyan();
-    match &query_response.response_content {
-        DnsRecord::A(record) => Ok(format_response(
+    let query_type_formatted = query_response
+        .data
+        .to_qtype()
+        .to_string()
+        .bold()
+        .bright_cyan();
+    match &query_response.data {
+        RData::A(record) => Ok(format_response(&query_type_formatted, &record.to_string())),
+        RData::AAAA(record) => Ok(format_response(&query_type_formatted, &record.to_string())),
+        RData::TXT(txt_data) => Ok(format_response(&query_type_formatted, txt_data)),
+        RData::CNAME(cname) => Ok(format_response(&query_type_formatted, cname)),
+        RData::NS(domain) => Ok(handle_ns_response(
             &query_type_formatted,
-            &record.addr.to_string(),
-        )),
-        DnsRecord::AAAA(record) => Ok(format_response(
-            &query_type_formatted,
-            &record.addr.to_string(),
-        )),
-        DnsRecord::TXT(txt_data) => Ok(format_response(&query_type_formatted, &txt_data.data)),
-        DnsRecord::CNAME(cname) => Ok(format_response(&query_type_formatted, &cname.data)),
-        DnsRecord::NS(domain) => Ok(handle_ns_response(
-            &query_type_formatted,
-            &domain.data,
+            domain,
             resolver,
-            &domain.data,
+            domain,
             args,
         )?),
-        DnsRecord::MX(mx) => Ok(format!(
-            "[{} {} {}]",
-            query_type_formatted, mx.priority, mx.domain
+        RData::MX {
+            preference,
+            exchange,
+        } => Ok(format!("[{query_type_formatted} {preference} {exchange}]")),
+        RData::SOA {
+            mname,
+            rname,
+            serial,
+            refresh,
+            retry,
+            expire,
+            minimum,
+        } => Ok(format!(
+            "[{query_type_formatted} {mname} {rname} {serial} {refresh} {retry} {expire} {minimum}]"
         )),
-        DnsRecord::SOA(soa) => Ok(format!(
-            "[{} {} {} {} {} {} {} {}]",
-            query_type_formatted,
-            soa.mname,
-            soa.rname,
-            soa.serial,
-            soa.refresh,
-            soa.retry,
-            soa.expire,
-            soa.minimum
+        RData::SRV {
+            priority,
+            weight,
+            port,
+            target,
+        } => Ok(format!(
+            "[{query_type_formatted} {priority} {weight} {port} {target}]"
         )),
-        DnsRecord::SRV(srv) => Ok(format!(
-            "[{} {} {} {} {}]",
-            query_type_formatted, srv.priority, srv.weight, srv.port, srv.target
-        )),
-        DnsRecord::DNSKEY(_dnskey) => Ok(format!("[{} Enabled]", "DNSSEC".bold().bright_cyan())),
+        RData::DNSKEY { .. } => Ok(format!("[{} Enabled]", "DNSSEC".bold().bright_cyan())),
+        RData::Unknown { qtype, data_len } => {
+            Ok(format!("[{qtype} Unknown data type: {data_len} bytes]"))
+        }
     }
 }
