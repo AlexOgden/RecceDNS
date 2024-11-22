@@ -119,7 +119,9 @@ fn process_response(
             data_output.add_result(record.clone());
         }
         let response_data_string = create_query_response_string(record, resolver, args)?;
-        println!("{response_data_string}");
+        if !args.quiet {
+            println!("{response_data_string}");
+        }
     }
     Ok(())
 }

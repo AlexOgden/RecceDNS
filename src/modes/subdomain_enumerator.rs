@@ -413,6 +413,10 @@ fn create_query_response_string(query_result: &[ResourceRecord]) -> String {
 }
 
 fn print_query_result(args: &CommandArgs, subdomain: &str, resolver: &str, response: &str) {
+    if args.quiet {
+        return;
+    }
+
     let domain = format!(
         "{}.{}",
         subdomain.cyan().bold(),
@@ -438,12 +442,13 @@ fn print_query_error(
     error: &DnsError,
     retry: bool,
 ) {
-    if !args.verbose
+    if (!args.verbose
         && !retry
         && matches!(
             error,
             DnsError::NoRecordsFound | DnsError::NonExistentDomain
-        )
+        ))
+        || args.quiet
     {
         return;
     }
