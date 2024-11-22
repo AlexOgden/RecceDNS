@@ -21,6 +21,7 @@ I originally started working on this project to learn Rust, improve on network p
 	- Use an optional delay between queries.
 - SRV enumeration, use a wordlist with the query argument set to SRV to find common SRV records.
 - Coloured output with progress reporting on bruteforce subdomain enumeration.
+- Output results to a JSON file.
 
 ## Cloning and Building
 
