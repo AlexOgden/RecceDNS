@@ -34,7 +34,7 @@ pub fn enumerate_subdomains(command_args: &CommandArgs, dns_resolver_list: &[&st
     ctrlc::set_handler({
         let interrupted_clone = Arc::clone(&interrupted);
         move || {
-            interrupted_clone.store(true, std::sync::atomic::Ordering::SeqCst);
+            interrupted_clone.store(true, Ordering::SeqCst);
         }
     })?;
 
