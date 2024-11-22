@@ -3,6 +3,8 @@ use colored::Colorize;
 use rand::Rng;
 use std::collections::HashSet;
 use std::io::{self, Write};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
 
@@ -28,6 +30,14 @@ struct EnumerationContext {
 }
 
 pub fn enumerate_subdomains(command_args: &CommandArgs, dns_resolver_list: &[&str]) -> Result<()> {
+    let interrupted = Arc::new(AtomicBool::new(false));
+    ctrlc::set_handler({
+        let interrupted_clone = Arc::clone(&interrupted);
+        move || {
+            interrupted_clone.store(true, std::sync::atomic::Ordering::SeqCst);
+        }
+    })?;
+
     if handle_wildcard_domain(command_args, dns_resolver_list)? {
         return Ok(());
     }
@@ -54,6 +64,11 @@ pub fn enumerate_subdomains(command_args: &CommandArgs, dns_resolver_list: &[&st
     };
 
     for (index, subdomain) in subdomain_list.iter().enumerate() {
+        if interrupted.load(Ordering::SeqCst) {
+            cli::clear_line();
+            println!("[{}] Interrupted by user", "!".red());
+            break;
+        }
         process_subdomain(
             command_args,
             dns_resolver_list,
@@ -76,18 +91,19 @@ pub fn enumerate_subdomains(command_args: &CommandArgs, dns_resolver_list: &[&st
 
     progress_bar.finish_and_clear();
 
-    retry_failed_queries(
-        command_args,
-        dns_resolver_list,
-        &mut *resolver_selector_instance,
-        query_types,
-        &mut query_timer,
-        &mut context,
-    )?;
-
+    if !interrupted.load(Ordering::SeqCst) {
+        retry_failed_queries(
+            command_args,
+            dns_resolver_list,
+            &mut *resolver_selector_instance,
+            query_types,
+            &mut query_timer,
+            &mut context,
+        )?;
+    }
     let elapsed_time = start_time.elapsed();
 
-    println!("\r\x1b[2K"); // Clear the progress bar
+    cli::clear_line();
     println!(
         "[{}] Done! Found {} subdomains in {:.2?}",
         "~".green(),
@@ -397,6 +413,10 @@ fn create_query_response_string(query_result: &[ResourceRecord]) -> String {
 }
 
 fn print_query_result(args: &CommandArgs, subdomain: &str, resolver: &str, response: &str) {
+    if args.quiet {
+        return;
+    }
+
     let domain = format!(
         "{}.{}",
         subdomain.cyan().bold(),
@@ -422,12 +442,13 @@ fn print_query_error(
     error: &DnsError,
     retry: bool,
 ) {
-    if !args.verbose
+    if (!args.verbose
         && !retry
         && matches!(
             error,
             DnsError::NoRecordsFound | DnsError::NonExistentDomain
-        )
+        ))
+        || args.quiet
     {
         return;
     }

@@ -49,6 +49,10 @@ pub struct CommandArgs {
     #[arg(long, required = false)]
     pub json: Option<String>,
 
+    /// Dont print results to the console, only write to the output file
+    #[arg(long, required = false)]
+    pub quiet: bool,
+
     /// Don't show the welcome ASCII art
     #[arg(long)]
     pub no_welcome: bool,
@@ -86,6 +90,9 @@ impl CommandArgs {
     pub fn validate(&self) -> Result<(), String> {
         if self.operation_mode == OperationMode::SubdomainEnumeration && self.wordlist.is_none() {
             return Err("The argument '--wordlist <WORDLIST>' is required when the operation mode is 'subdomain'".to_string());
+        }
+        if self.quiet && self.json.is_none() {
+            return Err("The argument '--quiet' requires '--json <OUTPUT_FILE>'".to_string());
         }
         Ok(())
     }
@@ -127,10 +134,14 @@ pub fn print_ascii_art() {
     );
 }
 
+pub fn clear_line() {
+    println!("\r\x1b[2K");
+}
+
 pub fn setup_progress_bar(total: u64) -> ProgressBar {
     let pb = ProgressBar::new(total);
     let style = ProgressStyle::default_bar()
-        .template("{prefix:.bold.dim} {spinner:.cyan} {wide_msg:.white} [{bar:50.cyan/blue}] ETA {eta:.bold}")
+        .template("[{spinner:.cyan}] {prefix:.bold} {wide_msg:.white} [{bar:50.cyan/blue}] ETA {eta:.bold}")
         .unwrap()
         .progress_chars("##-")
         .tick_chars(PROGRESS_TICK_CHARS);
