@@ -6,7 +6,7 @@ use crate::{
         protocol::{QueryType, RData, ResourceRecord},
         resolver::resolve_domain,
     },
-    io::cli::CommandArgs,
+    io::{cli::CommandArgs, json::EnumerationOutput},
     timing::stats::QueryTimer,
 };
 use anyhow::Result;
@@ -28,6 +28,13 @@ pub fn enumerate_records(args: &CommandArgs, dns_resolvers: &[&str]) -> Result<(
         args.target_domain.bold().bright_blue()
     );
 
+    let mut data_output = if args.output_file.is_some() {
+        Some(crate::io::json::EnumerationOutput::new(
+            args.target_domain.clone(),
+        ))
+    } else {
+        None
+    };
     let resolver = dns_resolvers[0];
     let domain = &args.target_domain;
     let mut seen_cnames = HashSet::new();
@@ -45,7 +52,13 @@ pub fn enumerate_records(args: &CommandArgs, dns_resolvers: &[&str]) -> Result<(
                 response
                     .answers
                     .sort_by(|a, b| a.data.to_qtype().cmp(&b.data.to_qtype()));
-                process_response(&mut seen_cnames, &response.answers, resolver, args)?;
+                process_response(
+                    &mut seen_cnames,
+                    &response.answers,
+                    resolver,
+                    &mut data_output,
+                    args,
+                )?;
             }
             Err(err) if !matches!(err, DnsError::NoRecordsFound | DnsError::NonExistentDomain) => {
                 eprintln!("{query_type} {err}");
@@ -61,6 +74,13 @@ pub fn enumerate_records(args: &CommandArgs, dns_resolvers: &[&str]) -> Result<(
         );
     }
 
+    if let (Some(output_file), Some(data_output)) = (&args.output_file, data_output) {
+        data_output.write_to_file(output_file)?;
+        println!(
+            "\nResults written to: {}",
+            output_file.bold().bright_green()
+        );
+    }
     Ok(())
 }
 
@@ -89,6 +109,7 @@ fn process_response(
     seen_cnames: &mut HashSet<String>,
     response: &[ResourceRecord],
     resolver: &str,
+    data_output: &mut Option<EnumerationOutput>,
     args: &CommandArgs,
 ) -> Result<()> {
     for record in response {
@@ -96,6 +117,9 @@ fn process_response(
             if !seen_cnames.insert(cname.clone()) {
                 continue; // Skip if CNAME is already seen
             }
+        }
+        if let Some(data_output) = data_output {
+            data_output.add_result(record.clone());
         }
         let response_data_string = create_query_response_string(record, resolver, args)?;
         println!("{response_data_string}");
