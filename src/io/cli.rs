@@ -127,6 +127,10 @@ pub fn print_ascii_art() {
     );
 }
 
+pub fn clear_line() {
+    println!("\r\x1b[2K");
+}
+
 pub fn setup_progress_bar(total: u64) -> ProgressBar {
     let pb = ProgressBar::new(total);
     let style = ProgressStyle::default_bar()
