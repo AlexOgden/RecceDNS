@@ -21,6 +21,7 @@ I originally started working on this project to learn Rust, improve on network p
 	- Use an optional delay between queries.
 - SRV enumeration, use a wordlist with the query argument set to SRV to find common SRV records.
 - Coloured output with progress reporting on bruteforce subdomain enumeration.
+- Output results to a JSON file.
 
 ## Cloning and Building
 
@@ -81,6 +82,8 @@ After building, you can find the executable in the `target/release` directory.
 - `--delay <MS|RANGE>`: Delay in milliseconds to use between queries in subdomain enumeration. You can specify a single value (e.g., `1000` for a 1-second delay) or a range (e.g., `100-200` for a random delay between 100 and 200 milliseconds). Default: `0`
 
 - `-r` `--use-random`: When multiple resolvers are provided, randomly select from the list on each query in enumeration.
+
+- `--json <path>` : Output the results to a JSON file. '.json' will be appended as the extension is not provided.
 
 ## Example Usage
 

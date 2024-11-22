@@ -1,7 +1,7 @@
 use anyhow::{Context, Result};
 
 use crate::dns::error::DnsError;
-use crate::dns::protocol::{DnsQueryResponse, QueryType};
+use crate::dns::protocol::QueryType;
 use crate::io::packet_buffer::PacketBuffer;
 use crate::network::types::TransportProtocol;
 use lazy_static::lazy_static;
@@ -44,7 +44,7 @@ pub fn resolve_domain(
     domain: &str,
     query_type: &QueryType,
     transport_protocol: &TransportProtocol,
-) -> Result<Vec<DnsQueryResponse>, DnsError> {
+) -> Result<DnsPacket, DnsError> {
     let udp_socket =
         initialize_udp_socket().map_err(|error| DnsError::Network(error.to_string()))?;
 
@@ -61,7 +61,7 @@ pub fn resolve_domain(
             if query_result.answers.is_empty() {
                 Err(DnsError::NoRecordsFound)
             } else {
-                Ok(query_result.answers)
+                Ok(query_result)
             }
         }
         ResultCode::NXDOMAIN => Err(DnsError::NonExistentDomain),
@@ -199,7 +199,7 @@ mod tests {
 
         assert_eq!(dns_packet.header.questions, 1);
         assert_eq!(dns_packet.questions.len(), 1);
-        assert_eq!(dns_packet.questions[0].domain, domain);
+        assert_eq!(dns_packet.questions[0].name, domain);
         assert_eq!(dns_packet.questions[0].qtype, query_type);
     }
 
