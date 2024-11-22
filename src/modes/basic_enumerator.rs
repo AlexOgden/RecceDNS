@@ -82,23 +82,21 @@ pub fn enumerate_records(args: &CommandArgs, dns_resolvers: &[&str]) -> Result<(
 }
 
 fn check_dnssec(resolver: &str, domain: &str, args: &CommandArgs) -> Result<()> {
-    match resolve_domain(
+    let response = resolve_domain(
         resolver,
         domain,
         &QueryType::DNSKEY,
         &args.transport_protocol,
-    ) {
-        Ok(response) if response.answers.is_empty() => {
-            println!("{}", format_response("DNSSEC", "is not enabled"));
-        }
-        Ok(_) => {
-            println!("{}", format_response("DNSSEC", "is enabled"));
-        }
-        Err(DnsError::NoRecordsFound) => {
-            println!("{}", format_response("DNSSEC", "is not enabled"));
-        }
+    );
+
+    let dnssec_status = match response {
+        Ok(response) if response.answers.is_empty() => "is not enabled",
+        Ok(_) => "is enabled",
+        Err(DnsError::NoRecordsFound) => "is not enabled",
         Err(err) => return Err(err.into()),
-    }
+    };
+
+    println!("{}", format_response("DNSSEC", dnssec_status));
     Ok(())
 }
 
