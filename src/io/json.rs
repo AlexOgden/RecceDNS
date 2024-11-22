@@ -1,11 +1,11 @@
-use crate::dns::protocol::DnsQueryResponse;
+use crate::dns::protocol::ResourceRecord;
 use anyhow::Result;
 use serde::Serialize;
 
 #[derive(Serialize)]
 pub struct EnumerationOutput {
     pub target_domain: String,
-    pub results: Vec<DnsQueryResponse>,
+    pub results: Vec<ResourceRecord>,
 }
 
 impl EnumerationOutput {
@@ -16,7 +16,7 @@ impl EnumerationOutput {
         }
     }
 
-    pub fn add_result(&mut self, result: DnsQueryResponse) {
+    pub fn add_result(&mut self, result: ResourceRecord) {
         self.results.push(result);
     }
 
