@@ -5,7 +5,7 @@ use indicatif::{ProgressBar, ProgressStyle};
 
 use super::validate::{self, dns_resolver_list};
 
-const PROGRESS_TICK_CHARS: &str = "⡈⠔⠢⢁";
+const PROGRESS_TICK_CHARS: &str = "⠢⢁⡈⠔";
 
 /// Command-line arguments for the program
 #[derive(Parser, Debug)]
@@ -22,8 +22,8 @@ pub struct CommandArgs {
     pub operation_mode: OperationMode,
 
     /// The target base domain name to probe
-    #[arg(short, long, required = true, value_parser = validate::domain)]
-    pub target_domain: String,
+    #[arg(short, long, required = true, value_parser = validate::target_input)]
+    pub target: String,
 
     /// IPv4 Address of the DNS resolver(s) to use (comma-seperated). Multiple resolvers will selected either randomly or sequentially
     #[arg(short, long, default_value = "1.1.1.1", value_parser = dns_resolver_list, required = false)]
@@ -108,6 +108,8 @@ pub enum OperationMode {
     BasicEnumeration,
     #[value(name = "s")]
     SubdomainEnumeration,
+    #[value(name = "r")]
+    ReverseIp,
 }
 
 pub fn get_parsed_args() -> CommandArgs {

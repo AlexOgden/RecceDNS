@@ -2,6 +2,8 @@ use anyhow::Result;
 use rand::seq::IteratorRandom;
 use rand::thread_rng;
 
+use crate::io::cli::CommandArgs;
+
 pub trait ResolverSelector {
     fn select<'a>(&mut self, dns_resolvers: &'a [&str]) -> Result<&'a str>;
 }
@@ -39,6 +41,14 @@ impl ResolverSelector for Sequential {
         let resolver = dns_resolvers[self.current_index];
         self.current_index = (self.current_index + 1) % dns_resolvers.len();
         Ok(resolver)
+    }
+}
+
+pub fn get_selector(args: &CommandArgs) -> Box<dyn ResolverSelector> {
+    if args.use_random {
+        Box::new(Random)
+    } else {
+        Box::new(Sequential::new())
     }
 }
 

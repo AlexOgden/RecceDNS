@@ -29,6 +29,7 @@ fn main() -> Result<()> {
         OperationMode::BasicEnumeration => {
             modes::basic_enumerator::enumerate_records(&args, &dns_resolvers)
         }
+        OperationMode::ReverseIp => modes::reverse_ip::reverse_ip(&args, &dns_resolvers),
     }
 }
 

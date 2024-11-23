@@ -3,8 +3,7 @@ use colored::Colorize;
 use rand::Rng;
 use std::collections::HashSet;
 use std::io::{self, Write};
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::atomic::Ordering;
 use std::thread;
 use std::time::Duration;
 
@@ -16,6 +15,7 @@ use crate::dns::{
     resolver::resolve_domain,
     resolver_selector::ResolverSelector,
 };
+use crate::io::interrupt;
 use crate::io::json::EnumerationOutput;
 use crate::io::{cli, cli::CommandArgs, wordlist};
 use crate::timing::stats::QueryTimer;
@@ -30,13 +30,7 @@ struct EnumerationContext {
 }
 
 pub fn enumerate_subdomains(command_args: &CommandArgs, dns_resolver_list: &[&str]) -> Result<()> {
-    let interrupted = Arc::new(AtomicBool::new(false));
-    ctrlc::set_handler({
-        let interrupted_clone = Arc::clone(&interrupted);
-        move || {
-            interrupted_clone.store(true, Ordering::SeqCst);
-        }
-    })?;
+    let interrupted = interrupt::initialize_interrupt_handler()?;
 
     if handle_wildcard_domain(command_args, dns_resolver_list)? {
         return Ok(());
@@ -44,7 +38,7 @@ pub fn enumerate_subdomains(command_args: &CommandArgs, dns_resolver_list: &[&st
 
     let query_types = get_query_types(&command_args.query_type);
     let subdomain_list = read_wordlist(&command_args.wordlist)?;
-    let mut resolver_selector_instance = setup_resolver_selector(command_args);
+    let mut resolver_selector_instance = resolver_selector::get_selector(command_args);
 
     let total_subdomains = subdomain_list.len() as u64;
     let progress_bar = cli::setup_progress_bar(total_subdomains);
@@ -60,7 +54,7 @@ pub fn enumerate_subdomains(command_args: &CommandArgs, dns_resolver_list: &[&st
         results_output: command_args
             .json
             .as_ref()
-            .map(|_| EnumerationOutput::new(command_args.target_domain.clone())),
+            .map(|_| EnumerationOutput::new(command_args.target.clone())),
     };
 
     for (index, subdomain) in subdomain_list.iter().enumerate() {
@@ -136,7 +130,7 @@ fn process_subdomain(
     context: &mut EnumerationContext,
 ) -> Result<()> {
     let query_resolver = resolver_selector_instance.select(dns_resolver_list)?;
-    let fqdn = format!("{}.{}", subdomain, command_args.target_domain);
+    let fqdn = format!("{}.{}", subdomain, command_args.target);
 
     context.current_query_results.clear();
     context.all_query_responses.clear();
@@ -217,7 +211,7 @@ fn retry_failed_queries(
 
     for subdomain in retries {
         let query_resolver = resolver_selector_instance.select(dns_resolver_list)?;
-        let fqdn = format!("{}.{}", subdomain, command_args.target_domain);
+        let fqdn = format!("{}.{}", subdomain, command_args.target);
 
         context.current_query_results.clear();
 
@@ -292,14 +286,6 @@ const fn get_query_types(query_type: &QueryType) -> &[QueryType] {
     }
 }
 
-fn setup_resolver_selector(args: &CommandArgs) -> Box<dyn ResolverSelector> {
-    if args.use_random {
-        Box::new(resolver_selector::Random)
-    } else {
-        Box::new(resolver_selector::Sequential::new())
-    }
-}
-
 fn read_wordlist(wordlist_path: &Option<String>) -> Result<Vec<String>> {
     if let Some(path) = wordlist_path {
         Ok(wordlist::read_from_file(path)?)
@@ -345,7 +331,7 @@ fn check_wildcard_domain(args: &CommandArgs, dns_resolvers: &[&str]) -> Result<b
                 let random_subdomain: String = (0..random_length)
                     .map(|_| rng.gen_range('a'..='z'))
                     .collect();
-                let fqdn = format!("{}.{}", random_subdomain, args.target_domain);
+                let fqdn = format!("{}.{}", random_subdomain, args.target);
 
                 resolve_domain(
                     query_resolver,
@@ -420,7 +406,7 @@ fn print_query_result(args: &CommandArgs, subdomain: &str, resolver: &str, respo
     let domain = format!(
         "{}.{}",
         subdomain.cyan().bold(),
-        args.target_domain.blue().italic()
+        args.target.blue().italic()
     );
     let status = "+".green();
     let mut message = format!("\r\x1b[2K[{status}] {domain}");
@@ -453,11 +439,7 @@ fn print_query_error(
         return;
     }
 
-    let domain = format!(
-        "{}.{}",
-        subdomain.red().bold(),
-        args.target_domain.blue().italic()
-    );
+    let domain = format!("{}.{}", subdomain.red().bold(), args.target.blue().italic());
     let status = "-".red();
     let mut message = format!("\r\x1b[2K[{status}] {domain}");
 

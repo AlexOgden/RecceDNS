@@ -1,19 +1,74 @@
 use anyhow::{anyhow, ensure, Context, Result};
-use lazy_static::lazy_static;
 use regex::Regex;
-use std::net::Ipv4Addr;
+use std::net::{IpAddr, Ipv4Addr};
 
-lazy_static! {
+lazy_static::lazy_static! {
     static ref DOMAIN_REGEX: Regex =
         Regex::new(r"^(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$").unwrap();
 }
 
-pub fn domain(domain: &str) -> Result<String> {
-    if DOMAIN_REGEX.is_match(domain) {
-        Ok(domain.to_string())
-    } else {
-        Err(anyhow!("Invalid domain name: {domain}"))
+pub fn target_input(input: &str) -> Result<String> {
+    let input = input.trim();
+
+    // Check for valid domain name
+    if DOMAIN_REGEX.is_match(input) {
+        return Ok(input.to_string());
     }
+
+    // Check for valid IP address (IPv4 or IPv6)
+    if input.parse::<IpAddr>().is_ok() {
+        return Ok(input.to_string());
+    }
+
+    // Check for CIDR notation (IPv4 or IPv6)
+    if let Some((ip_part, mask_part)) = input.split_once('/') {
+        let ip_part = ip_part.trim();
+        let mask_part = mask_part.trim();
+
+        if ip_part.is_empty() || mask_part.is_empty() {
+            return Err(anyhow!("Invalid CIDR notation: {}", input));
+        }
+
+        if let Ok(ip) = ip_part.parse::<IpAddr>() {
+            if let Ok(mask) = mask_part.parse::<u8>() {
+                match ip {
+                    IpAddr::V4(_) if mask <= 32 => return Ok(input.to_string()),
+                    IpAddr::V6(_) if mask <= 128 => return Ok(input.to_string()),
+                    _ => {}
+                }
+            }
+        }
+    }
+
+    // Check for IP address range
+    if let Some((start_ip, end_ip)) = input.split_once('-') {
+        let start_ip = start_ip.trim();
+        let end_ip = end_ip.trim();
+
+        if start_ip.is_empty() || end_ip.is_empty() {
+            return Err(anyhow!("Invalid IP range format: {}", input));
+        }
+
+        let start_parse = start_ip.parse::<IpAddr>();
+        let end_parse = end_ip.parse::<IpAddr>();
+
+        match (start_parse, end_parse) {
+            (Ok(start_addr), Ok(end_addr)) => {
+                if start_addr.is_ipv4() == end_addr.is_ipv4() {
+                    return Ok(input.to_string());
+                }
+                return Err(anyhow!(
+                    "IP range must consist of the same IP version: {}",
+                    input
+                ));
+            }
+            _ => {
+                return Err(anyhow!("Invalid IP range: {}", input));
+            }
+        }
+    }
+
+    Err(anyhow!("Invalid input: {}", input))
 }
 
 pub fn dns_resolver_list(servers: &str) -> Result<String> {
@@ -95,40 +150,81 @@ mod test {
     }
 
     #[test]
-    fn valid_domain() {
-        assert_eq!(domain("example.com").unwrap(), "example.com");
+    fn valid_domain_names() {
+        let valid_domains = [
+            "example.com",
+            "sub.example.com",
+            "example.co.uk",
+            "a.com",
+            "a-b.com",
+        ];
+        for domain in valid_domains {
+            assert_eq!(target_input(domain).unwrap(), domain);
+        }
     }
 
     #[test]
-    fn valid_subdomain() {
-        assert_eq!(
-            domain("subdomain.example.com").unwrap(),
-            "subdomain.example.com"
-        );
+    fn invalid_domain_names() {
+        let invalid_domains = [
+            "-example.com",
+            "example-.com",
+            "exa_mple.com",
+            "example..com",
+            "example.com-",
+        ];
+        for domain in invalid_domains {
+            assert!(target_input(domain).is_err());
+        }
     }
 
     #[test]
-    fn invalid_domain() {
-        // Test with invalid characters
-        assert!(domain("example!.com").is_err());
-
-        // Test with missing TLD
-        assert!(domain("example").is_err());
-
-        // Test with too short TLD
-        assert!(domain("example.a").is_err());
-
-        // Test with too long domain name
-        assert!(domain("a".repeat(256).as_str()).is_err());
+    fn valid_cidr_notations() {
+        let valid_cidrs = [
+            "192.168.0.0/24",
+            "10.0.0.0/8",
+            "172.16.0.0/12",
+            "2001:db8::/32",
+            "fe80::/10",
+        ];
+        for cidr in valid_cidrs {
+            assert_eq!(target_input(cidr).unwrap(), cidr);
+        }
     }
 
     #[test]
-    fn invalid_subdomain() {
-        // Test with invalid characters in subdomain
-        assert!(domain("sub!domain.example.com").is_err());
+    fn invalid_cidr_notations() {
+        let invalid_cidrs = [
+            "192.168.0.0/33",
+            "10.0.0.0/-1",
+            "172.16.0.0/abc",
+            "2001:db8::/129",
+            "fe80::/130",
+        ];
+        for cidr in invalid_cidrs {
+            assert!(target_input(cidr).is_err());
+        }
+    }
 
-        // Test with too long subdomain
-        let long_subdomain = "sub".repeat(64) + ".example.com";
-        assert!(domain(&long_subdomain).is_err());
+    #[test]
+    fn valid_ip_ranges() {
+        let valid_ranges = ["192.168.0.1-192.168.0.255", "10.0.0.1-10.0.0.255"];
+        for range in valid_ranges {
+            assert_eq!(target_input(range).unwrap(), range);
+        }
+    }
+
+    #[test]
+    fn invalid_ip_ranges() {
+        let invalid_ranges = [
+            "192.168.0.1-192.168.0.256",
+            "192.168.0.1-",
+            "-192.168.0.255",
+            "a-b",
+            "192.168.v.2-192.168.7.2",
+        ];
+        for range in invalid_ranges {
+            println!("{range}");
+            assert!(target_input(range).is_err());
+        }
     }
 }
