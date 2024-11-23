@@ -206,8 +206,9 @@ fn create_query_response_string(
             "[{query_type_formatted} {priority} {weight} {port} {target}]"
         )),
         RData::DNSKEY { .. } => Ok(format!("[{} Enabled]", "DNSSEC".bold().bright_cyan())),
-        RData::Unknown { qtype, data_len } => {
-            Ok(format!("[{qtype} Unknown data type: {data_len} bytes]"))
-        }
+        RData::Unknown { qtype, data_len } => Err(anyhow::Error::msg(format!(
+            "Unsupported data type: {qtype} with length {data_len} bytes"
+        ))),
+        RData::PTR { .. } => Err(anyhow::Error::msg("PTR query type is unsupported")),
     }
 }

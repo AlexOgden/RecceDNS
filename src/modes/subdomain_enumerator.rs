@@ -370,7 +370,7 @@ fn create_query_response_string(query_result: &[ResourceRecord]) -> String {
                 RData::A(record) => format!("[{query_type_formatted} {record}]"),
                 RData::AAAA(record) => format!("[{query_type_formatted} {record}]"),
                 RData::TXT(txt_data) => format!("[{query_type_formatted} {txt_data}]"),
-                RData::CNAME(domain) | RData::NS(domain) => {
+                RData::CNAME(domain) | RData::NS(domain) | RData::PTR(domain) => {
                     format!("[{query_type_formatted} {domain}]")
                 }
                 RData::MX {
