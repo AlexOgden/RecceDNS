@@ -25,16 +25,16 @@ pub fn enumerate_records(args: &CommandArgs, dns_resolvers: &[&str]) -> Result<(
 
     println!(
         "Enumerating records for target domain: {}\n",
-        args.target_domain.bold().bright_blue()
+        args.target.bold().bright_blue()
     );
 
     let mut data_output = if args.json.is_some() {
-        Some(EnumerationOutput::new(args.target_domain.clone()))
+        Some(EnumerationOutput::new(args.target.clone()))
     } else {
         None
     };
     let resolver = dns_resolvers[0];
-    let domain = &args.target_domain;
+    let domain = &args.target;
     let mut seen_cnames = HashSet::new();
     let mut query_timer = QueryTimer::new(!args.no_query_stats);
 
