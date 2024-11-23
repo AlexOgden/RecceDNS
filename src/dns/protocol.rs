@@ -38,6 +38,7 @@ pub enum QueryType {
     AAAA = 28,
     SRV = 33,
     DNSKEY = 48,
+    PTR = 12,
     ANY = 255,
 }
 
@@ -290,6 +291,11 @@ impl ResourceRecord {
                     public_key,
                 }
             }
+            QueryType::PTR => {
+                let mut ptr = String::new();
+                buffer.read_qname(&mut ptr)?;
+                RData::PTR(ptr)
+            }
             QueryType::ANY => {
                 buffer.step(data_len)?;
                 RData::Unknown { qtype, data_len }
@@ -381,6 +387,9 @@ impl ResourceRecord {
                     buffer.write_u8(*byte)?;
                 }
             }
+            RData::PTR(ptr) => {
+                buffer.write_qname(ptr)?;
+            }
             RData::Unknown { data_len, .. } => {
                 for _ in 0..*data_len {
                     buffer.write_u8(0)?;
@@ -408,6 +417,7 @@ pub enum RData {
         exchange: String,
     },
     TXT(String),
+    PTR(String),
     SOA {
         mname: String,
         rname: String,
@@ -447,6 +457,7 @@ impl RData {
             Self::SOA { .. } => QueryType::SOA,
             Self::SRV { .. } => QueryType::SRV,
             Self::DNSKEY { .. } => QueryType::DNSKEY,
+            Self::PTR(_) => QueryType::PTR,
             Self::Unknown { qtype, .. } => qtype.clone(),
         }
     }
@@ -557,6 +568,7 @@ mod tests {
         assert_eq!(QueryType::try_from(2_u16).unwrap(), QueryType::NS);
         assert_eq!(QueryType::try_from(33_u16).unwrap(), QueryType::SRV);
         assert_eq!(QueryType::try_from(48_u16).unwrap(), QueryType::DNSKEY);
+        assert_eq!(QueryType::try_from(12_u16).unwrap(), QueryType::PTR);
         assert_eq!(QueryType::try_from(255_u16).unwrap(), QueryType::ANY);
     }
 
@@ -571,6 +583,7 @@ mod tests {
         assert_eq!(QueryType::AAAA as u16, 28);
         assert_eq!(QueryType::SRV as u16, 33);
         assert_eq!(QueryType::DNSKEY as u16, 48);
+        assert_eq!(QueryType::PTR as u16, 12);
         assert_eq!(QueryType::ANY as u16, 255);
     }
 

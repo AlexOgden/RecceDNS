@@ -7,7 +7,7 @@ use crate::network::types::TransportProtocol;
 use lazy_static::lazy_static;
 use rand::Rng;
 use std::io::{Read, Write};
-use std::net::{TcpStream, UdpSocket};
+use std::net::{Ipv4Addr, TcpStream, UdpSocket};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -165,13 +165,31 @@ fn build_dns_query(domain: &str, query_type: &QueryType) -> Result<DnsPacket, Dn
         ));
     }
 
+    // Reverse the IP address for PTR queries
+    let domain = if query_type == &QueryType::PTR {
+        domain.parse::<Ipv4Addr>().map_or_else(
+            |_| domain.to_owned(),
+            |ip| {
+                ip.octets()
+                    .iter()
+                    .rev()
+                    .map(ToString::to_string)
+                    .collect::<Vec<_>>()
+                    .join(".")
+                    + ".in-addr.arpa"
+            },
+        )
+    } else {
+        domain.to_owned()
+    };
+
     let mut packet = DnsPacket::new();
     packet.header.id = rand::thread_rng().gen();
     packet.header.questions = 1;
     packet.header.recursion_desired = true;
     packet
         .questions
-        .push(DnsQuestion::new(domain.to_owned(), query_type.clone()));
+        .push(DnsQuestion::new(domain, query_type.clone()));
 
     Ok(packet)
 }
