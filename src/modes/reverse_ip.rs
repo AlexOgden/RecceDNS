@@ -224,3 +224,107 @@ fn parse_range(start: &str, end: &str) -> Result<Vec<IpAddr>, ParseIpError> {
         _ => Err(ParseIpError::InvalidRange),
     }
 }
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_ip_single_ipv4() {
+        let ip = "192.168.1.1";
+        let result = parse_ip(ip).unwrap();
+        assert_eq!(result, vec![IpAddr::V4("192.168.1.1".parse().unwrap())]);
+    }
+
+    #[test]
+    fn test_parse_ip_single_ipv6() {
+        let ip = "2001:0db8:85a3:0000:0000:8a2e:0370:7334";
+        let result = parse_ip(ip).unwrap();
+        assert_eq!(
+            result,
+            vec![IpAddr::V6(
+                "2001:0db8:85a3::8a2e:0370:7334".parse().unwrap()
+            )]
+        );
+    }
+
+    #[test]
+    fn test_parse_ip_cidr_ipv4() {
+        let ip = "192.168.1.0/30";
+        let result = parse_ip(ip).unwrap();
+        let expected = vec![
+            IpAddr::V4("192.168.1.0".parse().unwrap()),
+            IpAddr::V4("192.168.1.1".parse().unwrap()),
+            IpAddr::V4("192.168.1.2".parse().unwrap()),
+            IpAddr::V4("192.168.1.3".parse().unwrap()),
+        ];
+        assert_eq!(result, expected);
+    }
+
+    #[test]
+    fn test_parse_ip_cidr_ipv6() {
+        let ip = "2001:db8::/126";
+        let result = parse_ip(ip).unwrap();
+        let expected = vec![
+            IpAddr::V6("2001:db8::".parse().unwrap()),
+            IpAddr::V6("2001:db8::1".parse().unwrap()),
+            IpAddr::V6("2001:db8::2".parse().unwrap()),
+            IpAddr::V6("2001:db8::3".parse().unwrap()),
+        ];
+        assert_eq!(result, expected);
+    }
+
+    #[test]
+    fn test_parse_ip_range_ipv4() {
+        let ip = "192.168.1.1 - 192.168.1.3";
+        let result = parse_ip(ip).unwrap();
+        let expected = vec![
+            IpAddr::V4("192.168.1.1".parse().unwrap()),
+            IpAddr::V4("192.168.1.2".parse().unwrap()),
+            IpAddr::V4("192.168.1.3".parse().unwrap()),
+        ];
+        assert_eq!(result, expected);
+    }
+
+    #[test]
+    fn test_parse_ip_invalid_ip() {
+        let ip = "999.999.999.999";
+        let result = parse_ip(ip);
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err().to_string(), "Invalid IP address");
+    }
+
+    #[test]
+    fn test_parse_ip_invalid_cidr() {
+        let ip = "192.168.1.0/33";
+        let result = parse_ip(ip);
+        assert!(result.is_err());
+        assert_eq!(
+            result.unwrap_err().to_string(),
+            "CIDR prefix out of range for IPv4"
+        );
+    }
+
+    #[test]
+    fn test_parse_range_invalid_range() {
+        let start = "192.168.1.10";
+        let end = "192.168.1.5";
+        let result = parse_range(start, end);
+        assert!(matches!(result, Err(ParseIpError::StartIpGreaterThanEndIp)));
+    }
+
+    #[test]
+    fn test_parse_cidr_too_small_ipv4() {
+        let ip_str = "192.168.1.0";
+        let cidr_str = "7";
+        let result = parse_cidr(ip_str, cidr_str);
+        assert!(matches!(result, Err(ParseIpError::CidrPrefixTooSmall)));
+    }
+
+    #[test]
+    fn test_parse_cidr_too_small_ipv6() {
+        let ip_str = "2001:db8::";
+        let cidr_str = "110";
+        let result = parse_cidr(ip_str, cidr_str);
+        assert!(matches!(result, Err(ParseIpError::CidrPrefixTooSmall)));
+    }
+}
