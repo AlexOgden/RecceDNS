@@ -2,6 +2,10 @@ use anyhow::{anyhow, ensure, Context, Result};
 use regex::Regex;
 use std::net::{IpAddr, Ipv4Addr};
 
+use crate::network::net_check;
+
+use super::cli::CommandArgs;
+
 lazy_static::lazy_static! {
     static ref DOMAIN_REGEX: Regex =
         Regex::new(r"^(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$").unwrap();
@@ -88,6 +92,24 @@ pub fn ipv4_address(ip: &str) -> Result<String> {
     ip.parse::<Ipv4Addr>()
         .with_context(|| format!("Invalid IPv4 address: {ip}"))
         .map(|_| ip.to_string())
+}
+
+pub fn filter_working_dns_resolvers<'a>(
+    command_args: &CommandArgs,
+    dns_resolvers: &[&'a str],
+) -> Vec<&'a str> {
+    if command_args.no_dns_check {
+        return dns_resolvers.to_vec();
+    }
+
+    let working_resolvers =
+        net_check::check_dns_resolvers(dns_resolvers, &command_args.transport_protocol);
+
+    dns_resolvers
+        .iter()
+        .copied()
+        .filter(|resolver| working_resolvers.contains(resolver))
+        .collect()
 }
 
 #[cfg(test)]
