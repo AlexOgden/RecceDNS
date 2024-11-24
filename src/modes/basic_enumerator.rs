@@ -107,7 +107,7 @@ fn process_response(
     cmd_args: &CommandArgs,
 ) -> Result<()> {
     for record in response {
-        if let RData::CNAME(ref cname) = record.data {
+        if let RData::CNAME(cname) = &record.data {
             if !seen_cnames.insert(cname.clone()) {
                 continue; // Skip if CNAME is already seen
             }
