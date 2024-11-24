@@ -102,7 +102,7 @@ pub fn reverse_ip(command_args: &CommandArgs, dns_resolver_list: &[&str]) -> Res
     progress_bar.finish_with_message("Reverse PTR lookup completed.");
     cli::clear_line();
 
-    println!("\n[{}] Found {} PTR records", "~".green(), found_count);
+    println!("[{}] Found {} PTR records", "~".green(), found_count);
     if let Some(avg) = query_timer.average() {
         println!(
             "[{}] Average query time: {} ms",
