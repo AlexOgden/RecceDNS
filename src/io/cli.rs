@@ -21,7 +21,7 @@ pub struct CommandArgs {
     #[arg(short = 'm', long = "mode", required = true)]
     pub operation_mode: OperationMode,
 
-    /// The target base domain name to probe
+    /// The target base domain name or IP address (single, CIDR, or range)
     #[arg(short, long, required = true, value_parser = validate::target_input)]
     pub target: String,
 
