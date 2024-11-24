@@ -12,7 +12,7 @@ use crate::{
 use anyhow::Result;
 use std::collections::HashSet;
 
-pub fn enumerate_records(args: &CommandArgs, dns_resolvers: &[&str]) -> Result<()> {
+pub fn enumerate_records(cmd_args: &CommandArgs, dns_resolvers: &[&str]) -> Result<()> {
     const QUERY_TYPES: &[QueryType] = &[
         QueryType::A,
         QueryType::AAAA,
@@ -25,24 +25,25 @@ pub fn enumerate_records(args: &CommandArgs, dns_resolvers: &[&str]) -> Result<(
 
     println!(
         "Enumerating records for target domain: {}\n",
-        args.target.bold().bright_blue()
+        cmd_args.target.bold().bright_blue()
     );
 
-    let mut data_output = if args.json.is_some() {
-        Some(EnumerationOutput::new(args.target.clone()))
+    let mut data_output = if cmd_args.json.is_some() {
+        Some(EnumerationOutput::new(cmd_args.target.clone()))
     } else {
         None
     };
     let resolver = dns_resolvers[0];
-    let domain = &args.target;
+    let domain = &cmd_args.target;
     let mut seen_cnames = HashSet::new();
-    let mut query_timer = QueryTimer::new(!args.no_query_stats);
+    let mut query_timer = QueryTimer::new(!cmd_args.no_query_stats);
 
-    check_dnssec(resolver, domain, args)?;
+    check_dnssec(resolver, domain, cmd_args)?;
 
     for query_type in QUERY_TYPES {
         query_timer.start();
-        let query_result = resolve_domain(resolver, domain, query_type, &args.transport_protocol);
+        let query_result =
+            resolve_domain(resolver, domain, query_type, &cmd_args.transport_protocol);
         query_timer.stop();
 
         match query_result {
@@ -55,7 +56,7 @@ pub fn enumerate_records(args: &CommandArgs, dns_resolvers: &[&str]) -> Result<(
                     &response.answers,
                     resolver,
                     &mut data_output,
-                    args,
+                    cmd_args,
                 )?;
             }
             Err(err) if !matches!(err, DnsError::NoRecordsFound | DnsError::NonExistentDomain) => {
@@ -73,18 +74,18 @@ pub fn enumerate_records(args: &CommandArgs, dns_resolvers: &[&str]) -> Result<(
         );
     }
 
-    if let (Some(output_file), Some(data_output)) = (&args.json, data_output) {
+    if let (Some(output_file), Some(data_output)) = (&cmd_args.json, data_output) {
         data_output.write_to_file(output_file)?;
     }
     Ok(())
 }
 
-fn check_dnssec(resolver: &str, domain: &str, args: &CommandArgs) -> Result<()> {
+fn check_dnssec(resolver: &str, domain: &str, cmd_args: &CommandArgs) -> Result<()> {
     let response = resolve_domain(
         resolver,
         domain,
         &QueryType::DNSKEY,
-        &args.transport_protocol,
+        &cmd_args.transport_protocol,
     );
 
     let dnssec_status = match response {
@@ -103,7 +104,7 @@ fn process_response(
     response: &[ResourceRecord],
     resolver: &str,
     data_output: &mut Option<EnumerationOutput>,
-    args: &CommandArgs,
+    cmd_args: &CommandArgs,
 ) -> Result<()> {
     for record in response {
         if let RData::CNAME(ref cname) = record.data {
@@ -114,8 +115,8 @@ fn process_response(
         if let Some(data_output) = data_output {
             data_output.add_result(record.clone());
         }
-        let response_data_string = create_query_response_string(record, resolver, args)?;
-        if !args.quiet {
+        let response_data_string = create_query_response_string(record, resolver, cmd_args)?;
+        if !cmd_args.quiet {
             println!("{response_data_string}");
         }
     }
@@ -131,12 +132,17 @@ fn handle_ns_response(
     domain: &str,
     resolver: &str,
     ns_domain: &str,
-    args: &CommandArgs,
+    cmd_args: &CommandArgs,
 ) -> Result<String, DnsError> {
     let mut result = format_response(query_type_formatted, domain);
 
     for query_type in [QueryType::A, QueryType::AAAA] {
-        match resolve_domain(resolver, ns_domain, &query_type, &args.transport_protocol) {
+        match resolve_domain(
+            resolver,
+            ns_domain,
+            &query_type,
+            &cmd_args.transport_protocol,
+        ) {
             Ok(records) => {
                 for record in records.answers {
                     result.push(' ');
@@ -162,7 +168,7 @@ fn handle_ns_response(
 fn create_query_response_string(
     query_response: &ResourceRecord,
     resolver: &str,
-    args: &CommandArgs,
+    cmd_args: &CommandArgs,
 ) -> Result<String> {
     let query_type_formatted = query_response
         .data
@@ -180,7 +186,7 @@ fn create_query_response_string(
             domain,
             resolver,
             domain,
-            args,
+            cmd_args,
         )?),
         RData::MX {
             preference,

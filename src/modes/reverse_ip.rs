@@ -22,11 +22,11 @@ use crate::{
     timing::stats::QueryTimer,
 };
 
-pub fn reverse_ip(command_args: &CommandArgs, dns_resolver_list: &[&str]) -> Result<()> {
-    let target_ips = parse_ip(&command_args.target)?;
+pub fn reverse_ip(cmd_args: &CommandArgs, dns_resolver_list: &[&str]) -> Result<()> {
+    let target_ips = parse_ip(&cmd_args.target)?;
     let total_ips = target_ips.len() as u64;
-    let mut resolver_selector = resolver_selector::get_selector(command_args);
-    let mut query_timer = QueryTimer::new(!command_args.no_query_stats);
+    let mut resolver_selector = resolver_selector::get_selector(cmd_args);
+    let mut query_timer = QueryTimer::new(!cmd_args.no_query_stats);
     let mut found_count = 0;
 
     let interrupted = interrupt::initialize_interrupt_handler()?;
@@ -52,7 +52,7 @@ pub fn reverse_ip(command_args: &CommandArgs, dns_resolver_list: &[&str]) -> Res
             resolver,
             &ip.to_string(),
             &QueryType::PTR,
-            &command_args.transport_protocol,
+            &cmd_args.transport_protocol,
         );
         query_timer.stop();
 
@@ -80,7 +80,7 @@ pub fn reverse_ip(command_args: &CommandArgs, dns_resolver_list: &[&str]) -> Res
                 found_count += 1;
             }
             Err(error) => {
-                if command_args.verbose
+                if cmd_args.verbose
                     || (!matches!(
                         error,
                         DnsError::NoRecordsFound | DnsError::NonExistentDomain
@@ -91,7 +91,7 @@ pub fn reverse_ip(command_args: &CommandArgs, dns_resolver_list: &[&str]) -> Res
             }
         }
 
-        if let Some(delay_ms) = &command_args.delay {
+        if let Some(delay_ms) = &cmd_args.delay {
             let sleep_delay = delay_ms.get_delay();
             if sleep_delay > 0 {
                 thread::sleep(Duration::from_millis(sleep_delay));
