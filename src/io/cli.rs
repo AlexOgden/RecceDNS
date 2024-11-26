@@ -3,7 +3,7 @@ use clap::{Parser, ValueEnum};
 use colored::Colorize;
 use indicatif::{ProgressBar, ProgressStyle};
 
-use super::validate::{self, dns_resolver_list};
+use super::validation::{self, validate_dns_resolvers};
 
 const PROGRESS_TICK_CHARS: &str = "⠢⢁⡈⠔";
 
@@ -22,11 +22,11 @@ pub struct CommandArgs {
     pub operation_mode: OperationMode,
 
     /// The target base domain name or IP address (single, CIDR, or range)
-    #[arg(short, long, required = true, value_parser = validate::target_input)]
+    #[arg(short, long, required = true, value_parser = validation::validate_target)]
     pub target: String,
 
     /// IPv4 Address of the DNS resolver(s) to use (comma-seperated). Multiple resolvers will selected either randomly or sequentially
-    #[arg(short, long, default_value = "1.1.1.1", value_parser = dns_resolver_list, required = false)]
+    #[arg(short, long, default_value = "1.1.1.1", value_parser = validate_dns_resolvers, required = false)]
     pub dns_resolvers: String,
 
     /// Transport protocol to use for DNS queries

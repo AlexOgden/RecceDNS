@@ -11,7 +11,7 @@ lazy_static::lazy_static! {
         Regex::new(r"^(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$").unwrap();
 }
 
-pub fn target_input(input: &str) -> Result<String> {
+pub fn validate_target(input: &str) -> Result<String> {
     let input = input.trim();
 
     // Check for valid domain name
@@ -75,20 +75,20 @@ pub fn target_input(input: &str) -> Result<String> {
     Err(anyhow!("Invalid input: {}", input))
 }
 
-pub fn dns_resolver_list(servers: &str) -> Result<String> {
+pub fn validate_dns_resolvers(servers: &str) -> Result<String> {
     let server_list: Vec<&str> = servers.split(',').collect();
 
     ensure!(
         server_list
             .iter()
-            .all(|&server| ipv4_address(server).is_ok()),
+            .all(|&server| validate_ipv4(server).is_ok()),
         "DNS Resolver(s) invalid. Comma-separated IPv4 only."
     );
 
     Ok(servers.to_string())
 }
 
-pub fn ipv4_address(ip: &str) -> Result<String> {
+pub fn validate_ipv4(ip: &str) -> Result<String> {
     ip.parse::<Ipv4Addr>()
         .with_context(|| format!("Invalid IPv4 address: {ip}"))
         .map(|_| ip.to_string())
@@ -126,30 +126,30 @@ mod test {
             "0.0.0.0",
         ];
         for ip in valid_ips {
-            assert_eq!(ipv4_address(ip).unwrap(), ip);
+            assert_eq!(validate_ipv4(ip).unwrap(), ip);
         }
     }
 
     #[test]
     fn invalid_ipv4() {
-        assert!(ipv4_address("256.0.0.1").is_err());
-        assert!(ipv4_address("127.0.0.1234").is_err());
+        assert!(validate_ipv4("256.0.0.1").is_err());
+        assert!(validate_ipv4("127.0.0.1234").is_err());
     }
 
     #[test]
     fn empty_ip() {
-        assert!(ipv4_address("").is_err());
+        assert!(validate_ipv4("").is_err());
     }
 
     #[test]
     fn ipv4_with_invalid_characters() {
-        assert!(ipv4_address("192.0.2.abc").is_err());
+        assert!(validate_ipv4("192.0.2.abc").is_err());
     }
 
     #[test]
     fn valid_dns_resolver_list() {
         assert_eq!(
-            dns_resolver_list("192.0.2.1,8.8.8.8").unwrap(),
+            validate_dns_resolvers("192.0.2.1,8.8.8.8").unwrap(),
             "192.0.2.1,8.8.8.8"
         );
     }
@@ -157,18 +157,18 @@ mod test {
     #[test]
     fn invalid_dns_resolver_list() {
         // Test with invalid IP address
-        assert!(dns_resolver_list("192.0.2.1,256.0.0.1").is_err());
+        assert!(validate_dns_resolvers("192.0.2.1,256.0.0.1").is_err());
 
         // Test with non-IPv4 address
-        assert!(dns_resolver_list("192.0.2.1,example.com").is_err());
+        assert!(validate_dns_resolvers("192.0.2.1,example.com").is_err());
 
         // Test with invalid format
-        assert!(dns_resolver_list("192.0.2.1,8.8.8.8,invalid").is_err());
+        assert!(validate_dns_resolvers("192.0.2.1,8.8.8.8,invalid").is_err());
     }
 
     #[test]
     fn empty_dns_resolver_list() {
-        assert!(dns_resolver_list("").is_err());
+        assert!(validate_dns_resolvers("").is_err());
     }
 
     #[test]
@@ -181,7 +181,7 @@ mod test {
             "a-b.com",
         ];
         for domain in valid_domains {
-            assert_eq!(target_input(domain).unwrap(), domain);
+            assert_eq!(validate_target(domain).unwrap(), domain);
         }
     }
 
@@ -195,7 +195,7 @@ mod test {
             "example.com-",
         ];
         for domain in invalid_domains {
-            assert!(target_input(domain).is_err());
+            assert!(validate_target(domain).is_err());
         }
     }
 
@@ -209,7 +209,7 @@ mod test {
             "fe80::/10",
         ];
         for cidr in valid_cidrs {
-            assert_eq!(target_input(cidr).unwrap(), cidr);
+            assert_eq!(validate_target(cidr).unwrap(), cidr);
         }
     }
 
@@ -223,7 +223,7 @@ mod test {
             "fe80::/130",
         ];
         for cidr in invalid_cidrs {
-            assert!(target_input(cidr).is_err());
+            assert!(validate_target(cidr).is_err());
         }
     }
 
@@ -231,7 +231,7 @@ mod test {
     fn valid_ip_ranges() {
         let valid_ranges = ["192.168.0.1-192.168.0.255", "10.0.0.1-10.0.0.255"];
         for range in valid_ranges {
-            assert_eq!(target_input(range).unwrap(), range);
+            assert_eq!(validate_target(range).unwrap(), range);
         }
     }
 
@@ -246,7 +246,7 @@ mod test {
         ];
         for range in invalid_ranges {
             println!("{range}");
-            assert!(target_input(range).is_err());
+            assert!(validate_target(range).is_err());
         }
     }
 }

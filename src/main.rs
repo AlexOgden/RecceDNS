@@ -5,7 +5,7 @@ mod network;
 mod timing;
 
 use anyhow::{ensure, Result};
-use io::{cli::OperationMode, validate::filter_working_dns_resolvers};
+use io::{cli::OperationMode, validation::filter_working_dns_resolvers};
 
 fn main() -> Result<()> {
     let cmd_args = io::cli::get_parsed_args();
