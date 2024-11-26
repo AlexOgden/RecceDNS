@@ -5,46 +5,31 @@ mod network;
 mod timing;
 
 use anyhow::{ensure, Result};
-use io::cli::{CommandArgs, OperationMode};
-use network::net_check;
+use io::{cli::OperationMode, validation::filter_working_dns_resolvers};
 
 fn main() -> Result<()> {
-    let args = io::cli::get_parsed_args();
+    let cmd_args = io::cli::get_parsed_args();
 
-    if !args.no_welcome {
+    if !cmd_args.no_welcome {
         io::cli::print_ascii_art();
     }
 
-    let dns_resolvers: Vec<&str> = args.dns_resolvers.split(',').collect();
-    let dns_resolvers: Vec<&str> = validate_dns_resolvers(&args, &dns_resolvers);
+    let dns_resolvers = filter_working_dns_resolvers(
+        &cmd_args,
+        &cmd_args.dns_resolvers.split(',').collect::<Vec<&str>>(),
+    );
     ensure!(
         !dns_resolvers.is_empty(),
         "No DNS Resolvers in list! At least one resolver must be working!"
     );
 
-    match args.operation_mode {
-        OperationMode::SubdomainEnumeration => {
-            modes::subdomain_enumerator::enumerate_subdomains(&args, &dns_resolvers)
-        }
+    match cmd_args.operation_mode {
         OperationMode::BasicEnumeration => {
-            modes::basic_enumerator::enumerate_records(&args, &dns_resolvers)
+            modes::basic_enumerator::enumerate_records(&cmd_args, &dns_resolvers)
         }
+        OperationMode::SubdomainEnumeration => {
+            modes::subdomain_enumerator::enumerate_subdomains(&cmd_args, &dns_resolvers)
+        }
+        OperationMode::ReverseIp => modes::reverse_ip::reverse_ip(&cmd_args, &dns_resolvers),
     }
-}
-
-fn validate_dns_resolvers<'a>(args: &CommandArgs, dns_resolvers: &[&'a str]) -> Vec<&'a str> {
-    if args.no_dns_check {
-        return dns_resolvers.to_vec();
-    }
-
-    let transport_protocol = network::types::TransportProtocol::UDP;
-    let working_resolvers = net_check::check_dns_resolvers(dns_resolvers, &transport_protocol);
-
-    let filtered_resolvers: Vec<&'a str> = dns_resolvers
-        .iter()
-        .copied()
-        .filter(|resolver| working_resolvers.contains(resolver))
-        .collect();
-
-    filtered_resolvers
 }

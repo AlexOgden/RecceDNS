@@ -38,6 +38,7 @@ pub enum QueryType {
     AAAA = 28,
     SRV = 33,
     DNSKEY = 48,
+    PTR = 12,
     ANY = 255,
 }
 
@@ -290,6 +291,11 @@ impl ResourceRecord {
                     public_key,
                 }
             }
+            QueryType::PTR => {
+                let mut ptr = String::new();
+                buffer.read_qname(&mut ptr)?;
+                RData::PTR(ptr)
+            }
             QueryType::ANY => {
                 buffer.step(data_len)?;
                 RData::Unknown { qtype, data_len }
@@ -381,6 +387,9 @@ impl ResourceRecord {
                     buffer.write_u8(*byte)?;
                 }
             }
+            RData::PTR(ptr) => {
+                buffer.write_qname(ptr)?;
+            }
             RData::Unknown { data_len, .. } => {
                 for _ in 0..*data_len {
                     buffer.write_u8(0)?;
@@ -408,6 +417,7 @@ pub enum RData {
         exchange: String,
     },
     TXT(String),
+    PTR(String),
     SOA {
         mname: String,
         rname: String,
@@ -447,6 +457,7 @@ impl RData {
             Self::SOA { .. } => QueryType::SOA,
             Self::SRV { .. } => QueryType::SRV,
             Self::DNSKEY { .. } => QueryType::DNSKEY,
+            Self::PTR(_) => QueryType::PTR,
             Self::Unknown { qtype, .. } => qtype.clone(),
         }
     }
@@ -557,6 +568,7 @@ mod tests {
         assert_eq!(QueryType::try_from(2_u16).unwrap(), QueryType::NS);
         assert_eq!(QueryType::try_from(33_u16).unwrap(), QueryType::SRV);
         assert_eq!(QueryType::try_from(48_u16).unwrap(), QueryType::DNSKEY);
+        assert_eq!(QueryType::try_from(12_u16).unwrap(), QueryType::PTR);
         assert_eq!(QueryType::try_from(255_u16).unwrap(), QueryType::ANY);
     }
 
@@ -571,6 +583,7 @@ mod tests {
         assert_eq!(QueryType::AAAA as u16, 28);
         assert_eq!(QueryType::SRV as u16, 33);
         assert_eq!(QueryType::DNSKEY as u16, 48);
+        assert_eq!(QueryType::PTR as u16, 12);
         assert_eq!(QueryType::ANY as u16, 255);
     }
 
@@ -663,5 +676,200 @@ mod tests {
         let read_packet = DnsPacket::from_buffer(&mut buffer).unwrap();
 
         assert_eq!(packet, read_packet);
+    }
+
+    #[test]
+    fn test_resource_record_read_write_aaaa() {
+        let mut buffer = PacketBuffer::new();
+        let record = ResourceRecord {
+            name: "example.com".to_string(),
+            class: 1,
+            ttl: 3600,
+            data: RData::AAAA(Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 1)),
+        };
+
+        record.write(&mut buffer).unwrap();
+        buffer.set_pos(0).unwrap();
+        let read_record = ResourceRecord::read(&mut buffer).unwrap();
+
+        assert_eq!(record, read_record);
+    }
+
+    #[test]
+    fn test_resource_record_read_write_ns() {
+        let mut buffer = PacketBuffer::new();
+        let record = ResourceRecord {
+            name: "example.com".to_string(),
+            class: 1,
+            ttl: 3600,
+            data: RData::NS("ns1.example.com".to_string()),
+        };
+
+        record.write(&mut buffer).unwrap();
+        buffer.set_pos(0).unwrap();
+        let read_record = ResourceRecord::read(&mut buffer).unwrap();
+
+        assert_eq!(record, read_record);
+    }
+
+    #[test]
+    fn test_resource_record_read_write_cname() {
+        let mut buffer = PacketBuffer::new();
+        let record = ResourceRecord {
+            name: "www.example.com".to_string(),
+            class: 1,
+            ttl: 3600,
+            data: RData::CNAME("example.com".to_string()),
+        };
+
+        record.write(&mut buffer).unwrap();
+        buffer.set_pos(0).unwrap();
+        let read_record = ResourceRecord::read(&mut buffer).unwrap();
+
+        assert_eq!(record, read_record);
+    }
+
+    #[test]
+    fn test_resource_record_read_write_mx() {
+        let mut buffer = PacketBuffer::new();
+        let record = ResourceRecord {
+            name: "example.com".to_string(),
+            class: 1,
+            ttl: 3600,
+            data: RData::MX {
+                preference: 10,
+                exchange: "mail.example.com".to_string(),
+            },
+        };
+
+        record.write(&mut buffer).unwrap();
+        buffer.set_pos(0).unwrap();
+        let read_record = ResourceRecord::read(&mut buffer).unwrap();
+
+        assert_eq!(record, read_record);
+    }
+
+    #[test]
+    fn test_resource_record_read_write_txt() {
+        let mut buffer = PacketBuffer::new();
+        let record = ResourceRecord {
+            name: "example.com".to_string(),
+            class: 1,
+            ttl: 3600,
+            data: RData::TXT("v=spf1 include:_spf.example.com ~all".to_string()),
+        };
+
+        record.write(&mut buffer).unwrap();
+        buffer.set_pos(0).unwrap();
+        let read_record = ResourceRecord::read(&mut buffer).unwrap();
+
+        assert_eq!(record, read_record);
+    }
+
+    #[test]
+    fn test_resource_record_read_write_ptr() {
+        let mut buffer = PacketBuffer::new();
+        let record = ResourceRecord {
+            name: "1.0.0.127.in-addr.arpa".to_string(),
+            class: 1,
+            ttl: 3600,
+            data: RData::PTR("localhost".to_string()),
+        };
+
+        record.write(&mut buffer).unwrap();
+        buffer.set_pos(0).unwrap();
+        let read_record = ResourceRecord::read(&mut buffer).unwrap();
+
+        assert_eq!(record, read_record);
+    }
+
+    #[test]
+    fn test_resource_record_read_write_soa() {
+        let mut buffer = PacketBuffer::new();
+        let record = ResourceRecord {
+            name: "example.com".to_string(),
+            class: 1,
+            ttl: 3600,
+            data: RData::SOA {
+                mname: "ns1.example.com".to_string(),
+                rname: "admin.example.com".to_string(),
+                serial: 2_021_041_501,
+                refresh: 7200,
+                retry: 1800,
+                expire: 1_209_600,
+                minimum: 3600,
+            },
+        };
+
+        record.write(&mut buffer).unwrap();
+        buffer.set_pos(0).unwrap();
+        let read_record = ResourceRecord::read(&mut buffer).unwrap();
+
+        assert_eq!(record, read_record);
+    }
+
+    #[test]
+    fn test_resource_record_read_write_srv() {
+        let mut buffer = PacketBuffer::new();
+        let record = ResourceRecord {
+            name: "_sip._tcp.example.com".to_string(),
+            class: 1,
+            ttl: 3600,
+            data: RData::SRV {
+                priority: 10,
+                weight: 60,
+                port: 5060,
+                target: "sipserver.example.com".to_string(),
+            },
+        };
+
+        record.write(&mut buffer).unwrap();
+        buffer.set_pos(0).unwrap();
+        let read_record = ResourceRecord::read(&mut buffer).unwrap();
+
+        assert_eq!(record, read_record);
+    }
+
+    #[test]
+    fn test_resource_record_read_write_dnskey() {
+        let mut buffer = PacketBuffer::new();
+        let public_key = vec![4, 144, 130, 1, 1];
+        let record = ResourceRecord {
+            name: "example.com".to_string(),
+            class: 1,
+            ttl: 3600,
+            data: RData::DNSKEY {
+                flags: 256,
+                protocol: 3,
+                algorithm: 8,
+                public_key,
+            },
+        };
+
+        record.write(&mut buffer).unwrap();
+        buffer.set_pos(0).unwrap();
+        let read_record = ResourceRecord::read(&mut buffer).unwrap();
+
+        assert_eq!(record, read_record);
+    }
+
+    #[test]
+    fn test_resource_record_read_write_unknown() {
+        let mut buffer = PacketBuffer::new();
+        let record = ResourceRecord {
+            name: "unknown.example.com".to_string(),
+            class: 1,
+            ttl: 3600,
+            data: RData::Unknown {
+                qtype: QueryType::ANY,
+                data_len: 5,
+            },
+        };
+
+        record.write(&mut buffer).unwrap();
+        buffer.set_pos(0).unwrap();
+        let read_record = ResourceRecord::read(&mut buffer).unwrap();
+
+        assert_eq!(record, read_record);
     }
 }

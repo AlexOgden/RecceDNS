@@ -1,7 +1,7 @@
 [package]
 name = "reccedns"
 authors = ["Alex Ogden"]
-version = "0.2.1"
+version = "0.3.0"
 edition = "2021"
 
 [dependencies]
@@ -10,12 +10,12 @@ clap = { version = "4.5.21", features = ["derive"] }
 colored = "2.1.0"
 ctrlc = "3.4.5"
 indicatif = "0.17.9"
-regex = "1.11.0"
-rand = "0.8.5"
+lazy_static = "1.5.0"
 num_enum = "0.7.3"
-thiserror = "2.0.3"
+rand = "0.8.5"
+regex = "1.11.0"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0.133"
 strum = "0.26.3"
 strum_macros = "0.26.4"
-lazy_static = "1.5.0"
-serde_json = "1.0.133"
-serde = { version = "1.0", features = ["derive"] }
+thiserror = "2.0.3"
