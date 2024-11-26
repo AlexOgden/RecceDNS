@@ -5,6 +5,7 @@ use std::{
     sync::atomic::Ordering,
     thread,
     time::Duration,
+    vec,
 };
 use thiserror::Error;
 
@@ -135,16 +136,16 @@ pub enum ParseIpError {
 
 fn parse_ip(ip: &str) -> Result<Vec<IpAddr>, ParseIpError> {
     if let Some((start, end)) = ip.split_once('-') {
-        parse_range(start.trim(), end.trim())
+        expand_ip_range(start.trim(), end.trim())
     } else if let Some((ip_str, cidr_str)) = ip.split_once('/') {
-        parse_cidr(ip_str.trim(), cidr_str.trim())
+        expand_cidr(ip_str.trim(), cidr_str.trim())
     } else {
         let ip = ip.parse().map_err(|_| ParseIpError::InvalidIp)?;
         Ok(vec![ip])
     }
 }
 
-fn parse_cidr(ip_str: &str, cidr_str: &str) -> Result<Vec<IpAddr>, ParseIpError> {
+fn expand_cidr(ip_str: &str, cidr_str: &str) -> Result<Vec<IpAddr>, ParseIpError> {
     let cidr: u8 = cidr_str.parse().map_err(|_| ParseIpError::InvalidCidr)?;
     let ip: IpAddr = ip_str.parse().map_err(|_| ParseIpError::InvalidIp)?;
 
@@ -193,7 +194,7 @@ fn parse_cidr(ip_str: &str, cidr_str: &str) -> Result<Vec<IpAddr>, ParseIpError>
     }
 }
 
-fn parse_range(start: &str, end: &str) -> Result<Vec<IpAddr>, ParseIpError> {
+fn expand_ip_range(start: &str, end: &str) -> Result<Vec<IpAddr>, ParseIpError> {
     let start_ip: IpAddr = start.parse().map_err(|_| ParseIpError::InvalidIp)?;
     let end_ip: IpAddr = end.parse().map_err(|_| ParseIpError::InvalidIp)?;
 
@@ -224,6 +225,7 @@ fn parse_range(start: &str, end: &str) -> Result<Vec<IpAddr>, ParseIpError> {
         _ => Err(ParseIpError::InvalidRange),
     }
 }
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -308,7 +310,7 @@ mod tests {
     fn test_parse_range_invalid_range() {
         let start = "192.168.1.10";
         let end = "192.168.1.5";
-        let result = parse_range(start, end);
+        let result = expand_ip_range(start, end);
         assert!(matches!(result, Err(ParseIpError::StartIpGreaterThanEndIp)));
     }
 
@@ -316,7 +318,7 @@ mod tests {
     fn test_parse_cidr_too_small_ipv4() {
         let ip_str = "192.168.1.0";
         let cidr_str = "7";
-        let result = parse_cidr(ip_str, cidr_str);
+        let result = expand_cidr(ip_str, cidr_str);
         assert!(matches!(result, Err(ParseIpError::CidrPrefixTooSmall)));
     }
 
@@ -324,7 +326,7 @@ mod tests {
     fn test_parse_cidr_too_small_ipv6() {
         let ip_str = "2001:db8::";
         let cidr_str = "110";
-        let result = parse_cidr(ip_str, cidr_str);
+        let result = expand_cidr(ip_str, cidr_str);
         assert!(matches!(result, Err(ParseIpError::CidrPrefixTooSmall)));
     }
 }
