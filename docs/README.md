@@ -73,6 +73,8 @@ After building, you can find the executable in the `target/release` directory.
 
 - `--no-dns-check`: Don't check if the DNS servers are working before starting.
 
+- `--no-recursion`: Sets recursion-desired to false in DNS queries.
+
 - `--no-retry`: Don't retry failed queries.
 
 - `--no-print-records`: Don't print the DNS records in subdomain enumeration, only show the subdomains.
