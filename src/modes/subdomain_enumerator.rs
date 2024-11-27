@@ -374,8 +374,8 @@ fn create_query_response_string(query_result: &[ResourceRecord]) -> String {
                 } => format!(
                     "[{query_type_formatted} {priority} {weight} {port} {target}]"
                 ),
-                RData::DNSKEY { .. } => {
-                    format!("[{} Enabled]", "DNSSEC".bold().bright_cyan())
+                RData::DNSKEY { flags, protocol, algorithm, public_key: _ } => {
+                    format!("[{query_type_formatted} {flags} {protocol} {algorithm}]")
                 }
                 RData::Unknown { qtype, data_len } => {
                     format!("[{qtype} Unknown {data_len} bytes]")
