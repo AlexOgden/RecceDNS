@@ -264,4 +264,46 @@ mod test {
             assert!(validate_target(range).is_err());
         }
     }
+
+    #[test]
+    fn test_get_correct_query_types_empty_input() {
+        let allowed = vec![QueryType::A, QueryType::AAAA, QueryType::CNAME];
+        let result = get_correct_query_types(&[], &allowed);
+        assert_eq!(result, allowed);
+    }
+
+    #[test]
+    fn test_get_correct_query_types_with_any() {
+        let allowed = vec![QueryType::A, QueryType::AAAA, QueryType::CNAME];
+        let input = vec![QueryType::ANY];
+        let result = get_correct_query_types(&input, &allowed);
+        assert_eq!(result, allowed);
+    }
+
+    #[test]
+    fn test_get_correct_query_types_partial_overlap() {
+        let allowed = vec![QueryType::A, QueryType::AAAA, QueryType::CNAME];
+        let input = vec![QueryType::A, QueryType::MX, QueryType::TXT];
+        let expected = vec![QueryType::A];
+        let result = get_correct_query_types(&input, &allowed);
+        assert_eq!(result, expected);
+    }
+
+    #[test]
+    fn test_get_correct_query_types_all_allowed() {
+        let allowed = vec![QueryType::A, QueryType::AAAA, QueryType::CNAME];
+        let input = vec![QueryType::A, QueryType::CNAME];
+        let expected = vec![QueryType::A, QueryType::CNAME];
+        let result = get_correct_query_types(&input, &allowed);
+        assert_eq!(result, expected);
+    }
+
+    #[test]
+    fn test_get_correct_query_types_no_allowed() {
+        let allowed = vec![QueryType::A, QueryType::AAAA, QueryType::CNAME];
+        let input = vec![QueryType::MX, QueryType::TXT];
+        let expected: Vec<QueryType> = vec![];
+        let result = get_correct_query_types(&input, &allowed);
+        assert_eq!(result, expected);
+    }
 }
