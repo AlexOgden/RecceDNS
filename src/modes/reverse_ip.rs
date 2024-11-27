@@ -54,6 +54,7 @@ pub fn reverse_ip(cmd_args: &CommandArgs, dns_resolver_list: &[&str]) -> Result<
             &ip.to_string(),
             &QueryType::PTR,
             &cmd_args.transport_protocol,
+            !&cmd_args.no_recursion,
         );
         query_timer.stop();
 
