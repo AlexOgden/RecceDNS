@@ -45,6 +45,14 @@ pub struct CommandArgs {
     #[arg(short, long, value_enum, default_value_t = QueryType::ANY)]
     pub query_type: QueryType,
 
+    /// Delay in milliseconds between DNS requests for subdomain enumeration
+    #[arg(short = 'D', long, required = false, value_parser = parse_delay)]
+    pub delay: Option<Delay>,
+
+    /// Use a random resolver for each query, otherwise use them sequentially
+    #[arg(short = 'r', long, required = false, default_value_t = false)]
+    pub use_random: bool,
+
     /// Path of output file to write JSON results to. Extension is optional.
     #[arg(long, required = false)]
     pub json: Option<String>,
@@ -80,14 +88,6 @@ pub struct CommandArgs {
     /// Print which resolver was used for each query
     #[arg(long)]
     pub show_resolver: bool,
-
-    /// Delay in milliseconds between DNS requests for subdomain enumeration
-    #[arg(long, required = false, value_parser = parse_delay)]
-    pub delay: Option<Delay>,
-
-    /// Use a random resolver for each query, otherwise use them sequentially
-    #[arg(short = 'r', long, required = false, default_value_t = false)]
-    pub use_random: bool,
 }
 
 impl CommandArgs {
