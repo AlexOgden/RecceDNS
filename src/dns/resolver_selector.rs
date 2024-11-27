@@ -1,40 +1,52 @@
-use anyhow::Result;
-use rand::seq::SliceRandom;
-use rand::thread_rng;
-
 use crate::io::cli::CommandArgs;
+use anyhow::Result;
+use rand::prelude::*;
 
 pub trait ResolverSelector {
-    fn select<'a>(&mut self, dns_resolvers: &'a [&str]) -> Result<&'a str>;
+    fn select(&mut self) -> Result<&str>;
 }
 
 pub enum Selector {
-    Random,
-    Sequential { current_index: usize },
+    Random {
+        dns_resolvers: Vec<String>,
+    },
+    Sequential {
+        dns_resolvers: Vec<String>,
+        current_index: usize,
+    },
 }
 
 impl Selector {
-    pub const fn new(use_random: bool) -> Self {
+    pub fn new(use_random: bool, dns_resolvers: &[&str]) -> Self {
+        let resolvers = dns_resolvers.iter().map(|&s| s.to_string()).collect();
         if use_random {
-            Self::Random
+            Self::Random {
+                dns_resolvers: resolvers,
+            }
         } else {
-            Self::Sequential { current_index: 0 }
+            Self::Sequential {
+                dns_resolvers: resolvers,
+                current_index: 0,
+            }
         }
     }
 }
 
 impl ResolverSelector for Selector {
-    fn select<'a>(&mut self, dns_resolvers: &'a [&str]) -> Result<&'a str> {
+    fn select(&mut self) -> Result<&str> {
         match self {
-            Self::Random => dns_resolvers
+            Self::Random { dns_resolvers } => dns_resolvers
                 .choose(&mut thread_rng())
-                .copied()
+                .map(std::string::String::as_str)
                 .ok_or_else(|| anyhow::anyhow!("DNS Resolvers list is empty")),
-            Self::Sequential { current_index } => {
+            Self::Sequential {
+                dns_resolvers,
+                current_index,
+            } => {
                 if dns_resolvers.is_empty() {
                     return Err(anyhow::anyhow!("DNS Resolvers list is empty"));
                 }
-                let resolver = dns_resolvers[*current_index];
+                let resolver = &dns_resolvers[*current_index];
                 *current_index = (*current_index + 1) % dns_resolvers.len();
                 Ok(resolver)
             }
@@ -42,6 +54,6 @@ impl ResolverSelector for Selector {
     }
 }
 
-pub fn get_selector(args: &CommandArgs) -> Box<dyn ResolverSelector> {
-    Box::new(Selector::new(args.use_random))
+pub fn get_selector(args: &CommandArgs, dns_resolvers: &[&str]) -> Box<dyn ResolverSelector> {
+    Box::new(Selector::new(args.use_random, dns_resolvers))
 }

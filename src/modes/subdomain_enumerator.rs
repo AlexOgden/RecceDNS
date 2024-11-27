@@ -38,7 +38,8 @@ pub fn enumerate_subdomains(cmd_args: &CommandArgs, dns_resolver_list: &[&str]) 
 
     let query_types = get_query_types(&cmd_args.query_type);
     let subdomain_list = read_wordlist(&cmd_args.wordlist)?;
-    let mut resolver_selector_instance = resolver_selector::get_selector(cmd_args);
+    let mut resolver_selector_instance =
+        resolver_selector::get_selector(cmd_args, dns_resolver_list);
 
     let total_subdomains = subdomain_list.len() as u64;
     let progress_bar = cli::setup_progress_bar(total_subdomains);
@@ -65,7 +66,6 @@ pub fn enumerate_subdomains(cmd_args: &CommandArgs, dns_resolver_list: &[&str]) 
         }
         process_subdomain(
             cmd_args,
-            dns_resolver_list,
             &mut *resolver_selector_instance,
             query_types,
             subdomain,
@@ -88,7 +88,6 @@ pub fn enumerate_subdomains(cmd_args: &CommandArgs, dns_resolver_list: &[&str]) 
     if !interrupted.load(Ordering::SeqCst) {
         retry_failed_queries(
             cmd_args,
-            dns_resolver_list,
             &mut *resolver_selector_instance,
             query_types,
             &mut query_timer,
@@ -122,14 +121,13 @@ pub fn enumerate_subdomains(cmd_args: &CommandArgs, dns_resolver_list: &[&str]) 
 
 fn process_subdomain(
     cmd_args: &CommandArgs,
-    dns_resolver_list: &[&str],
     resolver_selector_instance: &mut dyn ResolverSelector,
     query_types: &[QueryType],
     subdomain: &str,
     query_timer: &mut QueryTimer,
     context: &mut EnumerationContext,
 ) -> Result<()> {
-    let query_resolver = resolver_selector_instance.select(dns_resolver_list)?;
+    let query_resolver = resolver_selector_instance.select()?;
     let fqdn = format!("{}.{}", subdomain, cmd_args.target);
 
     context.current_query_results.clear();
@@ -186,7 +184,6 @@ fn process_subdomain(
 
 fn retry_failed_queries(
     cmd_args: &CommandArgs,
-    dns_resolver_list: &[&str],
     resolver_selector_instance: &mut dyn ResolverSelector,
     query_types: &[QueryType],
     query_timer: &mut QueryTimer,
@@ -206,7 +203,7 @@ fn retry_failed_queries(
     context.failed_subdomains.clear();
 
     for subdomain in retries {
-        let query_resolver = resolver_selector_instance.select(dns_resolver_list)?;
+        let query_resolver = resolver_selector_instance.select()?;
         let fqdn = format!("{}.{}", subdomain, cmd_args.target);
 
         context.current_query_results.clear();
