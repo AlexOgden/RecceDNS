@@ -2,7 +2,7 @@ use anyhow::{anyhow, ensure, Context, Result};
 use regex::Regex;
 use std::net::{IpAddr, Ipv4Addr};
 
-use crate::network::net_check;
+use crate::{dns::protocol::QueryType, network::net_check};
 
 use super::cli::CommandArgs;
 
@@ -110,6 +110,21 @@ pub fn filter_working_dns_resolvers<'a>(
         .copied()
         .filter(|resolver| working_resolvers.contains(resolver))
         .collect()
+}
+
+pub fn get_correct_query_types(
+    query_types_arg: &[QueryType],
+    allowed_types: &[QueryType],
+) -> Vec<QueryType> {
+    if query_types_arg.is_empty() || query_types_arg.contains(&QueryType::ANY) {
+        allowed_types.to_vec()
+    } else {
+        query_types_arg
+            .iter()
+            .filter(|qt| allowed_types.contains(qt))
+            .cloned()
+            .collect()
+    }
 }
 
 #[cfg(test)]

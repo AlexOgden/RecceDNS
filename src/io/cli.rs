@@ -52,9 +52,16 @@ pub struct CommandArgs {
     #[arg(short, long, default_value_t = false)]
     pub verbose: bool,
 
-    /// What resource-record to query
-    #[arg(short, long, value_enum, default_value_t = QueryType::ANY)]
-    pub query_type: QueryType,
+    /// Query type(s) to use for DNS queries
+    #[arg(
+        short,
+        long,
+        value_enum,
+        value_delimiter = ',',
+        default_values_t = vec![QueryType::ANY],
+        ignore_case = true
+    )]
+    pub query_types: Vec<QueryType>,
 
     /// Delay in milliseconds between DNS requests for subdomain enumeration
     #[arg(short = 'D', long, required = false, value_parser = parse_delay)]

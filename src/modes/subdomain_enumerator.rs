@@ -6,20 +6,26 @@ use std::io::{self, Write};
 use std::sync::atomic::Ordering;
 use std::thread;
 use std::time::Duration;
+use std::time::Instant;
 
-use crate::dns::error::DnsError;
-use crate::dns::protocol::RData;
-use crate::dns::resolver_selector;
 use crate::dns::{
-    protocol::{QueryType, ResourceRecord},
+    error::DnsError,
+    protocol::{QueryType, RData, ResourceRecord},
     resolver::resolve_domain,
+    resolver_selector,
     resolver_selector::ResolverSelector,
 };
-use crate::io::interrupt;
-use crate::io::json::EnumerationOutput;
-use crate::io::{cli, cli::CommandArgs, wordlist};
+use crate::io::{
+    cli::{self, CommandArgs},
+    interrupt,
+    json::EnumerationOutput,
+    validation::get_correct_query_types,
+    wordlist,
+};
 use crate::timing::stats::QueryTimer;
-use std::time::Instant;
+
+const DEFAULT_QUERY_TYPES: &[QueryType] =
+    &[QueryType::A, QueryType::AAAA, QueryType::MX, QueryType::TXT];
 
 struct EnumerationContext {
     current_query_results: HashSet<ResourceRecord>,
@@ -36,7 +42,7 @@ pub fn enumerate_subdomains(cmd_args: &CommandArgs, dns_resolver_list: &[&str]) 
         return Ok(());
     }
 
-    let query_types = get_query_types(&cmd_args.query_type);
+    let query_types = get_correct_query_types(&cmd_args.query_types, DEFAULT_QUERY_TYPES);
     let subdomain_list = read_wordlist(&cmd_args.wordlist)?;
     let mut resolver_selector_instance =
         resolver_selector::get_selector(cmd_args, dns_resolver_list);
@@ -67,7 +73,7 @@ pub fn enumerate_subdomains(cmd_args: &CommandArgs, dns_resolver_list: &[&str]) 
         process_subdomain(
             cmd_args,
             &mut *resolver_selector_instance,
-            query_types,
+            &query_types,
             subdomain,
             &mut query_timer,
             &mut context,
@@ -89,7 +95,7 @@ pub fn enumerate_subdomains(cmd_args: &CommandArgs, dns_resolver_list: &[&str]) 
         retry_failed_queries(
             cmd_args,
             &mut *resolver_selector_instance,
-            query_types,
+            &query_types,
             &mut query_timer,
             &mut context,
         )?;
@@ -122,7 +128,7 @@ pub fn enumerate_subdomains(cmd_args: &CommandArgs, dns_resolver_list: &[&str]) 
 fn process_subdomain(
     cmd_args: &CommandArgs,
     resolver_selector_instance: &mut dyn ResolverSelector,
-    query_types: &[QueryType],
+    query_types: &Vec<QueryType>,
     subdomain: &str,
     query_timer: &mut QueryTimer,
     context: &mut EnumerationContext,
@@ -185,7 +191,7 @@ fn process_subdomain(
 fn retry_failed_queries(
     cmd_args: &CommandArgs,
     resolver_selector_instance: &mut dyn ResolverSelector,
-    query_types: &[QueryType],
+    query_types: &Vec<QueryType>,
     query_timer: &mut QueryTimer,
     context: &mut EnumerationContext,
 ) -> Result<()> {
@@ -266,13 +272,6 @@ fn retry_failed_queries(
     }
 
     Ok(())
-}
-
-const fn get_query_types(query_type: &QueryType) -> &[QueryType] {
-    match query_type {
-        QueryType::ANY => &[QueryType::A, QueryType::AAAA, QueryType::MX, QueryType::TXT],
-        _ => std::slice::from_ref(query_type),
-    }
 }
 
 fn read_wordlist(wordlist_path: &Option<String>) -> Result<Vec<String>> {
