@@ -127,30 +127,39 @@ fn send_dns_query_udp(
 }
 
 fn send_dns_query_tcp(query: &[u8], dns_server: &str) -> Result<Vec<u8>, DnsError> {
+    // Establish TCP connection to the DNS server
     let mut stream = TcpStream::connect(dns_server)
         .map_err(|e| DnsError::Network(format!("Failed to connect to {dns_server} (TCP): {e}")))?;
 
-    let timeout = Some(Duration::new(3, 0));
+    // Set read and write timeouts
+    let timeout = Duration::from_secs(3);
     stream
-        .set_read_timeout(timeout)
-        .and_then(|()| stream.set_write_timeout(timeout))
-        .map_err(|e| DnsError::Network(format!("Failed to set timeout: {e}")))?;
+        .set_read_timeout(Some(timeout))
+        .map_err(|e| DnsError::Network(format!("Failed to set read timeout: {e}")))?;
+    stream
+        .set_write_timeout(Some(timeout))
+        .map_err(|e| DnsError::Network(format!("Failed to set write timeout: {e}")))?;
 
+    // Send query length in big-endian format
     let query_len = u16::try_from(query.len())
         .map_err(|_| DnsError::InvalidData("Query length exceeds u16 maximum value".to_owned()))?
         .to_be_bytes();
     stream
         .write_all(&query_len)
-        .and_then(|()| stream.write_all(query))
+        .map_err(|e| DnsError::Network(format!("Failed to write query length: {e}")))?;
+    stream
+        .write_all(query)
         .map_err(|e| DnsError::Network(format!("Failed to write query: {e}")))?;
 
-    let mut len_buffer = [0; 2];
+    // Read response length
+    let mut len_buffer = [0u8; 2];
     stream
         .read_exact(&mut len_buffer)
         .map_err(|_| DnsError::Network("Failed to read response length".to_owned()))?;
     let response_len = u16::from_be_bytes(len_buffer) as usize;
 
-    let mut response_buffer = vec![0; response_len];
+    // Read the actual response
+    let mut response_buffer = vec![0u8; response_len];
     stream
         .read_exact(&mut response_buffer)
         .map_err(|_| DnsError::Network("Failed to read response".to_owned()))?;
