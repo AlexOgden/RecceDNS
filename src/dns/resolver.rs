@@ -44,6 +44,7 @@ pub fn resolve_domain(
     domain: &str,
     query_type: &QueryType,
     transport_protocol: &TransportProtocol,
+    recursion: bool,
 ) -> Result<DnsPacket, DnsError> {
     let udp_socket =
         initialize_udp_socket().map_err(|error| DnsError::Network(error.to_string()))?;
@@ -54,6 +55,7 @@ pub fn resolve_domain(
         dns_server,
         domain,
         query_type,
+        recursion,
     )?;
 
     match query_result.header.rescode {
@@ -75,13 +77,14 @@ pub fn resolve_domain(
 fn execute_dns_query(
     socket: &UdpSocket,
     transport_protocol: &TransportProtocol,
-    dns_server: &str,
+    dns_resolver: &str,
     domain: &str,
     query_type: &QueryType,
+    recursion: bool,
 ) -> Result<DnsPacket, DnsError> {
-    let dns_server_address = format!("{dns_server}:{DNS_PORT}");
+    let dns_server_address = format!("{dns_resolver}:{DNS_PORT}");
 
-    let mut query = build_dns_query(domain, query_type)?;
+    let mut query = build_dns_query(domain, query_type, recursion)?;
     let mut req_buffer = PacketBuffer::new();
     query.write(&mut req_buffer)?;
     let response = match transport_protocol {
@@ -167,7 +170,11 @@ fn send_dns_query_tcp(query: &[u8], dns_server: &str) -> Result<Vec<u8>, DnsErro
     Ok(response_buffer)
 }
 
-fn build_dns_query(domain: &str, query_type: &QueryType) -> Result<DnsPacket, DnsError> {
+fn build_dns_query(
+    domain: &str,
+    query_type: &QueryType,
+    recursion: bool,
+) -> Result<DnsPacket, DnsError> {
     if domain.is_empty() {
         return Err(DnsError::InvalidData(
             "Domain name cannot be empty".to_owned(),
@@ -195,7 +202,7 @@ fn build_dns_query(domain: &str, query_type: &QueryType) -> Result<DnsPacket, Dn
     let mut packet = DnsPacket::new();
     packet.header.id = rand::thread_rng().gen();
     packet.header.questions = 1;
-    packet.header.recursion_desired = true;
+    packet.header.recursion_desired = recursion;
     packet
         .questions
         .push(DnsQuestion::new(domain, query_type.clone()));
@@ -222,7 +229,7 @@ mod tests {
     fn test_build_dns_query() {
         let domain = "example.com";
         let query_type = QueryType::A;
-        let dns_packet = build_dns_query(domain, &query_type).unwrap();
+        let dns_packet = build_dns_query(domain, &query_type, true).unwrap();
 
         assert_eq!(dns_packet.header.questions, 1);
         assert_eq!(dns_packet.questions.len(), 1);
@@ -234,12 +241,30 @@ mod tests {
     fn test_build_dns_query_empty_domain() {
         let domain = "";
         let query_type = QueryType::A;
-        let result = build_dns_query(domain, &query_type);
+        let result = build_dns_query(domain, &query_type, true);
 
         assert!(result.is_err());
         assert_eq!(
             result.unwrap_err().to_string(),
             "Invalid data: Domain name cannot be empty"
         );
+    }
+
+    #[test]
+    fn test_build_dns_query_with_recursion() {
+        let domain = "example.com";
+        let query_type = QueryType::A;
+        let dns_packet = build_dns_query(domain, &query_type, true).unwrap();
+
+        assert!(dns_packet.header.recursion_desired);
+    }
+
+    #[test]
+    fn test_build_dns_query_without_recursion() {
+        let domain = "example.com";
+        let query_type = QueryType::A;
+        let dns_packet = build_dns_query(domain, &query_type, false).unwrap();
+
+        assert!(!dns_packet.header.recursion_desired);
     }
 }
