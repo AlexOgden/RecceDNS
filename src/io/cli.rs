@@ -61,6 +61,10 @@ pub struct CommandArgs {
     #[arg(long)]
     pub no_dns_check: bool,
 
+    /// Dont request recursion in DNS queries
+    #[arg(long)]
+    pub no_recursion: bool,
+
     /// Don't retry failed queries
     #[arg(long)]
     pub no_retry: bool,

@@ -22,6 +22,7 @@ fn check_nxdomain_hijacking(server_address: &str, transport_protocol: &Transport
         &random_domain,
         &QueryType::A,
         transport_protocol,
+        true,
     )
     .is_ok()
 }
@@ -55,7 +56,7 @@ pub fn check_dns_resolvers<'a>(
 
         let root_server_letter = thread_rng().gen_range(b'a'..b'm') as char;
         let domain = format!("{root_server_letter}.{ROOT_SERVER}");
-        let normal_query = resolve_domain(server, &domain, &QueryType::A, transport_protocol);
+        let normal_query = resolve_domain(server, &domain, &QueryType::A, transport_protocol, true);
 
         if hijacking {
             print_status(server, "FAIL");

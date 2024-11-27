@@ -142,6 +142,7 @@ fn process_subdomain(
             &fqdn,
             query_type,
             &cmd_args.transport_protocol,
+            !&cmd_args.no_recursion,
         );
         query_timer.stop();
 
@@ -217,6 +218,7 @@ fn retry_failed_queries(
                 &fqdn,
                 query_type,
                 &cmd_args.transport_protocol,
+                !&cmd_args.no_recursion,
             );
             query_timer.stop();
 
@@ -328,6 +330,7 @@ fn check_wildcard_domain(args: &CommandArgs, dns_resolvers: &[&str]) -> Result<b
                     &fqdn,
                     &QueryType::A,
                     &args.transport_protocol,
+                    true,
                 )
                 .is_err()
             });

@@ -42,8 +42,13 @@ pub fn enumerate_records(cmd_args: &CommandArgs, dns_resolvers: &[&str]) -> Resu
 
     for query_type in QUERY_TYPES {
         query_timer.start();
-        let query_result =
-            resolve_domain(resolver, domain, query_type, &cmd_args.transport_protocol);
+        let query_result = resolve_domain(
+            resolver,
+            domain,
+            query_type,
+            &cmd_args.transport_protocol,
+            !&cmd_args.no_recursion,
+        );
         query_timer.stop();
 
         match query_result {
@@ -86,6 +91,7 @@ fn check_dnssec(resolver: &str, domain: &str, cmd_args: &CommandArgs) -> Result<
         domain,
         &QueryType::DNSKEY,
         &cmd_args.transport_protocol,
+        !&cmd_args.no_recursion,
     );
 
     let dnssec_status = match response {
@@ -142,6 +148,7 @@ fn handle_ns_response(
             ns_domain,
             &query_type,
             &cmd_args.transport_protocol,
+            !&cmd_args.no_recursion,
         ) {
             Ok(records) => {
                 for record in records.answers {
