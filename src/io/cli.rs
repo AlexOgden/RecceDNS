@@ -1,17 +1,28 @@
-use crate::{dns::protocol::QueryType, network::types::TransportProtocol, timing::delay::Delay};
 use clap::{Parser, ValueEnum};
 use colored::Colorize;
 use indicatif::{ProgressBar, ProgressStyle};
 
 use super::validation::{self, validate_dns_resolvers};
+use crate::{dns::protocol::QueryType, network::types::TransportProtocol, timing::delay::Delay};
 
 const PROGRESS_TICK_CHARS: &str = "⠢⢁⡈⠔";
+
+/// Operation modes for the program
+#[derive(ValueEnum, Clone, Debug, PartialEq, Eq)]
+pub enum OperationMode {
+    #[value(name = "b")]
+    BasicEnumeration,
+    #[value(name = "s")]
+    SubdomainEnumeration,
+    #[value(name = "r")]
+    ReverseIp,
+}
 
 /// Command-line arguments for the program
 #[derive(Parser, Debug)]
 #[allow(clippy::struct_excessive_bools)]
 #[command(
-	name = "RecceDNS",
+    name = "RecceDNS",
     author = "Alex Ogden",
     version = env!("CARGO_PKG_VERSION"),
     about = "A DNS reconnaissance tool for enumerating subdomains and DNS records",
@@ -25,7 +36,7 @@ pub struct CommandArgs {
     #[arg(short, long, required = true, value_parser = validation::validate_target)]
     pub target: String,
 
-    /// IPv4 Address of the DNS resolver(s) to use (comma-seperated). Multiple resolvers will selected either randomly or sequentially
+    /// IPv4 Address of the DNS resolver(s) to use (comma-separated). Multiple resolvers will be selected either randomly or sequentially
     #[arg(short, long, default_value = "1.1.1.1", value_parser = validate_dns_resolvers, required = false)]
     pub dns_resolvers: String,
 
@@ -57,7 +68,7 @@ pub struct CommandArgs {
     #[arg(long, required = false)]
     pub json: Option<String>,
 
-    /// Dont print results to the console, only write to the output file
+    /// Don't print results to the console, only write to the output file
     #[arg(long, required = false)]
     pub quiet: bool,
 
@@ -69,7 +80,7 @@ pub struct CommandArgs {
     #[arg(long)]
     pub no_dns_check: bool,
 
-    /// Dont request recursion in DNS queries
+    /// Don't request recursion in DNS queries
     #[arg(long)]
     pub no_recursion: bool,
 
@@ -102,20 +113,12 @@ impl CommandArgs {
     }
 }
 
+/// Parses delay from a string
 fn parse_delay(s: &str) -> Result<Delay, String> {
     s.parse()
 }
 
-#[derive(ValueEnum, Clone, Debug, PartialEq, Eq)]
-pub enum OperationMode {
-    #[value(name = "b")]
-    BasicEnumeration,
-    #[value(name = "s")]
-    SubdomainEnumeration,
-    #[value(name = "r")]
-    ReverseIp,
-}
-
+/// Retrieves and validates the parsed command-line arguments
 pub fn get_parsed_args() -> CommandArgs {
     let args = CommandArgs::parse();
     if let Err(e) = args.validate() {
@@ -125,6 +128,7 @@ pub fn get_parsed_args() -> CommandArgs {
     args
 }
 
+/// Prints the ASCII art banner
 pub fn print_ascii_art() {
     let title_art = r"
     ____                      ____  _   _______
@@ -140,10 +144,12 @@ pub fn print_ascii_art() {
     );
 }
 
+/// Clears the current line in the terminal
 pub fn clear_line() {
     println!("\r\x1b[2K");
 }
 
+/// Sets up the progress bar with the given total
 pub fn setup_progress_bar(total: u64) -> ProgressBar {
     let pb = ProgressBar::new(total);
     let style = ProgressStyle::default_bar()
@@ -157,6 +163,7 @@ pub fn setup_progress_bar(total: u64) -> ProgressBar {
     pb
 }
 
+/// Updates the progress bar based on the current index and total
 pub fn update_progress_bar(pb: &ProgressBar, index: usize, total: u64) {
     pb.set_prefix(format!("[{}/{}]", index + 1, total));
     pb.inc(1);
