@@ -25,7 +25,7 @@ use crate::timing::stats::QueryTimer;
 const DEFAULT_QUERY_TYPES: &[QueryType] =
     &[QueryType::A, QueryType::AAAA, QueryType::MX, QueryType::TXT];
 
-struct EnumerationContext {
+struct EnumerationState {
     current_query_results: HashSet<ResourceRecord>,
     all_query_responses: Vec<ResourceRecord>,
     failed_subdomains: HashSet<String>,
@@ -50,7 +50,7 @@ pub fn enumerate_subdomains(cmd_args: &CommandArgs, dns_resolver_list: &[&str]) 
     let mut query_timer = QueryTimer::new(!cmd_args.no_query_stats);
     let start_time = Instant::now();
 
-    let mut context = EnumerationContext {
+    let mut context = EnumerationState {
         current_query_results: HashSet::new(),
         all_query_responses: Vec::new(),
         failed_subdomains: HashSet::new(),
@@ -129,7 +129,7 @@ fn process_subdomain(
     query_types: &[QueryType],
     subdomain: &str,
     query_timer: &mut QueryTimer,
-    context: &mut EnumerationContext,
+    context: &mut EnumerationState,
 ) -> Result<()> {
     let fqdn = format!("{}.{}", subdomain, cmd_args.target);
     resolve_and_handle(
@@ -148,7 +148,7 @@ fn retry_failed_queries(
     resolver_selector: &mut dyn ResolverSelector,
     query_types: &[QueryType],
     query_timer: &mut QueryTimer,
-    context: &mut EnumerationContext,
+    context: &mut EnumerationState,
 ) -> Result<()> {
     if context.failed_subdomains.is_empty() {
         return Ok(());
@@ -190,7 +190,7 @@ fn resolve_and_handle(
     query_types: &[QueryType],
     fqdn: &str,
     query_timer: &mut QueryTimer,
-    context: &mut EnumerationContext,
+    context: &mut EnumerationState,
     subdomain: &str,
 ) -> Result<()> {
     let resolver = resolver_selector.select()?;
@@ -218,6 +218,7 @@ fn resolve_and_handle(
                 {
                     context.failed_subdomains.insert(subdomain.to_string());
                 }
+
                 print_query_error(cmd_args, subdomain, resolver, &err, false);
                 break;
             }
