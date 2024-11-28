@@ -41,7 +41,7 @@ pub struct CommandArgs {
     pub dns_resolvers: String,
 
     /// Transport protocol to use for DNS queries
-    #[arg(short = 'p', long, value_enum, default_value_t = TransportProtocol::UDP, required = false)]
+    #[arg(short = 'p', long = "protocol", value_enum, default_value_t = TransportProtocol::UDP, required = false, ignore_case = true)]
     pub transport_protocol: TransportProtocol,
 
     /// Path to subdomain wordlist
@@ -76,7 +76,7 @@ pub struct CommandArgs {
     pub json: Option<String>,
 
     /// Don't print results to the console, only write to the output file
-    #[arg(long, required = false)]
+    #[arg(short = 'Q', long, required = false)]
     pub quiet: bool,
 
     /// Don't show the welcome ASCII art
