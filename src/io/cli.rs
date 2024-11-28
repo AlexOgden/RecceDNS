@@ -3,7 +3,11 @@ use colored::Colorize;
 use indicatif::{ProgressBar, ProgressStyle};
 
 use super::validation::{self, validate_dns_resolvers};
-use crate::{dns::protocol::QueryType, network::types::TransportProtocol, timing::delay::Delay};
+use crate::{
+    dns::protocol::QueryType,
+    network::types::TransportProtocol,
+    timing::delay::Delay,
+};
 
 const PROGRESS_TICK_CHARS: &str = "⠢⢁⡈⠔";
 

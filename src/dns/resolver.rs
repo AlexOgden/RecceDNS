@@ -1,9 +1,4 @@
 use anyhow::{Context, Result};
-
-use crate::dns::error::DnsError;
-use crate::dns::protocol::QueryType;
-use crate::io::packet_buffer::PacketBuffer;
-use crate::network::types::TransportProtocol;
 use lazy_static::lazy_static;
 use rand::Rng;
 use std::io::{Read, Write};
@@ -11,7 +6,12 @@ use std::net::{Ipv4Addr, TcpStream, UdpSocket};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use super::protocol::{DnsPacket, DnsQuestion, ResultCode};
+use crate::dns::{
+    error::DnsError,
+    protocol::{DnsPacket, DnsQuestion, QueryType, ResultCode},
+};
+use crate::io::packet_buffer::PacketBuffer;
+use crate::network::types::TransportProtocol;
 
 lazy_static! {
     static ref UDP_SOCKET: Mutex<Option<Arc<UdpSocket>>> = Mutex::new(None);

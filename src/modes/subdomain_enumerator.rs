@@ -4,9 +4,7 @@ use rand::Rng;
 use std::collections::HashSet;
 use std::io::{self, Write};
 use std::sync::atomic::Ordering;
-use std::thread;
-use std::time::Duration;
-use std::time::Instant;
+use std::{thread, time::Duration, time::Instant};
 
 use crate::dns::{
     error::DnsError,
