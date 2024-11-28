@@ -44,8 +44,7 @@ pub fn enumerate_subdomains(cmd_args: &CommandArgs, dns_resolver_list: &[&str]) 
 
     let query_types = get_correct_query_types(&cmd_args.query_types, DEFAULT_QUERY_TYPES);
     let subdomain_list = read_wordlist(&cmd_args.wordlist)?;
-    let mut resolver_selector_instance =
-        resolver_selector::get_selector(cmd_args, dns_resolver_list);
+    let mut resolver_selector = resolver_selector::get_selector(cmd_args, dns_resolver_list);
 
     let total_subdomains = subdomain_list.len() as u64;
     let progress_bar = cli::setup_progress_bar(total_subdomains);
@@ -70,9 +69,10 @@ pub fn enumerate_subdomains(cmd_args: &CommandArgs, dns_resolver_list: &[&str]) 
             println!("[{}] Interrupted by user", "!".red());
             break;
         }
+
         process_subdomain(
             cmd_args,
-            &mut *resolver_selector_instance,
+            &mut *resolver_selector,
             &query_types,
             subdomain,
             &mut query_timer,
@@ -82,8 +82,7 @@ pub fn enumerate_subdomains(cmd_args: &CommandArgs, dns_resolver_list: &[&str]) 
         cli::update_progress_bar(&progress_bar, index, total_subdomains);
 
         if let Some(delay_ms) = &cmd_args.delay {
-            let sleep_delay = delay_ms.get_delay();
-            if sleep_delay > 0 {
+            if let Some(sleep_delay) = delay_ms.get_delay().checked_sub(0) {
                 thread::sleep(Duration::from_millis(sleep_delay));
             }
         }
@@ -94,12 +93,13 @@ pub fn enumerate_subdomains(cmd_args: &CommandArgs, dns_resolver_list: &[&str]) 
     if !interrupted.load(Ordering::SeqCst) {
         retry_failed_queries(
             cmd_args,
-            &mut *resolver_selector_instance,
+            &mut *resolver_selector,
             &query_types,
             &mut query_timer,
             &mut context,
         )?;
     }
+
     let elapsed_time = start_time.elapsed();
 
     cli::clear_line();
@@ -109,17 +109,17 @@ pub fn enumerate_subdomains(cmd_args: &CommandArgs, dns_resolver_list: &[&str]) 
         context.found_subdomain_count.to_string().bold(),
         elapsed_time
     );
-    if let Some(query_average_ms) = query_timer.average() {
+
+    if let Some(avg) = query_timer.average() {
         println!(
             "[{}] Average query time: {} ms",
             "~".green(),
-            query_average_ms.to_string().bold().bright_yellow()
+            avg.to_string().bold().bright_yellow()
         );
     }
 
-    // Write the results to the specified output file if provided
-    if let (Some(output), Some(output_file)) = (&context.results_output, &cmd_args.json) {
-        output.write_to_file(output_file)?;
+    if let (Some(output), Some(file)) = (&context.results_output, &cmd_args.json) {
+        output.write_to_file(file)?;
     }
 
     Ok(())
@@ -127,30 +127,90 @@ pub fn enumerate_subdomains(cmd_args: &CommandArgs, dns_resolver_list: &[&str]) 
 
 fn process_subdomain(
     cmd_args: &CommandArgs,
-    resolver_selector_instance: &mut dyn ResolverSelector,
-    query_types: &Vec<QueryType>,
+    resolver_selector: &mut dyn ResolverSelector,
+    query_types: &[QueryType],
     subdomain: &str,
     query_timer: &mut QueryTimer,
     context: &mut EnumerationContext,
 ) -> Result<()> {
-    let query_resolver = resolver_selector_instance.select()?;
     let fqdn = format!("{}.{}", subdomain, cmd_args.target);
+    resolve_and_handle(
+        cmd_args,
+        resolver_selector,
+        query_types,
+        &fqdn,
+        query_timer,
+        context,
+        subdomain,
+    )
+}
 
+fn retry_failed_queries(
+    cmd_args: &CommandArgs,
+    resolver_selector: &mut dyn ResolverSelector,
+    query_types: &[QueryType],
+    query_timer: &mut QueryTimer,
+    context: &mut EnumerationContext,
+) -> Result<()> {
+    if context.failed_subdomains.is_empty() {
+        return Ok(());
+    }
+
+    let failed = std::mem::take(&mut context.failed_subdomains);
+    println!(
+        "\n[{}] Retrying {} failed queries",
+        "!".bright_yellow(),
+        failed.len().to_string().bold()
+    );
+
+    let retry_count = u32::try_from(failed.len()).unwrap_or(0);
+
+    for subdomain in failed {
+        let fqdn = format!("{}.{}", subdomain, cmd_args.target);
+        resolve_and_handle(
+            cmd_args,
+            resolver_selector,
+            query_types,
+            &fqdn,
+            query_timer,
+            context,
+            &subdomain,
+        )?;
+        thread::sleep(Duration::from_millis(50));
+    }
+
+    if retry_count > 0 {
+        println!("Failed to resolve {retry_count} subdomains after retries");
+    }
+
+    Ok(())
+}
+
+fn resolve_and_handle(
+    cmd_args: &CommandArgs,
+    resolver_selector: &mut dyn ResolverSelector,
+    query_types: &[QueryType],
+    fqdn: &str,
+    query_timer: &mut QueryTimer,
+    context: &mut EnumerationContext,
+    subdomain: &str,
+) -> Result<()> {
+    let resolver = resolver_selector.select()?;
     context.current_query_results.clear();
     context.all_query_responses.clear();
 
     for query_type in query_types {
         query_timer.start();
-        let query_result = resolve_domain(
-            query_resolver,
-            &fqdn,
+        let result = resolve_domain(
+            resolver,
+            fqdn,
             query_type,
             &cmd_args.transport_protocol,
-            !&cmd_args.no_recursion,
+            !cmd_args.no_recursion,
         );
         query_timer.stop();
 
-        match query_result {
+        match result {
             Ok(response) => {
                 context.current_query_results.extend(response.answers);
             }
@@ -160,7 +220,7 @@ fn process_subdomain(
                 {
                     context.failed_subdomains.insert(subdomain.to_string());
                 }
-                print_query_error(cmd_args, subdomain, query_resolver, &err, false);
+                print_query_error(cmd_args, subdomain, resolver, &err, false);
                 break;
             }
         }
@@ -173,102 +233,17 @@ fn process_subdomain(
         context
             .all_query_responses
             .sort_by_key(|r| r.data.to_qtype());
-        let response_data_string = create_query_response_string(&context.all_query_responses);
 
         if let Some(output) = &mut context.results_output {
-            for response in &context.all_query_responses {
-                output.add_result(response.clone());
-            }
+            context
+                .all_query_responses
+                .iter()
+                .for_each(|r| output.add_result(r.clone()));
         }
 
-        print_query_result(cmd_args, subdomain, query_resolver, &response_data_string);
+        let response_str = create_query_response_string(&context.all_query_responses);
+        print_query_result(cmd_args, subdomain, resolver, &response_str);
         context.found_subdomain_count += 1;
-    }
-
-    Ok(())
-}
-
-fn retry_failed_queries(
-    cmd_args: &CommandArgs,
-    resolver_selector_instance: &mut dyn ResolverSelector,
-    query_types: &Vec<QueryType>,
-    query_timer: &mut QueryTimer,
-    context: &mut EnumerationContext,
-) -> Result<()> {
-    if !context.failed_subdomains.is_empty() {
-        let count = context.failed_subdomains.len();
-        println!(
-            "\n[{}] Retrying {} failed queries",
-            "!".bright_yellow(),
-            count.to_string().bold()
-        );
-    }
-
-    let mut retry_failed_count: u32 = 0;
-    let retries: Vec<String> = context.failed_subdomains.iter().cloned().collect();
-    context.failed_subdomains.clear();
-
-    for subdomain in retries {
-        let query_resolver = resolver_selector_instance.select()?;
-        let fqdn = format!("{}.{}", subdomain, cmd_args.target);
-
-        context.current_query_results.clear();
-
-        for query_type in query_types {
-            query_timer.start();
-            let query_result = resolve_domain(
-                query_resolver,
-                &fqdn,
-                query_type,
-                &cmd_args.transport_protocol,
-                !&cmd_args.no_recursion,
-            );
-            query_timer.stop();
-
-            match query_result {
-                Ok(response) => {
-                    context.current_query_results.extend(response.answers);
-                }
-                Err(err) => {
-                    if !matches!(err, DnsError::NoRecordsFound | DnsError::NonExistentDomain) {
-                        retry_failed_count += 1;
-                        context.failed_subdomains.insert(subdomain.clone());
-                    }
-
-                    print_query_error(cmd_args, &subdomain, query_resolver, &err, true);
-
-                    if matches!(err, DnsError::NonExistentDomain) {
-                        break;
-                    }
-                }
-            }
-        }
-
-        if !context.current_query_results.is_empty() {
-            context.all_query_responses.clear();
-            context
-                .all_query_responses
-                .extend(context.current_query_results.drain());
-            context
-                .all_query_responses
-                .sort_by_key(|r| r.data.to_qtype());
-            let response_data_string = create_query_response_string(&context.all_query_responses);
-
-            if let Some(output) = &mut context.results_output {
-                for response in &context.all_query_responses {
-                    output.add_result(response.clone());
-                }
-            }
-
-            print_query_result(cmd_args, &subdomain, query_resolver, &response_data_string);
-            context.found_subdomain_count += 1;
-        }
-
-        thread::sleep(Duration::from_millis(50));
-    }
-
-    if retry_failed_count > 0 {
-        println!("Failed to resolve {retry_failed_count} subdomains after retries");
     }
 
     Ok(())
