@@ -41,7 +41,7 @@ pub fn enumerate_subdomains(cmd_args: &CommandArgs, dns_resolver_list: &[&str]) 
     }
 
     let query_types = get_correct_query_types(&cmd_args.query_types, DEFAULT_QUERY_TYPES);
-    let subdomain_list = read_wordlist(&cmd_args.wordlist)?;
+    let subdomain_list = read_wordlist(cmd_args.wordlist.as_ref())?;
     let mut resolver_selector = resolver_selector::get_selector(cmd_args, dns_resolver_list);
 
     let total_subdomains = subdomain_list.len() as u64;
@@ -248,7 +248,7 @@ fn resolve_and_handle(
     Ok(())
 }
 
-fn read_wordlist(wordlist_path: &Option<String>) -> Result<Vec<String>> {
+fn read_wordlist(wordlist_path: Option<&String>) -> Result<Vec<String>> {
     if let Some(path) = wordlist_path {
         Ok(wordlist::read_from_file(path)?)
     } else {
