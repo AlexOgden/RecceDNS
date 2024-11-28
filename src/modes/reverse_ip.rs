@@ -26,7 +26,8 @@ use crate::{
 pub fn reverse_ip(cmd_args: &CommandArgs, dns_resolver_list: &[&str]) -> Result<()> {
     let target_ips = parse_ip(&cmd_args.target)?;
     let total_ips = target_ips.len() as u64;
-    let mut resolver_selector = resolver_selector::get_selector(cmd_args);
+
+    let mut resolver_selector = resolver_selector::get_selector(cmd_args, dns_resolver_list);
     let mut query_timer = QueryTimer::new(!cmd_args.no_query_stats);
     let mut found_count = 0;
 
@@ -47,13 +48,14 @@ pub fn reverse_ip(cmd_args: &CommandArgs, dns_resolver_list: &[&str]) -> Result<
             break;
         }
 
-        let resolver = resolver_selector.select(dns_resolver_list)?;
+        let resolver = resolver_selector.select()?;
         query_timer.start();
         let query_result = resolve_domain(
             resolver,
             &ip.to_string(),
             &QueryType::PTR,
             &cmd_args.transport_protocol,
+            !&cmd_args.no_recursion,
         );
         query_timer.stop();
 

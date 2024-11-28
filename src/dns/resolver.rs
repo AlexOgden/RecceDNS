@@ -44,6 +44,7 @@ pub fn resolve_domain(
     domain: &str,
     query_type: &QueryType,
     transport_protocol: &TransportProtocol,
+    recursion: bool,
 ) -> Result<DnsPacket, DnsError> {
     let udp_socket =
         initialize_udp_socket().map_err(|error| DnsError::Network(error.to_string()))?;
@@ -54,6 +55,7 @@ pub fn resolve_domain(
         dns_server,
         domain,
         query_type,
+        recursion,
     )?;
 
     match query_result.header.rescode {
@@ -75,13 +77,14 @@ pub fn resolve_domain(
 fn execute_dns_query(
     socket: &UdpSocket,
     transport_protocol: &TransportProtocol,
-    dns_server: &str,
+    dns_resolver: &str,
     domain: &str,
     query_type: &QueryType,
+    recursion: bool,
 ) -> Result<DnsPacket, DnsError> {
-    let dns_server_address = format!("{dns_server}:{DNS_PORT}");
+    let dns_server_address = format!("{dns_resolver}:{DNS_PORT}");
 
-    let mut query = build_dns_query(domain, query_type)?;
+    let mut query = build_dns_query(domain, query_type, recursion)?;
     let mut req_buffer = PacketBuffer::new();
     query.write(&mut req_buffer)?;
     let response = match transport_protocol {
@@ -127,30 +130,39 @@ fn send_dns_query_udp(
 }
 
 fn send_dns_query_tcp(query: &[u8], dns_server: &str) -> Result<Vec<u8>, DnsError> {
+    // Establish TCP connection to the DNS server
     let mut stream = TcpStream::connect(dns_server)
         .map_err(|e| DnsError::Network(format!("Failed to connect to {dns_server} (TCP): {e}")))?;
 
-    let timeout = Some(Duration::new(3, 0));
+    // Set read and write timeouts
+    let timeout = Duration::from_secs(3);
     stream
-        .set_read_timeout(timeout)
-        .and_then(|()| stream.set_write_timeout(timeout))
-        .map_err(|e| DnsError::Network(format!("Failed to set timeout: {e}")))?;
+        .set_read_timeout(Some(timeout))
+        .map_err(|e| DnsError::Network(format!("Failed to set read timeout: {e}")))?;
+    stream
+        .set_write_timeout(Some(timeout))
+        .map_err(|e| DnsError::Network(format!("Failed to set write timeout: {e}")))?;
 
+    // Send query length in big-endian format
     let query_len = u16::try_from(query.len())
         .map_err(|_| DnsError::InvalidData("Query length exceeds u16 maximum value".to_owned()))?
         .to_be_bytes();
     stream
         .write_all(&query_len)
-        .and_then(|()| stream.write_all(query))
+        .map_err(|e| DnsError::Network(format!("Failed to write query length: {e}")))?;
+    stream
+        .write_all(query)
         .map_err(|e| DnsError::Network(format!("Failed to write query: {e}")))?;
 
-    let mut len_buffer = [0; 2];
+    // Read response length
+    let mut len_buffer = [0u8; 2];
     stream
         .read_exact(&mut len_buffer)
         .map_err(|_| DnsError::Network("Failed to read response length".to_owned()))?;
     let response_len = u16::from_be_bytes(len_buffer) as usize;
 
-    let mut response_buffer = vec![0; response_len];
+    // Read the actual response
+    let mut response_buffer = vec![0u8; response_len];
     stream
         .read_exact(&mut response_buffer)
         .map_err(|_| DnsError::Network("Failed to read response".to_owned()))?;
@@ -158,7 +170,11 @@ fn send_dns_query_tcp(query: &[u8], dns_server: &str) -> Result<Vec<u8>, DnsErro
     Ok(response_buffer)
 }
 
-fn build_dns_query(domain: &str, query_type: &QueryType) -> Result<DnsPacket, DnsError> {
+fn build_dns_query(
+    domain: &str,
+    query_type: &QueryType,
+    recursion: bool,
+) -> Result<DnsPacket, DnsError> {
     if domain.is_empty() {
         return Err(DnsError::InvalidData(
             "Domain name cannot be empty".to_owned(),
@@ -186,7 +202,7 @@ fn build_dns_query(domain: &str, query_type: &QueryType) -> Result<DnsPacket, Dn
     let mut packet = DnsPacket::new();
     packet.header.id = rand::thread_rng().gen();
     packet.header.questions = 1;
-    packet.header.recursion_desired = true;
+    packet.header.recursion_desired = recursion;
     packet
         .questions
         .push(DnsQuestion::new(domain, query_type.clone()));
@@ -213,7 +229,7 @@ mod tests {
     fn test_build_dns_query() {
         let domain = "example.com";
         let query_type = QueryType::A;
-        let dns_packet = build_dns_query(domain, &query_type).unwrap();
+        let dns_packet = build_dns_query(domain, &query_type, true).unwrap();
 
         assert_eq!(dns_packet.header.questions, 1);
         assert_eq!(dns_packet.questions.len(), 1);
@@ -225,12 +241,30 @@ mod tests {
     fn test_build_dns_query_empty_domain() {
         let domain = "";
         let query_type = QueryType::A;
-        let result = build_dns_query(domain, &query_type);
+        let result = build_dns_query(domain, &query_type, true);
 
         assert!(result.is_err());
         assert_eq!(
             result.unwrap_err().to_string(),
             "Invalid data: Domain name cannot be empty"
         );
+    }
+
+    #[test]
+    fn test_build_dns_query_with_recursion() {
+        let domain = "example.com";
+        let query_type = QueryType::A;
+        let dns_packet = build_dns_query(domain, &query_type, true).unwrap();
+
+        assert!(dns_packet.header.recursion_desired);
+    }
+
+    #[test]
+    fn test_build_dns_query_without_recursion() {
+        let domain = "example.com";
+        let query_type = QueryType::A;
+        let dns_packet = build_dns_query(domain, &query_type, false).unwrap();
+
+        assert!(!dns_packet.header.recursion_desired);
     }
 }

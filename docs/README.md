@@ -59,7 +59,7 @@ After building, you can find the executable in the `target/release` directory.
 
 - `-d, --dns-resolvers <DNS_RESOLVERS>`: IPv4 Address of the DNS resolver(s) to use (comma-separated). Multiple resolvers will be selected either randomly or sequentially based on the presence of `-r`. Default is `1.1.1.1`.
 
-- `-p, --transport-protocol <TRANSPORT_PROTOCOL>`: *OPTIONAL*: Transport protocol to use for DNS queries. Possible values are:
+- `-p, --protocol <TRANSPORT_PROTOCOL>`: *OPTIONAL*: Transport protocol to use for DNS queries. Possible values are:
   - `UDP`: **(default)**
   - `TCP`
 
@@ -67,11 +67,13 @@ After building, you can find the executable in the `target/release` directory.
 
 - `-v, --verbose`: Print extra information. Default is `false`.
 
-- `-q, --query-type <QUERY_TYPE>`: What resource-record to query. Possible values are: `A`, `AAAA`, `CNAME`, `MX`, `TXT`, `NS`, `SOA`, `SRV`, `ANY` (default). When using subdomain enumeration, `ANY` will use `A`, `AAAA`, `MX`, `TXT`.
+- `-q, --query-types <QUERY_TYPE>`: What resource-record(s) to query. Possible values are: `A`, `AAAA`, `CNAME`, `MX`, `TXT`, `NS`, `SOA`, `SRV`, `ANY` (default). Accepts a comma-seperated list. Not every query type is available for each mode.
 
 - `--no-welcome`: Don't show the welcome ASCII art.
 
 - `--no-dns-check`: Don't check if the DNS servers are working before starting.
+
+- `--no-recursion`: Sets recursion-desired to false in DNS queries.
 
 - `--no-retry`: Don't retry failed queries.
 
@@ -87,6 +89,8 @@ After building, you can find the executable in the `target/release` directory.
 
 - `--json <path>` : Output the results to a JSON file. '.json' will be appended as the extension is not provided.
 
+- `-Q` `--quiet` : Don't print any results to the terminal. Can be useful for targets with large amount of results that you are outputing to JSON.
+
 ## Example Usage
 
 #### Basic Enumeration
@@ -97,7 +101,7 @@ After building, you can find the executable in the `target/release` directory.
 
 Any Records
 
-`reccedns -m s -d 1.1.1.1 -q any -w .\subdomains-top1million-5000.txt -t github.com`
+`reccedns -m s -d 1.1.1.1 -w .\subdomains-top1million-5000.txt -t github.com`
 
 A (IPv4) Only
 
@@ -109,7 +113,7 @@ SRV enumeration
 
 Multiple Resolvers - Sequential Selection
 
-`reccedns -m s -d 1.1.1.1,9.9.9.9,8.8.8.8 -q a -w .\subdomains-top1million-5000.txt -t github.com`
+`reccedns -m s -d 1.1.1.1,9.9.9.9,8.8.8.8 -q a,aaaa -w .\subdomains-top1million-5000.txt -t github.com`
 
 Multiple Resolvers - Random Selection
 

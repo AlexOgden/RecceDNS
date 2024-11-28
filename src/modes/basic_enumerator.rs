@@ -6,23 +6,23 @@ use crate::{
         protocol::{QueryType, RData, ResourceRecord},
         resolver::resolve_domain,
     },
-    io::{cli::CommandArgs, json::EnumerationOutput},
+    io::{cli::CommandArgs, json::EnumerationOutput, validation::get_correct_query_types},
     timing::stats::QueryTimer,
 };
 use anyhow::Result;
 use std::collections::HashSet;
 
-pub fn enumerate_records(cmd_args: &CommandArgs, dns_resolvers: &[&str]) -> Result<()> {
-    const QUERY_TYPES: &[QueryType] = &[
-        QueryType::A,
-        QueryType::AAAA,
-        QueryType::CNAME,
-        QueryType::MX,
-        QueryType::TXT,
-        QueryType::NS,
-        QueryType::SOA,
-    ];
+const DEFAULT_QUERY_TYPES: &[QueryType] = &[
+    QueryType::A,
+    QueryType::AAAA,
+    QueryType::CNAME,
+    QueryType::MX,
+    QueryType::TXT,
+    QueryType::NS,
+    QueryType::SOA,
+];
 
+pub fn enumerate_records(cmd_args: &CommandArgs, dns_resolvers: &[&str]) -> Result<()> {
     println!(
         "Enumerating records for target domain: {}\n",
         cmd_args.target.bold().bright_blue()
@@ -33,6 +33,8 @@ pub fn enumerate_records(cmd_args: &CommandArgs, dns_resolvers: &[&str]) -> Resu
     } else {
         None
     };
+
+    let query_types = get_correct_query_types(&cmd_args.query_types, DEFAULT_QUERY_TYPES);
     let resolver = dns_resolvers[0];
     let domain = &cmd_args.target;
     let mut seen_cnames = HashSet::new();
@@ -40,10 +42,15 @@ pub fn enumerate_records(cmd_args: &CommandArgs, dns_resolvers: &[&str]) -> Resu
 
     check_dnssec(resolver, domain, cmd_args)?;
 
-    for query_type in QUERY_TYPES {
+    for query_type in query_types {
         query_timer.start();
-        let query_result =
-            resolve_domain(resolver, domain, query_type, &cmd_args.transport_protocol);
+        let query_result = resolve_domain(
+            resolver,
+            domain,
+            &query_type,
+            &cmd_args.transport_protocol,
+            !&cmd_args.no_recursion,
+        );
         query_timer.stop();
 
         match query_result {
@@ -86,6 +93,7 @@ fn check_dnssec(resolver: &str, domain: &str, cmd_args: &CommandArgs) -> Result<
         domain,
         &QueryType::DNSKEY,
         &cmd_args.transport_protocol,
+        !&cmd_args.no_recursion,
     );
 
     let dnssec_status = match response {
@@ -142,6 +150,7 @@ fn handle_ns_response(
             ns_domain,
             &query_type,
             &cmd_args.transport_protocol,
+            !&cmd_args.no_recursion,
         ) {
             Ok(records) => {
                 for record in records.answers {
