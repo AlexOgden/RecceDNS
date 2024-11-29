@@ -5,7 +5,7 @@ use indicatif::{ProgressBar, ProgressStyle};
 use super::validation::{self, validate_dns_resolvers};
 use crate::{dns::protocol::QueryType, network::types::TransportProtocol, timing::delay::Delay};
 
-const PROGRESS_TICK_CHARS: &str = "⠢⢁⡈⠔";
+const PROGRESS_TICK_CHARS: &str = "/|\\- ";
 
 /// Operation modes for the program
 #[derive(ValueEnum, Clone, Debug, PartialEq, Eq)]

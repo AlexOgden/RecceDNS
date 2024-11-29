@@ -7,7 +7,8 @@ mod timing;
 use anyhow::{ensure, Result};
 use io::{cli::OperationMode, validation::filter_working_dns_resolvers};
 
-fn main() -> Result<()> {
+#[tokio::main]
+async fn main() -> Result<()> {
     let cmd_args = io::cli::get_parsed_args();
 
     if !cmd_args.no_welcome {
@@ -33,7 +34,7 @@ fn main() -> Result<()> {
         OperationMode::BasicEnumeration => {
             modes::basic_enumerator::enumerate_records(&cmd_args, &dns_resolvers)
         }
-        OperationMode::CertSearch => modes::cert_search::search_certificates(&cmd_args),
+        OperationMode::CertSearch => modes::cert_search::search_certificates(&cmd_args).await,
         OperationMode::SubdomainEnumeration => {
             modes::subdomain_enumerator::enumerate_subdomains(&cmd_args, &dns_resolvers)
         }

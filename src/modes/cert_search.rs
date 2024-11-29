@@ -1,4 +1,5 @@
 use std::collections::HashSet;
+use std::time::Duration;
 
 use crate::io::{
     cli::CommandArgs,
@@ -6,6 +7,8 @@ use crate::io::{
 };
 use anyhow::Result;
 use colored::Colorize;
+use indicatif::{ProgressBar, ProgressStyle};
+use reqwest::Client;
 use thiserror::Error;
 
 const CRTSH_URL: &str = "https://crt.sh/json?q=";
@@ -22,18 +25,32 @@ pub enum SearchError {
     EmptyJsonData,
 }
 
-pub fn search_certificates(cmd_args: &CommandArgs) -> Result<()> {
+pub async fn search_certificates(cmd_args: &CommandArgs) -> Result<()> {
     println!(
         "Searching subdomain certificates for target domain: {}\n",
         cmd_args.target.bold().bright_blue()
     );
 
-    let mut results_output = cmd_args.json.as_ref().map(|_| CertSearchOutput::new(cmd_args.target.clone()));
+    let mut results_output = cmd_args
+        .json
+        .as_ref()
+        .map(|_| CertSearchOutput::new(cmd_args.target.clone()));
     let target_domain = cmd_args.target.as_str();
 
-    match get_results_json(target_domain) {
+    let spinner = ProgressBar::new_spinner();
+    spinner.set_style(
+        ProgressStyle::default_spinner()
+            .template("[{spinner:.cyan}] Fetching certificate records...")
+            .expect("Invalid template")
+            .tick_chars("/|\\- "),
+    );
+    spinner.enable_steady_tick(Duration::from_millis(100));
+
+    match get_results_json(target_domain).await {
         Ok(data) => {
+            spinner.set_message("Searching...");
             let subdomains = get_subdomains(&data, target_domain)?;
+            spinner.finish_and_clear();
 
             for subdomain in &subdomains {
                 println!(
@@ -58,18 +75,22 @@ pub fn search_certificates(cmd_args: &CommandArgs) -> Result<()> {
             );
 
             if let Some(output) = results_output {
-                let json_path = cmd_args.json.clone().ok_or_else(|| anyhow::anyhow!("JSON output path is missing."))?;
+                let json_path = cmd_args
+                    .json
+                    .clone()
+                    .ok_or_else(|| anyhow::anyhow!("JSON output path is missing."))?;
                 output.write_to_file(&json_path)?;
             }
 
             Ok(())
         }
         Err(error) => {
+            spinner.finish_and_clear();
             if matches!(error, SearchError::EmptyJsonData) {
                 println!(
                     "[{}] No subdomains found for domain: {}",
                     "~".green(),
-                    target_domain
+                    target_domain.bold()
                 );
                 Ok(())
             } else {
@@ -80,11 +101,19 @@ pub fn search_certificates(cmd_args: &CommandArgs) -> Result<()> {
     }
 }
 
-fn get_results_json(target_domain: &str) -> Result<serde_json::Value, SearchError> {
+async fn get_results_json(target_domain: &str) -> Result<serde_json::Value, SearchError> {
     let url = format!("{CRTSH_URL}{target_domain}");
+    let client = Client::new();
+    let response = client
+        .get(&url)
+        .send()
+        .await
+        .map_err(SearchError::HttpRequestError)?;
 
-    let response = reqwest::blocking::get(&url).map_err(SearchError::HttpRequestError)?;
-    let json: serde_json::Value = response.json()?;
+    let json: serde_json::Value = response
+        .json()
+        .await
+        .map_err(SearchError::HttpRequestError)?;
 
     if json.as_array().map_or(true, Vec::is_empty) {
         return Err(SearchError::EmptyJsonData);
@@ -111,6 +140,16 @@ mod tests {
     use serde_json::json;
 
     use super::*;
+
+    #[tokio::test]
+    async fn test_get_results_json_success() {
+        let target_domain = "example.com";
+        let result = get_results_json(target_domain).await;
+
+        assert!(result.is_ok());
+        let json = result.unwrap();
+        assert!(json.is_array());
+    }
 
     #[test]
     fn test_get_subdomains_with_valid_json() {
@@ -145,17 +184,5 @@ mod tests {
         let result = get_subdomains(&sample_json, target_domain);
 
         assert!(result.unwrap().is_empty());
-    }
-
-    #[test]
-    fn test_get_results_json_success() {
-        // This test assumes that the external API is reachable.
-        // For real unit tests, consider mocking the HTTP request.
-        let target_domain = "example.com";
-        let result = get_results_json(target_domain);
-
-        assert!(result.is_ok());
-        let json = result.unwrap();
-        assert!(json.is_array());
     }
 }
