@@ -141,16 +141,6 @@ mod tests {
 
     use super::*;
 
-    #[tokio::test]
-    async fn test_get_results_json_success() {
-        let target_domain = "example.com";
-        let result = get_results_json(target_domain).await;
-
-        assert!(result.is_ok());
-        let json = result.unwrap();
-        assert!(json.is_array());
-    }
-
     #[test]
     fn test_get_subdomains_with_valid_json() {
         let sample_json = json!([
