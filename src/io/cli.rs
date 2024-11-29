@@ -16,6 +16,8 @@ pub enum OperationMode {
     SubdomainEnumeration,
     #[value(name = "r")]
     ReverseIp,
+    #[value(name = "c")]
+    CertSearch,
 }
 
 /// Command-line arguments for the program

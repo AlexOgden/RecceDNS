@@ -14,8 +14,14 @@ fn main() -> Result<()> {
         io::cli::print_ascii_art();
     }
 
+    let no_dns_check = match cmd_args.operation_mode {
+        OperationMode::CertSearch => true,
+        _ => cmd_args.no_dns_check,
+    };
+
     let dns_resolvers = filter_working_dns_resolvers(
-        &cmd_args,
+        no_dns_check,
+        &cmd_args.transport_protocol,
         &cmd_args.dns_resolvers.split(',').collect::<Vec<&str>>(),
     );
     ensure!(
@@ -27,6 +33,7 @@ fn main() -> Result<()> {
         OperationMode::BasicEnumeration => {
             modes::basic_enumerator::enumerate_records(&cmd_args, &dns_resolvers)
         }
+        OperationMode::CertSearch => modes::cert_search::search_certificates(&cmd_args),
         OperationMode::SubdomainEnumeration => {
             modes::subdomain_enumerator::enumerate_subdomains(&cmd_args, &dns_resolvers)
         }
