@@ -28,15 +28,10 @@ pub fn search_certificates(cmd_args: &CommandArgs) -> Result<()> {
         cmd_args.target.bold().bright_blue()
     );
 
-    let mut results_output = cmd_args
-        .json
-        .as_ref()
-        .map(|_| CertSearchOutput::new(cmd_args.target.clone()));
-
+    let mut results_output = cmd_args.json.as_ref().map(|_| CertSearchOutput::new(cmd_args.target.clone()));
     let target_domain = cmd_args.target.as_str();
-    let api_response = get_results_json(target_domain);
 
-    match api_response {
+    match get_results_json(target_domain) {
         Ok(data) => {
             let subdomains = get_subdomains(&data, target_domain)?;
 
@@ -50,7 +45,9 @@ pub fn search_certificates(cmd_args: &CommandArgs) -> Result<()> {
             }
 
             if let Some(output) = &mut results_output {
-                subdomains.iter().for_each(|r| output.add_result(r.clone()));
+                for subdomain in &subdomains {
+                    output.add_result(subdomain.clone());
+                }
             }
 
             println!(
@@ -61,11 +58,8 @@ pub fn search_certificates(cmd_args: &CommandArgs) -> Result<()> {
             );
 
             if let Some(output) = results_output {
-                if let Some(json_path) = &cmd_args.json {
-                    output.write_to_file(json_path)?;
-                } else {
-                    return Err(anyhow::anyhow!("JSON output path is missing."));
-                }
+                let json_path = cmd_args.json.clone().ok_or_else(|| anyhow::anyhow!("JSON output path is missing."))?;
+                output.write_to_file(&json_path)?;
             }
 
             Ok(())
