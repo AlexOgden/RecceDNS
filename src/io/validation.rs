@@ -2,9 +2,10 @@ use anyhow::{anyhow, ensure, Context, Result};
 use regex::Regex;
 use std::net::{IpAddr, Ipv4Addr};
 
-use crate::{dns::protocol::QueryType, network::net_check};
-
-use super::cli::CommandArgs;
+use crate::{
+    dns::protocol::QueryType,
+    network::{net_check, types::TransportProtocol},
+};
 
 lazy_static::lazy_static! {
     static ref DOMAIN_REGEX: Regex =
@@ -95,15 +96,15 @@ pub fn validate_ipv4(ip: &str) -> Result<String> {
 }
 
 pub fn filter_working_dns_resolvers<'a>(
-    cmd_args: &CommandArgs,
+    no_dns_check: bool,
+    transport_protocol: &TransportProtocol,
     dns_resolvers: &[&'a str],
 ) -> Vec<&'a str> {
-    if cmd_args.no_dns_check {
+    if no_dns_check {
         return dns_resolvers.to_vec();
     }
 
-    let working_resolvers =
-        net_check::check_dns_resolvers(dns_resolvers, &cmd_args.transport_protocol);
+    let working_resolvers = net_check::check_dns_resolvers(dns_resolvers, transport_protocol);
 
     dns_resolvers
         .iter()

@@ -6,7 +6,11 @@ use crate::{
         protocol::{QueryType, RData, ResourceRecord},
         resolver::resolve_domain,
     },
-    io::{cli::CommandArgs, json::EnumerationOutput, validation::get_correct_query_types},
+    io::{
+        cli::CommandArgs,
+        json::{DnsEnumerationOutput, Output},
+        validation::get_correct_query_types,
+    },
     timing::stats::QueryTimer,
 };
 use anyhow::Result;
@@ -29,7 +33,7 @@ pub fn enumerate_records(cmd_args: &CommandArgs, dns_resolvers: &[&str]) -> Resu
     );
 
     let mut data_output = if cmd_args.json.is_some() {
-        Some(EnumerationOutput::new(cmd_args.target.clone()))
+        Some(DnsEnumerationOutput::new(cmd_args.target.clone()))
     } else {
         None
     };
@@ -111,7 +115,7 @@ fn process_response(
     seen_cnames: &mut HashSet<String>,
     response: &[ResourceRecord],
     resolver: &str,
-    data_output: &mut Option<EnumerationOutput>,
+    data_output: &mut Option<DnsEnumerationOutput>,
     cmd_args: &CommandArgs,
 ) -> Result<()> {
     for record in response {
