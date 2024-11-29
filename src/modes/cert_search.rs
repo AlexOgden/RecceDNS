@@ -92,6 +92,7 @@ fn get_results_json(target_domain: &str) -> Result<serde_json::Value, SearchErro
 
     Ok(json)
 }
+
 fn get_subdomains(json: &serde_json::Value, target_domain: &str) -> Result<HashSet<String>> {
     let names: HashSet<String> = json
         .as_array()
