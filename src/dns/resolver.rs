@@ -183,18 +183,9 @@ fn build_dns_query(
 
     // Reverse the IP address for PTR queries
     let domain = if query_type == &QueryType::PTR {
-        domain.parse::<Ipv4Addr>().map_or_else(
-            |_| domain.to_owned(),
-            |ip| {
-                ip.octets()
-                    .iter()
-                    .rev()
-                    .map(ToString::to_string)
-                    .collect::<Vec<_>>()
-                    .join(".")
-                    + ".in-addr.arpa"
-            },
-        )
+        domain
+            .parse::<Ipv4Addr>()
+            .map_or_else(|_| domain.to_owned(), ip_to_ptr)
     } else {
         domain.to_owned()
     };
@@ -208,6 +199,16 @@ fn build_dns_query(
         .push(DnsQuestion::new(domain, query_type.clone()));
 
     Ok(packet)
+}
+
+fn ip_to_ptr(ip: Ipv4Addr) -> String {
+    ip.octets()
+        .iter()
+        .rev()
+        .map(ToString::to_string)
+        .collect::<Vec<_>>()
+        .join(".")
+        + ".in-addr.arpa"
 }
 
 fn parse_dns_response(response: &[u8]) -> Result<DnsPacket, DnsError> {
