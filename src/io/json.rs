@@ -1,15 +1,61 @@
-use crate::dns::protocol::ResourceRecord;
 use anyhow::Result;
 use colored::Colorize;
 use serde::Serialize;
+use std::fs::File;
+use std::path::Path;
+
+use crate::dns::protocol::ResourceRecord;
+
+pub trait Output {
+    fn write_to_file(&self, output_file: &str) -> Result<()>;
+}
 
 #[derive(Serialize)]
-pub struct EnumerationOutput {
+pub struct DnsEnumerationOutput {
     pub target_domain: String,
     pub results: Vec<ResourceRecord>,
 }
 
-impl EnumerationOutput {
+#[derive(Serialize)]
+pub struct CertSearchOutput {
+    pub target_domain: String,
+    pub subdomains: Vec<String>,
+}
+
+impl Output for DnsEnumerationOutput {
+    fn write_to_file(&self, output_file: &str) -> Result<()> {
+        write_json(&self, output_file)
+    }
+}
+
+impl Output for CertSearchOutput {
+    fn write_to_file(&self, output_file: &str) -> Result<()> {
+        write_json(&self, output_file)
+    }
+}
+
+fn write_json<T: Serialize>(data: &T, output_file: &str) -> Result<()> {
+    let output_file = if Path::new(output_file)
+        .extension()
+        .map_or(false, |ext| ext.eq_ignore_ascii_case("json"))
+    {
+        output_file.to_string()
+    } else {
+        format!("{output_file}.json")
+    };
+
+    let file = File::create(&output_file)?;
+    serde_json::to_writer_pretty(file, data)?;
+
+    println!(
+        "[{}] JSON output written to: {}",
+        "~".green(),
+        output_file.bold().bright_yellow()
+    );
+    Ok(())
+}
+
+impl DnsEnumerationOutput {
     pub const fn new(target_domain: String) -> Self {
         Self {
             target_domain,
@@ -20,26 +66,17 @@ impl EnumerationOutput {
     pub fn add_result(&mut self, result: ResourceRecord) {
         self.results.push(result);
     }
+}
 
-    pub fn write_to_file(&self, output_file: &str) -> Result<()> {
-        let output_file = if std::path::Path::new(output_file)
-            .extension()
-            .map_or(false, |ext| ext.eq_ignore_ascii_case("json"))
-        {
-            output_file.to_string()
-        } else {
-            format!("{output_file}.json")
-        };
+impl CertSearchOutput {
+    pub const fn new(target_domain: String) -> Self {
+        Self {
+            target_domain,
+            subdomains: Vec::new(),
+        }
+    }
 
-        let output_file_path = output_file.clone();
-        let file = std::fs::File::create(output_file)?;
-        serde_json::to_writer_pretty(file, self)?;
-
-        println!(
-            "[{}] JSON output written to: {}",
-            "~".green(),
-            output_file_path.bold().bright_yellow()
-        );
-        Ok(())
+    pub fn add_result(&mut self, subdomain: String) {
+        self.subdomains.push(subdomain);
     }
 }

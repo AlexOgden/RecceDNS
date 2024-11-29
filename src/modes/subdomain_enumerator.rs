@@ -13,10 +13,11 @@ use crate::dns::{
     resolver_selector,
     resolver_selector::ResolverSelector,
 };
+use crate::io::json::Output;
 use crate::io::{
     cli::{self, CommandArgs},
     interrupt,
-    json::EnumerationOutput,
+    json::DnsEnumerationOutput,
     validation::get_correct_query_types,
     wordlist,
 };
@@ -30,7 +31,7 @@ struct EnumerationState {
     all_query_responses: Vec<ResourceRecord>,
     failed_subdomains: HashSet<String>,
     found_subdomain_count: u32,
-    results_output: Option<EnumerationOutput>,
+    results_output: Option<DnsEnumerationOutput>,
 }
 
 pub fn enumerate_subdomains(cmd_args: &CommandArgs, dns_resolver_list: &[&str]) -> Result<()> {
@@ -58,7 +59,7 @@ pub fn enumerate_subdomains(cmd_args: &CommandArgs, dns_resolver_list: &[&str]) 
         results_output: cmd_args
             .json
             .as_ref()
-            .map(|_| EnumerationOutput::new(cmd_args.target.clone())),
+            .map(|_| DnsEnumerationOutput::new(cmd_args.target.clone())),
     };
 
     for (index, subdomain) in subdomain_list.iter().enumerate() {
