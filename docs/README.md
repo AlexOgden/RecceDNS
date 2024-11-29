@@ -21,6 +21,7 @@ I originally started working on this project to learn Rust, improve on network p
 	- Use an optional delay between queries.
 - SRV enumeration, use a wordlist with the query argument set to SRV to find common SRV records.
 - Reverse IP PTR for a single IP address, CIDR notation, or range.
+- Search for subdomains based on past TLS certificates using crt.sh.
 - Coloured output with progress reporting on bruteforce subdomain enumeration.
 - Output results to a JSON file.
 
@@ -54,6 +55,7 @@ After building, you can find the executable in the `target/release` directory.
   - `b`: Basic Enumeration
   - `s`: Subdomain Enumeration
   - `r`: Reverse PTR IP
+  - `c`: Certificate Search
 
 - `-t, --target <TARGET>`: The target base domain name or IP address (single, CIDR, or range). Examples: `google.com`, `192.168.2.3`, `192.168.2.0/24`, `192.168.2.1-192.168.2.230`.
 
@@ -93,11 +95,11 @@ After building, you can find the executable in the `target/release` directory.
 
 ## Example Usage
 
-#### Basic Enumeration
+### Basic Enumeration
 
 `reccedns -m b -d 1.1.1.1 -t github.com`
 
-#### Bruteforce Subdomains
+### Bruteforce Subdomains
 
 Any Records
 
@@ -127,7 +129,7 @@ With random-range delay
 
 `reccedns -m s -d 1.1.1.1 -w .\subdomains-top1million-5000.txt -t github.com --delay 50-900`
 
-#### Reverse PTR IP Search
+### Reverse PTR IP Search
 
 Single IP Address
 
@@ -140,3 +142,7 @@ CIDR Notation
 IP Range
 
 `reccedns -m r -d 1.1.1.1 -t 192.168.0.0-192.168.1.254`
+
+### Certificate Search
+
+`recce dns -m c -t github.com`
