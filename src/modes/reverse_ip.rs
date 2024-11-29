@@ -24,14 +24,14 @@ use crate::{
 };
 
 pub fn reverse_ip(cmd_args: &CommandArgs, dns_resolver_list: &[&str]) -> Result<()> {
+    let interrupted = interrupt::initialize_interrupt_handler()?;
+
     let target_ips = parse_ip(&cmd_args.target)?;
     let total_ips = target_ips.len() as u64;
 
     let mut resolver_selector = resolver_selector::get_selector(cmd_args, dns_resolver_list);
     let mut query_timer = QueryTimer::new(!cmd_args.no_query_stats);
     let mut found_count = 0;
-
-    let interrupted = interrupt::initialize_interrupt_handler()?;
 
     let progress_bar = cli::setup_progress_bar(total_ips);
     progress_bar.set_message("Performing reverse PTR lookup...");

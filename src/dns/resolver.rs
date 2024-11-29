@@ -1,9 +1,4 @@
 use anyhow::{Context, Result};
-
-use crate::dns::error::DnsError;
-use crate::dns::protocol::QueryType;
-use crate::io::packet_buffer::PacketBuffer;
-use crate::network::types::TransportProtocol;
 use lazy_static::lazy_static;
 use rand::Rng;
 use std::io::{Read, Write};
@@ -11,7 +6,12 @@ use std::net::{Ipv4Addr, TcpStream, UdpSocket};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use super::protocol::{DnsPacket, DnsQuestion, ResultCode};
+use crate::dns::{
+    error::DnsError,
+    protocol::{DnsPacket, DnsQuestion, QueryType, ResultCode},
+};
+use crate::io::packet_buffer::PacketBuffer;
+use crate::network::types::TransportProtocol;
 
 lazy_static! {
     static ref UDP_SOCKET: Mutex<Option<Arc<UdpSocket>>> = Mutex::new(None);
@@ -183,18 +183,9 @@ fn build_dns_query(
 
     // Reverse the IP address for PTR queries
     let domain = if query_type == &QueryType::PTR {
-        domain.parse::<Ipv4Addr>().map_or_else(
-            |_| domain.to_owned(),
-            |ip| {
-                ip.octets()
-                    .iter()
-                    .rev()
-                    .map(ToString::to_string)
-                    .collect::<Vec<_>>()
-                    .join(".")
-                    + ".in-addr.arpa"
-            },
-        )
+        domain
+            .parse::<Ipv4Addr>()
+            .map_or_else(|_| domain.to_owned(), ip_to_ptr)
     } else {
         domain.to_owned()
     };
@@ -208,6 +199,16 @@ fn build_dns_query(
         .push(DnsQuestion::new(domain, query_type.clone()));
 
     Ok(packet)
+}
+
+fn ip_to_ptr(ip: Ipv4Addr) -> String {
+    ip.octets()
+        .iter()
+        .rev()
+        .map(ToString::to_string)
+        .collect::<Vec<_>>()
+        .join(".")
+        + ".in-addr.arpa"
 }
 
 fn parse_dns_response(response: &[u8]) -> Result<DnsPacket, DnsError> {
