@@ -105,3 +105,57 @@ fn get_subdomains(json: &serde_json::Value, target_domain: &str) -> Result<HashS
 
     Ok(names)
 }
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::*;
+
+    #[test]
+    fn test_get_subdomains_with_valid_json() {
+        let sample_json = json!([
+            {"common_name": "sub1.example.com"},
+            {"common_name": "sub2.example.com"},
+            {"common_name": "example.com"}
+        ]);
+
+        let target_domain = "example.com";
+        let subdomains = get_subdomains(&sample_json, target_domain).unwrap();
+
+        let mut expected = HashSet::new();
+        expected.insert("sub1".to_string());
+        expected.insert("sub2".to_string());
+
+        assert_eq!(subdomains, expected);
+    }
+
+    #[test]
+    fn test_get_subdomains_with_invalid_json() {
+        let invalid_json = serde_json::Value::String("invalid".to_string());
+        let target_domain = "example.com";
+        let result = get_subdomains(&invalid_json, target_domain);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_get_subdomains_with_empty_json() {
+        let sample_json = json!([]);
+        let target_domain = "example.com";
+        let result = get_subdomains(&sample_json, target_domain);
+
+        assert!(result.unwrap().is_empty());
+    }
+
+    #[test]
+    fn test_get_results_json_success() {
+        // This test assumes that the external API is reachable.
+        // For real unit tests, consider mocking the HTTP request.
+        let target_domain = "example.com";
+        let result = get_results_json(target_domain);
+
+        assert!(result.is_ok());
+        let json = result.unwrap();
+        assert!(json.is_array());
+    }
+}
