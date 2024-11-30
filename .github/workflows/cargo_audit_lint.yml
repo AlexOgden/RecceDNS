@@ -2,7 +2,7 @@ name: Lint and Audit
 
 on:
   push:
-    branches: [ "master" ]
+    branches: [ "master", "development" ]
     paths:
       - '**/*.rs'
       - 'Cargo.toml'

@@ -38,6 +38,14 @@ jobs:
         restore-keys: |
           ${{ runner.os }}-rust-toolchain-
 
+    - name: Cache target directory
+      uses: actions/cache@v3
+      with:
+        path: target
+        key: ${{ runner.os }}-cargo-target-${{ hashFiles('**/Cargo.lock') }}
+        restore-keys: |
+          ${{ runner.os }}-cargo-target-
+
     - name: Set up Rust
       uses: actions-rs/toolchain@v1
       with:
