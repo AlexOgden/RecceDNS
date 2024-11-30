@@ -8,7 +8,7 @@ use crate::io::{
 use anyhow::Result;
 use colored::Colorize;
 use indicatif::{ProgressBar, ProgressStyle};
-use reqwest::Client;
+use reqwest::{Client, StatusCode};
 use thiserror::Error;
 
 const CRTSH_URL: &str = "https://crt.sh/json?q=";
@@ -17,6 +17,9 @@ const CRTSH_URL: &str = "https://crt.sh/json?q=";
 pub enum SearchError {
     #[error("HTTP request failed: {0}")]
     HttpRequestError(#[from] reqwest::Error),
+
+    #[error("Received non-success status code: {0}")]
+    NonSuccessStatus(StatusCode),
 
     #[error("Failed to parse JSON response: {0}")]
     JsonParseError(#[from] serde_json::Error),
@@ -81,8 +84,6 @@ pub async fn search_certificates(cmd_args: &CommandArgs) -> Result<()> {
                     .ok_or_else(|| anyhow::anyhow!("JSON output path is missing."))?;
                 output.write_to_file(&json_path)?;
             }
-
-            Ok(())
         }
         Err(error) => {
             spinner.finish_and_clear();
@@ -92,13 +93,12 @@ pub async fn search_certificates(cmd_args: &CommandArgs) -> Result<()> {
                     "~".green(),
                     target_domain.bold()
                 );
-                Ok(())
             } else {
-                eprintln!("[{}] API Request failed! {}", "!".red(), error);
-                Err(error.into())
+                eprintln!("[{}] {}", "!".red(), error);
             }
         }
     }
+    Ok(())
 }
 
 async fn get_results_json(target_domain: &str) -> Result<serde_json::Value, SearchError> {
@@ -109,6 +109,11 @@ async fn get_results_json(target_domain: &str) -> Result<serde_json::Value, Sear
         .send()
         .await
         .map_err(SearchError::HttpRequestError)?;
+
+    let status = response.status();
+    if !status.is_success() {
+        return Err(SearchError::NonSuccessStatus(status));
+    }
 
     let json: serde_json::Value = response
         .json()
