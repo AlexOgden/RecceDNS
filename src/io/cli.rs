@@ -115,9 +115,11 @@ impl CommandArgs {
         if self.operation_mode == OperationMode::SubdomainEnumeration && self.wordlist.is_none() {
             return Err("The argument '--wordlist <WORDLIST>' is required when the operation mode is 'subdomain'".to_string());
         }
+
         if self.quiet && self.json.is_none() {
             return Err("The argument '--quiet' requires '--json <OUTPUT_FILE>'".to_string());
         }
+
         Ok(())
     }
 }
