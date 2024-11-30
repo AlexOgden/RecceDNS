@@ -15,10 +15,8 @@ async fn main() -> Result<()> {
         io::cli::print_ascii_art();
     }
 
-    let no_dns_check = match cmd_args.operation_mode {
-        OperationMode::CertSearch => true,
-        _ => cmd_args.no_dns_check,
-    };
+    let no_dns_check =
+        cmd_args.operation_mode == OperationMode::CertSearch || cmd_args.no_dns_check;
 
     let dns_resolvers = filter_working_dns_resolvers(
         no_dns_check,
