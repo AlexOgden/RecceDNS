@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use clap::{Parser, ValueEnum};
 use colored::Colorize;
 use indicatif::{ProgressBar, ProgressStyle};
@@ -171,7 +173,21 @@ pub fn setup_progress_bar(total: u64) -> ProgressBar {
     pb.set_style(style);
     pb.set_prefix(format!("[{}/{}]", 0, total));
     pb.set_message("Enumerating...");
+    pb.enable_steady_tick(Duration::from_millis(100));
     pb
+}
+
+// Sets up a basic spinner progress bar
+pub fn setup_basic_spinner() -> ProgressBar {
+    let spinner = ProgressBar::new_spinner();
+    spinner.set_style(
+        ProgressStyle::default_spinner()
+            .template("[{spinner:.cyan}] Fetching certificate records...")
+            .expect("Invalid template")
+            .tick_chars("/|\\- "),
+    );
+    spinner.enable_steady_tick(Duration::from_millis(100));
+    spinner
 }
 
 /// Updates the progress bar based on the current index and total
