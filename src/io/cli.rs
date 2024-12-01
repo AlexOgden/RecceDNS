@@ -177,6 +177,19 @@ pub fn setup_progress_bar(total: u64) -> ProgressBar {
     pb
 }
 
+// Sets up a basic spinner progress bar
+pub fn setup_basic_spinner() -> ProgressBar {
+    let spinner = ProgressBar::new_spinner();
+    spinner.set_style(
+        ProgressStyle::default_spinner()
+            .template("[{spinner:.cyan}] Fetching certificate records...")
+            .expect("Invalid template")
+            .tick_chars("/|\\- "),
+    );
+    spinner.enable_steady_tick(Duration::from_millis(100));
+    spinner
+}
+
 /// Updates the progress bar based on the current index and total
 pub fn update_progress_bar(pb: &ProgressBar, index: usize, total: u64) {
     pb.set_prefix(format!("[{}/{}]", index + 1, total));

@@ -1,18 +1,17 @@
 use std::collections::HashSet;
-use std::time::Duration;
 
 use crate::io::{
-    cli::CommandArgs,
+    cli::{self, CommandArgs},
     json::{CertSearchOutput, Output},
 };
 use anyhow::Result;
 use colored::Colorize;
-use indicatif::{ProgressBar, ProgressStyle};
 use reqwest::{Client, StatusCode};
 use serde_json::Value;
 use thiserror::Error;
 
 const CRTSH_URL: &str = "https://crt.sh/json?q=";
+
 lazy_static::lazy_static! {
     static ref CLIENT: Client = Client::new();
 }
@@ -44,61 +43,61 @@ pub async fn search_certificates(cmd_args: &CommandArgs) -> Result<()> {
         .map(|_| CertSearchOutput::new(cmd_args.target.clone()));
     let target_domain = cmd_args.target.as_str();
 
-    let spinner = ProgressBar::new_spinner();
-    spinner.set_style(
-        ProgressStyle::default_spinner()
-            .template("[{spinner:.cyan}] Fetching certificate records...")
-            .expect("Invalid template")
-            .tick_chars("/|\\- "),
-    );
-    spinner.enable_steady_tick(Duration::from_millis(100));
+    let spinner = cli::setup_basic_spinner();
 
-    match get_results_json(target_domain).await {
-        Ok(data) => {
-            spinner.set_message("Searching...");
-            let subdomains = get_subdomains(&data, target_domain)?;
-            spinner.finish_and_clear();
+    let max_retries = if cmd_args.no_retry { 1 } else { 3 };
 
-            for subdomain in &subdomains {
-                println!(
-                    "[{}] {}.{}",
-                    "+".green(),
-                    subdomain.cyan().bold(),
-                    target_domain.blue().italic()
-                );
-            }
+    for attempt in 0..=max_retries {
+        match get_results_json(target_domain).await {
+            Ok(data) => {
+                spinner.set_message("Searching...");
+                let subdomains = get_subdomains(&data, target_domain)?;
+                spinner.finish_and_clear();
 
-            if let Some(output) = &mut results_output {
                 for subdomain in &subdomains {
-                    output.add_result(subdomain.clone());
+                    println!(
+                        "[{}] {}.{}",
+                        "+".green(),
+                        subdomain.cyan().bold(),
+                        target_domain.blue().italic()
+                    );
                 }
-            }
 
-            println!(
-                "\n[{}] Found {} subdomains for target domain: {}",
-                "+".green(),
-                subdomains.len(),
-                target_domain
-            );
+                if let Some(output) = &mut results_output {
+                    for subdomain in &subdomains {
+                        output.add_result(subdomain.clone());
+                    }
+                }
 
-            if let Some(output) = results_output {
-                let json_path = cmd_args
-                    .json
-                    .clone()
-                    .ok_or_else(|| anyhow::anyhow!("JSON output path is missing."))?;
-                output.write_to_file(&json_path)?;
-            }
-        }
-        Err(error) => {
-            spinner.finish_and_clear();
-            if matches!(error, SearchError::EmptyJsonData) {
                 println!(
-                    "[{}] No subdomains found for domain: {}",
-                    "~".green(),
-                    target_domain.bold()
+                    "\n[{}] Found {} subdomains for target domain: {}",
+                    "+".green(),
+                    subdomains.len(),
+                    target_domain
                 );
-            } else {
-                eprintln!("[{}] {}", "!".red(), error);
+
+                if let Some(output) = results_output {
+                    let json_path = cmd_args
+                        .json
+                        .clone()
+                        .ok_or_else(|| anyhow::anyhow!("JSON output path is missing."))?;
+                    output.write_to_file(&json_path)?;
+                }
+                break;
+            }
+            Err(error) => {
+                spinner.finish_and_clear();
+                if attempt < max_retries && matches!(error, SearchError::NonSuccessStatus(_)) {
+                    println!(
+                        "[{}] Attempt {}/{} failed: {}. Retrying...",
+                        "!".red(),
+                        attempt,
+                        max_retries,
+                        error
+                    );
+                } else if attempt >= max_retries {
+                    eprintln!("[{}] {}", "!".red(), error);
+                }
             }
         }
     }
