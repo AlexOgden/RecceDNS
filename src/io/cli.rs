@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use clap::{Parser, ValueEnum};
 use colored::Colorize;
 use indicatif::{ProgressBar, ProgressStyle};
@@ -171,6 +173,7 @@ pub fn setup_progress_bar(total: u64) -> ProgressBar {
     pb.set_style(style);
     pb.set_prefix(format!("[{}/{}]", 0, total));
     pb.set_message("Enumerating...");
+    pb.enable_steady_tick(Duration::from_millis(100));
     pb
 }
 
