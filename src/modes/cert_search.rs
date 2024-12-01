@@ -9,9 +9,13 @@ use anyhow::Result;
 use colored::Colorize;
 use indicatif::{ProgressBar, ProgressStyle};
 use reqwest::{Client, StatusCode};
+use serde_json::Value;
 use thiserror::Error;
 
 const CRTSH_URL: &str = "https://crt.sh/json?q=";
+lazy_static::lazy_static! {
+    static ref CLIENT: Client = Client::new();
+}
 
 #[derive(Error, Debug)]
 pub enum SearchError {
@@ -101,22 +105,20 @@ pub async fn search_certificates(cmd_args: &CommandArgs) -> Result<()> {
     Ok(())
 }
 
-async fn get_results_json(target_domain: &str) -> Result<serde_json::Value, SearchError> {
+async fn get_results_json(target_domain: &str) -> Result<Value, SearchError> {
     let url = format!("{CRTSH_URL}{target_domain}");
-    let client = Client::new();
-    let response = client
+    let response = CLIENT
         .get(&url)
         .send()
         .await
         .map_err(SearchError::HttpRequestError)?;
 
-    let status = response.status();
-    if !status.is_success() {
-        return Err(SearchError::NonSuccessStatus(status));
+    if !response.status().is_success() {
+        return Err(SearchError::NonSuccessStatus(response.status()));
     }
 
-    let json: serde_json::Value = response
-        .json()
+    let json = response
+        .json::<Value>()
         .await
         .map_err(SearchError::HttpRequestError)?;
 
