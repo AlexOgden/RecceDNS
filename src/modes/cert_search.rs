@@ -6,13 +6,14 @@ use crate::io::{
 };
 use anyhow::Result;
 use colored::Colorize;
+use lazy_static::lazy_static;
 use reqwest::{Client, StatusCode};
 use serde_json::Value;
 use thiserror::Error;
 
 const CRTSH_URL: &str = "https://crt.sh/json?q=";
 
-lazy_static::lazy_static! {
+lazy_static! {
     static ref CLIENT: Client = Client::new();
 }
 
