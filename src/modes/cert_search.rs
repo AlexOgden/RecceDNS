@@ -6,13 +6,14 @@ use crate::io::{
 };
 use anyhow::Result;
 use colored::Colorize;
+use lazy_static::lazy_static;
 use reqwest::{Client, StatusCode};
 use serde_json::Value;
 use thiserror::Error;
 
 const CRTSH_URL: &str = "https://crt.sh/json?q=";
 
-lazy_static::lazy_static! {
+lazy_static! {
     static ref CLIENT: Client = Client::new();
 }
 
@@ -43,11 +44,11 @@ pub async fn search_certificates(cmd_args: &CommandArgs) -> Result<()> {
         .map(|_| CertSearchOutput::new(cmd_args.target.clone()));
     let target_domain = cmd_args.target.as_str();
 
-    let spinner = cli::setup_basic_spinner();
-
     let max_retries = if cmd_args.no_retry { 1 } else { 3 };
 
-    for attempt in 0..=max_retries {
+    for attempt in 1..=max_retries {
+        let spinner = cli::setup_basic_spinner();
+
         match get_results_json(target_domain).await {
             Ok(data) => {
                 spinner.set_message("Searching...");
@@ -96,7 +97,13 @@ pub async fn search_certificates(cmd_args: &CommandArgs) -> Result<()> {
                         error
                     );
                 } else if attempt >= max_retries {
-                    eprintln!("[{}] {}", "!".red(), error);
+                    println!(
+                        "[{}] Attempt {}/{} failed: {}",
+                        "!".red(),
+                        attempt,
+                        max_retries,
+                        error
+                    );
                 }
             }
         }
