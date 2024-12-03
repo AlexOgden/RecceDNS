@@ -32,11 +32,10 @@ pub fn enumerate_records(cmd_args: &CommandArgs, dns_resolvers: &[&str]) -> Resu
         cmd_args.target.bold().bright_blue()
     );
 
-    let mut data_output = if cmd_args.json.is_some() {
-        Some(DnsEnumerationOutput::new(cmd_args.target.clone()))
-    } else {
-        None
-    };
+    let mut data_output = cmd_args
+        .json
+        .as_ref()
+        .map(|_| DnsEnumerationOutput::new(cmd_args.target.clone()));
 
     let query_types = get_correct_query_types(&cmd_args.query_types, DEFAULT_QUERY_TYPES);
     let resolver = dns_resolvers[0];
