@@ -22,6 +22,7 @@ I originally started working on this project to learn Rust, improve on network p
 - SRV enumeration, use a wordlist with the query argument set to SRV to find common SRV records.
 - Reverse IP PTR for a single IP address, CIDR notation, or range.
 - Search for subdomains based Certificate Transparency using crt.sh.
+- Expland TLD enumeration for a given domain on the full IANA TLD list.
 - Coloured output with progress reporting on bruteforce subdomain enumeration.
 - Output results to a JSON file.
 
@@ -56,6 +57,7 @@ After building, you can find the executable in the `target/release` directory.
   - `s`: Subdomain Enumeration
   - `r`: Reverse PTR IP
   - `c`: Certificate Search
+  - `t`: TLD Expansion
 
 - `-t, --target <TARGET>`: The target base domain name or IP address (single, CIDR, or range). Examples: `google.com`, `192.168.2.3`, `192.168.2.0/24`, `192.168.2.1-192.168.2.230`.
 
@@ -145,4 +147,22 @@ IP Range
 
 ### Certificate Search
 
-`recce dns -m c -t github.com`
+`reccedns -m c -t github.com`
+
+### TLD Expansion
+
+Check 'github' with the full list of IANA TLDs
+
+`reccedns -m t -d 8.8.8.8 -t github.com`
+
+Don't print the actual DNS records
+
+`reccedns -m t -d 8.8.8.8 -t github.com --no-print-records`
+
+Only check using `A` records
+
+`reccedns -m t -d 8.8.8.8 -t github.com -q a`
+
+Check with `A` and `AAAA`
+
+`reccedns -m t -d 8.8.8.8 -t github.com -q a,aaaa`
