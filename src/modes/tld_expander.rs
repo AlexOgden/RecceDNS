@@ -1,6 +1,6 @@
 use anyhow::Result;
 use colored::Colorize;
-use std::{collections::HashSet, string, sync::atomic::Ordering};
+use std::{collections::HashSet, sync::atomic::Ordering};
 
 use crate::{
     dns::{
@@ -147,16 +147,12 @@ async fn attempt_iana_tld_list_fetch(cmd_args: &CommandArgs) -> Result<Vec<Strin
 }
 
 async fn fetch_and_filter_tld_list() -> Result<Vec<String>> {
-    let tld_list: Vec<String> = reqwest::get(IANA_TLD_URL)
-        .await?
-        .text()
-        .await?
+    let response = reqwest::get(IANA_TLD_URL).await?.text().await?;
+    let tld_list = response
         .lines()
         .filter(|line| !line.starts_with('#'))
-        .map(string::ToString::to_string)
-        .map(|s| s.to_lowercase())
+        .map(|s| s.trim().to_lowercase())
         .collect();
-
     Ok(tld_list)
 }
 
