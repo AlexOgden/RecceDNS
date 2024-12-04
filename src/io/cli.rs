@@ -20,6 +20,8 @@ pub enum OperationMode {
     ReverseIp,
     #[value(name = "c")]
     CertSearch,
+    #[value(name = "t")]
+    TldExpansion,
 }
 
 /// Command-line arguments for the program
@@ -159,7 +161,7 @@ pub fn print_ascii_art() {
 
 /// Clears the current line in the terminal
 pub fn clear_line() {
-    println!("\r\x1b[2K");
+    print!("\r\x1b[2K");
 }
 
 /// Sets up the progress bar with the given total
