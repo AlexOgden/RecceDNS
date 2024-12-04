@@ -1,6 +1,6 @@
 use anyhow::Result;
 use colored::Colorize;
-use std::{collections::HashSet, sync::atomic::Ordering};
+use std::{collections::HashSet, sync::atomic::Ordering, thread, time::Duration};
 
 use crate::{
     dns::{
@@ -61,6 +61,12 @@ pub async fn expand_tlds(cmd_args: &CommandArgs, dns_resolver_list: &[&str]) -> 
             &mut results_output,
             cmd_args,
         )?;
+
+        if let Some(delay_ms) = &cmd_args.delay {
+            if let Some(sleep_delay) = delay_ms.get_delay().checked_sub(0) {
+                thread::sleep(Duration::from_millis(sleep_delay));
+            }
+        }
     }
 
     progress_bar.finish_and_clear();
