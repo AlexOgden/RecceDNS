@@ -13,11 +13,10 @@ use crate::dns::{
     resolver_selector,
     resolver_selector::ResolverSelector,
 };
-use crate::io::json::Output;
 use crate::io::{
     cli::{self, CommandArgs},
     interrupt,
-    json::DnsEnumerationOutput,
+    json::{DnsEnumerationOutput, Output},
     validation::get_correct_query_types,
     wordlist,
 };

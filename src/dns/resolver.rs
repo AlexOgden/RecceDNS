@@ -40,7 +40,7 @@ fn initialize_udp_socket() -> Result<Arc<UdpSocket>> {
 }
 
 pub fn resolve_domain(
-    dns_server: &str,
+    dns_resolver: &str,
     domain: &str,
     query_type: &QueryType,
     transport_protocol: &TransportProtocol,
@@ -52,7 +52,7 @@ pub fn resolve_domain(
     let query_result = execute_dns_query(
         &udp_socket,
         transport_protocol,
-        dns_server,
+        dns_resolver,
         domain,
         query_type,
         recursion,
@@ -67,10 +67,10 @@ pub fn resolve_domain(
             }
         }
         ResultCode::NXDOMAIN => Err(DnsError::NonExistentDomain),
-        ResultCode::SERVFAIL => Err(DnsError::NameserverError("Server failed".to_owned())),
-        ResultCode::NOTIMP => Err(DnsError::NameserverError("Not implemented".to_owned())),
+        ResultCode::SERVFAIL => Err(DnsError::NameserverError("Server Failed".to_owned())),
+        ResultCode::NOTIMP => Err(DnsError::NameserverError("Not Implemented".to_owned())),
         ResultCode::REFUSED => Err(DnsError::NameserverError("Refused".to_owned())),
-        ResultCode::FORMERR => Err(DnsError::ProtocolData("Format error".to_owned())),
+        ResultCode::FORMERR => Err(DnsError::ProtocolData("Format Error".to_owned())),
     }
 }
 
