@@ -12,7 +12,9 @@ use crate::{
     },
     io::{
         cli::{self, CommandArgs},
-        interrupt, logger,
+        interrupt,
+        json::{DnsEnumerationOutput, Output},
+        logger,
         validation::get_correct_query_types,
     },
     log_error, log_info, log_success, log_warning,
@@ -28,6 +30,10 @@ pub async fn expand_tlds(cmd_args: &CommandArgs, dns_resolver_list: &[&str]) -> 
 
     let mut resolver_selector = resolver_selector::get_selector(cmd_args, dns_resolver_list);
     let mut query_timer = QueryTimer::new(!cmd_args.no_query_stats);
+    let mut results_output = cmd_args
+        .json
+        .as_ref()
+        .map(|_| DnsEnumerationOutput::new(cmd_args.target.clone()));
 
     let target_fqdn = &cmd_args.target;
     let target_base_domain = target_fqdn.rsplit('.').nth(1).unwrap_or(target_fqdn);
@@ -52,6 +58,7 @@ pub async fn expand_tlds(cmd_args: &CommandArgs, dns_resolver_list: &[&str]) -> 
             &query_fqdn,
             &mut *resolver_selector,
             &mut query_timer,
+            &mut results_output,
             cmd_args,
         )?;
     }
@@ -67,6 +74,9 @@ pub async fn expand_tlds(cmd_args: &CommandArgs, dns_resolver_list: &[&str]) -> 
         }
     }
 
+    if let (Some(output), Some(file)) = (results_output, &cmd_args.json) {
+        output.write_to_file(file)?;
+    }
     Ok(())
 }
 
@@ -74,6 +84,7 @@ fn process_domain(
     domain_name: &str,
     resolver_selector: &mut dyn ResolverSelector,
     query_timer: &mut QueryTimer,
+    results_output: &mut Option<DnsEnumerationOutput>,
     cmd_args: &CommandArgs,
 ) -> Result<()> {
     let resolver = resolver_selector.select()?;
@@ -108,6 +119,12 @@ fn process_domain(
         query_results.sort_by(|a, b| a.data.to_qtype().cmp(&b.data.to_qtype()));
         let response_output = create_query_response_string(&query_results);
         print_query_result(cmd_args, domain_name, resolver, &response_output);
+
+        if let Some(output) = results_output {
+            query_results
+                .iter()
+                .for_each(|r| output.add_result(r.clone()));
+        }
     }
 
     Ok(())
