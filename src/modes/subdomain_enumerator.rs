@@ -182,7 +182,9 @@ fn retry_failed_queries(
     }
 
     if retry_count > 0 {
-        log_warning!("Failed to resolve {retry_count} subdomains after retries");
+        log_warning!(format!(
+            "Failed to resolve {retry_count} subdomains after retries"
+        ));
     }
 
     Ok(())
