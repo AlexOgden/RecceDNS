@@ -1,10 +1,10 @@
 use anyhow::Result;
-use colored::Colorize;
 use serde::Serialize;
 use std::fs::File;
 use std::path::Path;
 
 use crate::dns::protocol::ResourceRecord;
+use crate::log_info;
 
 pub trait Output {
     fn write_to_file(&self, output_file: &str) -> Result<()>;
@@ -47,11 +47,8 @@ fn write_json<T: Serialize>(data: &T, output_file: &str) -> Result<()> {
     let file = File::create(&output_file)?;
     serde_json::to_writer_pretty(file, data)?;
 
-    println!(
-        "[{}] JSON output written to: {}",
-        "~".green(),
-        output_file.bold().bright_yellow()
-    );
+    log_info!(format!("JSON output written to: {}", output_file));
+
     Ok(())
 }
 

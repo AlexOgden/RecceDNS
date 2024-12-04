@@ -11,6 +11,7 @@ use crate::{
         json::{DnsEnumerationOutput, Output},
         validation::get_correct_query_types,
     },
+    log_info,
     timing::stats::QueryTimer,
 };
 use anyhow::Result;
@@ -77,16 +78,19 @@ pub fn enumerate_records(cmd_args: &CommandArgs, dns_resolvers: &[&str]) -> Resu
     }
 
     if let Some(average_query_time) = query_timer.average() {
-        println!(
-            "\n[{}] Average query time: {} ms",
-            "~".green(),
-            average_query_time.to_string().bold().bright_yellow()
+        log_info!(
+            format!(
+                "Average query time: {} ms",
+                average_query_time.to_string().bold().bright_yellow()
+            ),
+            true
         );
     }
 
     if let (Some(output_file), Some(data_output)) = (&cmd_args.json, data_output) {
         data_output.write_to_file(output_file)?;
     }
+
     Ok(())
 }
 

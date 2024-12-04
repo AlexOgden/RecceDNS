@@ -159,11 +159,6 @@ pub fn print_ascii_art() {
     );
 }
 
-/// Clears the current line in the terminal
-pub fn clear_line() {
-    print!("\r\x1b[2K");
-}
-
 /// Sets up the progress bar with the given total
 pub fn setup_progress_bar(total: u64) -> ProgressBar {
     let pb = ProgressBar::new(total);

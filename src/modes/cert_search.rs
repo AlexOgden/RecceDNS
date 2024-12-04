@@ -1,8 +1,11 @@
 use std::collections::HashSet;
 
-use crate::io::{
-    cli::{self, CommandArgs},
-    json::{CertSearchOutput, Output},
+use crate::{
+    io::{
+        cli::{self, CommandArgs},
+        json::{CertSearchOutput, Output},
+    },
+    log_error, log_success,
 };
 use anyhow::Result;
 use colored::Colorize;
@@ -56,12 +59,11 @@ pub async fn search_certificates(cmd_args: &CommandArgs) -> Result<()> {
                 spinner.finish_and_clear();
 
                 for subdomain in &subdomains {
-                    println!(
-                        "[{}] {}.{}",
-                        "+".green(),
+                    log_success!(format!(
+                        "{}.{}",
                         subdomain.cyan().bold(),
                         target_domain.blue().italic()
-                    );
+                    ));
                 }
 
                 if let Some(output) = &mut results_output {
@@ -70,11 +72,13 @@ pub async fn search_certificates(cmd_args: &CommandArgs) -> Result<()> {
                     }
                 }
 
-                println!(
-                    "\n[{}] Found {} subdomains for target domain: {}",
-                    "+".green(),
-                    subdomains.len(),
-                    target_domain
+                log_success!(
+                    format!(
+                        "Found {} subdomains for target domain: {}",
+                        subdomains.len(),
+                        target_domain
+                    ),
+                    true
                 );
 
                 if let Some(output) = results_output {
@@ -89,21 +93,15 @@ pub async fn search_certificates(cmd_args: &CommandArgs) -> Result<()> {
             Err(error) => {
                 spinner.finish_and_clear();
                 if attempt < max_retries && matches!(error, SearchError::NonSuccessStatus(_)) {
-                    println!(
-                        "[{}] Attempt {}/{} failed: {}. Retrying...",
-                        "!".red(),
-                        attempt,
-                        max_retries,
-                        error
-                    );
+                    log_error!(format!(
+                        "Attempt {}/{} failed: {}. Retrying...",
+                        attempt, max_retries, error
+                    ));
                 } else if attempt >= max_retries {
-                    println!(
-                        "[{}] Attempt {}/{} failed: {}",
-                        "!".red(),
-                        attempt,
-                        max_retries,
-                        error
-                    );
+                    log_error!(format!(
+                        "Attempt {}/{} failed: {}.",
+                        attempt, max_retries, error
+                    ));
                 }
             }
         }

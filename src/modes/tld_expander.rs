@@ -5,15 +5,17 @@ use std::{collections::HashSet, sync::atomic::Ordering};
 use crate::{
     dns::{
         error::DnsError,
-        protocol::{QueryType, RData, ResourceRecord},
+        format::create_query_response_string,
+        protocol::{QueryType, ResourceRecord},
         resolver::resolve_domain,
         resolver_selector::{self, ResolverSelector},
     },
     io::{
         cli::{self, CommandArgs},
-        interrupt,
+        interrupt, logger,
         validation::get_correct_query_types,
     },
+    log_error, log_info, log_success, log_warning,
     timing::stats::QueryTimer,
 };
 
@@ -32,16 +34,15 @@ pub async fn expand_tlds(cmd_args: &CommandArgs, dns_resolver_list: &[&str]) -> 
 
     let progress_bar = cli::setup_progress_bar(tld_list.len() as u64);
     progress_bar.set_message("Performing TLD expansion search...");
-    progress_bar.println(format!(
-        "[{}] Performing TLD Expansion for {}\n\n",
-        "~".green(),
+
+    log_info!(format!(
+        "Performing TLD Expansion for {}\n",
         target_base_domain.cyan().italic()
     ));
 
     for (idx, tld) in tld_list.iter().enumerate() {
         if interrupted.load(Ordering::SeqCst) {
-            cli::clear_line();
-            println!("[{}] Interrupted by user", "!".red());
+            log_warning!("Interrupted by user".to_string());
             break;
         }
 
@@ -59,11 +60,10 @@ pub async fn expand_tlds(cmd_args: &CommandArgs, dns_resolver_list: &[&str]) -> 
 
     if let Some(avg) = query_timer.average() {
         if !cmd_args.no_query_stats {
-            println!(
-                "[{}] Average query time: {} ms",
-                "~".green(),
+            log_info!(format!(
+                "Average query time: {} ms",
                 avg.to_string().bold().bright_yellow()
-            );
+            ));
         }
     }
 
@@ -92,7 +92,7 @@ fn process_domain(
         );
         query_timer.stop();
 
-        cli::clear_line();
+        logger::clear_line();
         match query_result {
             Ok(response) => {
                 all_query_results.extend(response.answers);
@@ -124,13 +124,10 @@ async fn attempt_iana_tld_list_fetch(cmd_args: &CommandArgs) -> Result<Vec<Strin
             match fetch_and_filter_tld_list().await {
                 Ok(list) => break list,
                 Err(e) if attempt < max_attempts && !cmd_args.no_retry => {
-                    eprintln!(
-                        "[{}] Attempt {}/{} failed: {}. Retrying...",
-                        "!".red(),
-                        attempt,
-                        max_attempts,
-                        e
-                    );
+                    log_error!(format!(
+                        "Attempt {}/{} failed: {}. Retrying...",
+                        attempt, max_attempts, e
+                    ));
                     attempt += 1;
                 }
                 Err(e) => return Err(e),
@@ -138,11 +135,10 @@ async fn attempt_iana_tld_list_fetch(cmd_args: &CommandArgs) -> Result<Vec<Strin
         }
     };
     spinner.finish_and_clear();
-    println!(
-        "[{}] Fetched IANA TLD list with {} TLDs",
-        "+".green(),
+    log_success!(format!(
+        "Fetched IANA TLD list with {} TLDs",
         tld_list.len()
-    );
+    ));
     Ok(tld_list)
 }
 
@@ -156,65 +152,13 @@ async fn fetch_and_filter_tld_list() -> Result<Vec<String>> {
     Ok(tld_list)
 }
 
-fn create_query_response_string(query_result: &[ResourceRecord]) -> String {
-    let query_responses: String = query_result
-        .iter()
-        .map(|response| {
-            let query_type_formatted = response.data.to_qtype().to_string().bold();
-            match &response.data {
-                RData::A(record) => format!("[{query_type_formatted} {record}]"),
-                RData::AAAA(record) => format!("[{query_type_formatted} {record}]"),
-                RData::TXT(txt_data) => format!("[{query_type_formatted} {txt_data}]"),
-                RData::CNAME(domain) | RData::NS(domain) | RData::PTR(domain) => {
-                    format!("[{query_type_formatted} {domain}]")
-                }
-                RData::MX {
-                    preference,
-                    exchange,
-                } => {
-                    format!("[{query_type_formatted} {preference} {exchange}]")
-                }
-                RData::SOA {
-                    mname,
-                    rname,
-                    serial,
-                    refresh,
-                    retry,
-                    expire,
-                    minimum,
-                } => format!(
-                    "[{query_type_formatted} {mname} {rname} {serial} {refresh} {retry} {expire} {minimum}]"
-                ),
-                RData::SRV {
-                    priority,
-                    weight,
-                    port,
-                    target,
-                } => format!(
-                    "[{query_type_formatted} {priority} {weight} {port} {target}]"
-                ),
-                RData::DNSKEY { flags, protocol, algorithm, public_key: _ } => {
-                    format!("[{query_type_formatted} {flags} {protocol} {algorithm}]")
-                }
-                RData::Unknown { qtype, data_len } => {
-                    format!("[{qtype} Unknown {data_len} bytes]")
-                }
-            }
-        })
-        .collect::<Vec<_>>()
-        .join(",");
-
-    format!("[{query_responses}]")
-}
-
 fn print_query_result(args: &CommandArgs, domain: &str, resolver: &str, response: &str) {
     if args.quiet {
         return;
     }
 
-    let status = "+".green();
     let domain = domain.cyan().bold();
-    let mut message = format!("\r\x1b[2K[{status}] {domain}");
+    let mut message = format!("{domain}");
 
     if args.verbose || args.show_resolver {
         message.push_str(&format!(" [resolver: {}]", resolver.magenta()));
@@ -223,7 +167,7 @@ fn print_query_result(args: &CommandArgs, domain: &str, resolver: &str, response
         message.push_str(&format!(" {response}"));
     }
 
-    println!("{message}");
+    log_success!(message);
 }
 
 fn print_query_error(args: &CommandArgs, domain: &str, resolver: &str, error: &DnsError) {
@@ -238,13 +182,12 @@ fn print_query_error(args: &CommandArgs, domain: &str, resolver: &str, error: &D
     }
 
     let domain = domain.red().bold();
-    let status = "-".red();
-    let mut message = format!("\r\x1b[2K[{status}] {domain}");
+    let mut message = format!("{domain}");
 
     if args.show_resolver {
         message.push_str(&format!(" [resolver: {}]", resolver.magenta()));
     }
     message.push_str(&format!(" {error}"));
 
-    eprintln!("{message}");
+    log_error!(message);
 }

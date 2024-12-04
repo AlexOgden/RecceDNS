@@ -18,8 +18,9 @@ use crate::{
     },
     io::{
         cli::{self, CommandArgs},
-        interrupt,
+        interrupt, logger,
     },
+    log_error, log_info, log_success, log_warning,
     timing::stats::QueryTimer,
 };
 
@@ -35,16 +36,15 @@ pub fn reverse_ip(cmd_args: &CommandArgs, dns_resolver_list: &[&str]) -> Result<
 
     let progress_bar = cli::setup_progress_bar(total_ips);
     progress_bar.set_message("Performing reverse PTR lookup...");
-    progress_bar.println(format!(
-        "[{}] Performing reverse PTR lookup for {} IP addresses\n",
-        "~".green(),
+    log_info!(format!(
+        "Performing reverse PTR lookup for {} IP addresses\n",
         target_ips.len()
     ));
 
     for (index, ip) in target_ips.iter().enumerate() {
         if interrupted.load(Ordering::SeqCst) {
-            cli::clear_line();
-            progress_bar.println(format!("[{}] Interrupted by user", "!".red()));
+            logger::clear_line();
+            log_warning!("Interrupted by user".to_string());
             break;
         }
 
@@ -79,7 +79,8 @@ pub fn reverse_ip(cmd_args: &CommandArgs, dns_resolver_list: &[&str]) -> Result<
                 } else {
                     ptr_records.join(", ")
                 };
-                progress_bar.println(format!("[{}] {} [{}]", "+".green(), ip, display_record));
+
+                log_success!(format!("{} [{}]", ip, display_record.to_string().cyan()));
                 found_count += 1;
             }
             Err(error) => {
@@ -89,7 +90,7 @@ pub fn reverse_ip(cmd_args: &CommandArgs, dns_resolver_list: &[&str]) -> Result<
                         DnsError::NoRecordsFound | DnsError::NonExistentDomain
                     ))
                 {
-                    progress_bar.println(format!("[{}] {} [{}]", "-".red(), ip, error));
+                    log_error!(format!("{} [{}]", ip, error));
                 }
             }
         }
@@ -102,16 +103,18 @@ pub fn reverse_ip(cmd_args: &CommandArgs, dns_resolver_list: &[&str]) -> Result<
         }
     }
 
-    progress_bar.finish_with_message("Reverse PTR lookup completed.");
-    cli::clear_line();
+    progress_bar.finish_and_clear();
 
-    println!("[{}] Found {} PTR records", "~".green(), found_count);
+    log_info!(
+        format!("Found {} PTR records", found_count.to_string().bold()),
+        true
+    );
+
     if let Some(avg) = query_timer.average() {
-        println!(
-            "[{}] Average query time: {} ms",
-            "~".green(),
+        log_info!(format!(
+            "Average query time: {} ms",
             avg.to_string().bold().bright_yellow()
-        );
+        ));
     }
     Ok(())
 }

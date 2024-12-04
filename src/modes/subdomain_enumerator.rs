@@ -1,26 +1,32 @@
 use anyhow::{anyhow, Result};
 use colored::Colorize;
 use rand::Rng;
-use std::collections::HashSet;
-use std::io::{self, Write};
-use std::sync::atomic::Ordering;
-use std::{thread, time::Duration, time::Instant};
+use std::{
+    collections::HashSet,
+    io::{self, Write},
+    sync::atomic::Ordering,
+    thread,
+    time::{Duration, Instant},
+};
 
-use crate::dns::{
-    error::DnsError,
-    protocol::{QueryType, RData, ResourceRecord},
-    resolver::resolve_domain,
-    resolver_selector,
-    resolver_selector::ResolverSelector,
+use crate::{
+    dns::{
+        error::DnsError,
+        format::create_query_response_string,
+        protocol::{QueryType, ResourceRecord},
+        resolver::resolve_domain,
+        resolver_selector::{self, ResolverSelector},
+    },
+    io::{
+        cli::{self, CommandArgs},
+        interrupt,
+        json::{DnsEnumerationOutput, Output},
+        validation::get_correct_query_types,
+        wordlist,
+    },
+    log_error, log_info, log_question, log_success, log_warning,
+    timing::stats::QueryTimer,
 };
-use crate::io::{
-    cli::{self, CommandArgs},
-    interrupt,
-    json::{DnsEnumerationOutput, Output},
-    validation::get_correct_query_types,
-    wordlist,
-};
-use crate::timing::stats::QueryTimer;
 
 const DEFAULT_QUERY_TYPES: &[QueryType] =
     &[QueryType::A, QueryType::AAAA, QueryType::MX, QueryType::TXT];
@@ -63,8 +69,7 @@ pub fn enumerate_subdomains(cmd_args: &CommandArgs, dns_resolver_list: &[&str]) 
 
     for (index, subdomain) in subdomain_list.iter().enumerate() {
         if interrupted.load(Ordering::SeqCst) {
-            cli::clear_line();
-            println!("[{}] Interrupted by user", "!".red());
+            log_warning!("Enumeration interrupted by user");
             break;
         }
 
@@ -100,20 +105,20 @@ pub fn enumerate_subdomains(cmd_args: &CommandArgs, dns_resolver_list: &[&str]) 
 
     let elapsed_time = start_time.elapsed();
 
-    cli::clear_line();
-    println!(
-        "[{}] Done! Found {} subdomains in {:.2?}",
-        "~".green(),
-        context.found_subdomain_count.to_string().bold(),
-        elapsed_time
+    log_info!(
+        format!(
+            "Done! Found {} subdomains in {:.2?}",
+            context.found_subdomain_count.to_string().bold(),
+            elapsed_time
+        ),
+        true
     );
 
     if let Some(avg) = query_timer.average() {
-        println!(
-            "[{}] Average query time: {} ms",
-            "~".green(),
+        log_info!(format!(
+            "Average query time: {} ms",
             avg.to_string().bold().bright_yellow()
-        );
+        ));
     }
 
     if let (Some(output), Some(file)) = (&context.results_output, &cmd_args.json) {
@@ -155,11 +160,10 @@ fn retry_failed_queries(
     }
 
     let failed = std::mem::take(&mut context.failed_subdomains);
-    println!(
-        "\n[{}] Retrying {} failed queries",
-        "!".bright_yellow(),
+    log_warning!(format!(
+        "Retrying {} failed queries",
         failed.len().to_string().bold()
-    );
+    ));
 
     let retry_count = u32::try_from(failed.len()).unwrap_or(0);
 
@@ -178,7 +182,7 @@ fn retry_failed_queries(
     }
 
     if retry_count > 0 {
-        println!("Failed to resolve {retry_count} subdomains after retries");
+        log_warning!("Failed to resolve {retry_count} subdomains after retries");
     }
 
     Ok(())
@@ -260,11 +264,9 @@ fn read_wordlist(wordlist_path: Option<&String>) -> Result<Vec<String>> {
 
 fn handle_wildcard_domain(args: &CommandArgs, dns_resolvers: &[&str]) -> Result<bool> {
     if check_wildcard_domain(args, dns_resolvers)? {
-        println!(
-            "[{}] Warning: Wildcard domain detected. Results may include false positives!",
-            "!".yellow()
-        );
-        print!("[{}] Do you want to continue? (y/n): ", "?".cyan());
+        log_warning!("Warning: Wildcard domain detected. Results may include false positives!");
+        log_question!("Do you want to continue? (y/n): ");
+
         io::stdout().flush().expect("Failed to flush stdout");
 
         let mut input = String::new();
@@ -273,7 +275,7 @@ fn handle_wildcard_domain(args: &CommandArgs, dns_resolvers: &[&str]) -> Result<
             .expect("Failed to read input");
 
         if !matches!(input.trim().to_lowercase().as_str(), "y") {
-            println!("[{}] Aborting due to wildcard domain detection.", "!".red());
+            log_error!("Aborting due to wildcard domain detection.");
             return Ok(true);
         }
     }
@@ -310,57 +312,6 @@ fn check_wildcard_domain(args: &CommandArgs, dns_resolvers: &[&str]) -> Result<b
     )
 }
 
-fn create_query_response_string(query_result: &[ResourceRecord]) -> String {
-    let query_responses: String = query_result
-        .iter()
-        .map(|response| {
-            let query_type_formatted = response.data.to_qtype().to_string().bold();
-            match &response.data {
-                RData::A(record) => format!("[{query_type_formatted} {record}]"),
-                RData::AAAA(record) => format!("[{query_type_formatted} {record}]"),
-                RData::TXT(txt_data) => format!("[{query_type_formatted} {txt_data}]"),
-                RData::CNAME(domain) | RData::NS(domain) | RData::PTR(domain) => {
-                    format!("[{query_type_formatted} {domain}]")
-                }
-                RData::MX {
-                    preference,
-                    exchange,
-                } => {
-                    format!("[{query_type_formatted} {preference} {exchange}]")
-                }
-                RData::SOA {
-                    mname,
-                    rname,
-                    serial,
-                    refresh,
-                    retry,
-                    expire,
-                    minimum,
-                } => format!(
-                    "[{query_type_formatted} {mname} {rname} {serial} {refresh} {retry} {expire} {minimum}]"
-                ),
-                RData::SRV {
-                    priority,
-                    weight,
-                    port,
-                    target,
-                } => format!(
-                    "[{query_type_formatted} {priority} {weight} {port} {target}]"
-                ),
-                RData::DNSKEY { flags, protocol, algorithm, public_key: _ } => {
-                    format!("[{query_type_formatted} {flags} {protocol} {algorithm}]")
-                }
-                RData::Unknown { qtype, data_len } => {
-                    format!("[{qtype} Unknown {data_len} bytes]")
-                }
-            }
-        })
-        .collect::<Vec<_>>()
-        .join(",");
-
-    format!("[{query_responses}]")
-}
-
 fn print_query_result(args: &CommandArgs, subdomain: &str, resolver: &str, response: &str) {
     if args.quiet {
         return;
@@ -371,8 +322,8 @@ fn print_query_result(args: &CommandArgs, subdomain: &str, resolver: &str, respo
         subdomain.cyan().bold(),
         args.target.blue().italic()
     );
-    let status = "+".green();
-    let mut message = format!("\r\x1b[2K[{status}] {domain}");
+
+    let mut message = domain;
 
     if args.verbose || args.show_resolver {
         message.push_str(&format!(" [resolver: {}]", resolver.magenta()));
@@ -381,7 +332,7 @@ fn print_query_result(args: &CommandArgs, subdomain: &str, resolver: &str, respo
         message.push_str(&format!(" {response}"));
     }
 
-    println!("{message}");
+    log_success!(message);
 }
 
 fn print_query_error(
@@ -403,13 +354,12 @@ fn print_query_error(
     }
 
     let domain = format!("{}.{}", subdomain.red().bold(), args.target.blue().italic());
-    let status = "-".red();
-    let mut message = format!("\r\x1b[2K[{status}] {domain}");
+    let mut message = domain;
 
     if args.show_resolver {
         message.push_str(&format!(" [resolver: {}]", resolver.magenta()));
     }
     message.push_str(&format!(" {error}"));
 
-    eprintln!("{message}");
+    log_error!(message);
 }
