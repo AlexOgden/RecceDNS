@@ -7,12 +7,12 @@ pub enum DnsError {
     NoRecordsFound,
     #[error("None existent domain")]
     NonExistentDomain,
-    #[error("Nameserver error: {0}")]
+    #[error("Nameserver Error: {0}")]
     NameserverError(String),
-    #[error("Network error: {0}")]
+    #[error("Network Error: {0}")]
     Network(String),
-    #[error("Invalid data: {0}")]
+    #[error("Invalid Data: {0}")]
     InvalidData(String),
-    #[error("Protocol error: {0}")]
+    #[error("Protocol Error: {0}")]
     ProtocolData(String),
 }

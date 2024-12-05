@@ -118,11 +118,9 @@ fn send_dns_query_udp(
     let mut response_buffer = [0; UDP_BUFFER_SIZE];
     let (bytes_received, _) = socket.recv_from(&mut response_buffer).map_err(|error| {
         if error.raw_os_error() == Some(10060) {
-            DnsError::Network(
-                "Failed to receive response (UDP): Connection attempt failed.".to_string(),
-            )
+            DnsError::Network(format!("UDP receive timeout ({dns_server})"))
         } else {
-            DnsError::Network(format!("Failed to receive response (UDP): {error}"))
+            DnsError::Network(format!("UDP receive error: {error}"))
         }
     })?;
 
