@@ -244,8 +244,8 @@ mod tests {
 
         assert!(result.is_err());
         assert_eq!(
-            result.unwrap_err().to_string(),
-            "Invalid data: Domain name cannot be empty"
+            result.unwrap_err(),
+            DnsError::InvalidData("Domain name cannot be empty".to_owned())
         );
     }
 
@@ -265,5 +265,23 @@ mod tests {
         let dns_packet = build_dns_query(domain, &query_type, false).unwrap();
 
         assert!(!dns_packet.header.recursion_desired);
+    }
+
+    #[test]
+    fn test_ip_to_ptr() {
+        let ip = Ipv4Addr::new(192, 168, 1, 22);
+        let ptr = ip_to_ptr(ip);
+
+        assert_eq!(ptr, "22.1.168.192.in-addr.arpa");
+    }
+
+    #[test]
+    fn test_build_dns_query_ptr() {
+        let domain = "192.168.1.50";
+        let query_type = QueryType::PTR;
+        let dns_packet = build_dns_query(domain, &query_type, true).unwrap();
+
+        assert_eq!(dns_packet.questions[0].name, "50.1.168.192.in-addr.arpa");
+        assert_eq!(dns_packet.questions[0].qtype, query_type);
     }
 }
