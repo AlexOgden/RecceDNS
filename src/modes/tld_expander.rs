@@ -17,7 +17,7 @@ use crate::{
         logger,
         validation::get_correct_query_types,
     },
-    log_error, log_info, log_success, log_warning,
+    log_error, log_info, log_success, log_warn,
     timing::stats::QueryTimer,
 };
 
@@ -48,7 +48,7 @@ pub async fn expand_tlds(cmd_args: &CommandArgs, dns_resolver_list: &[&str]) -> 
 
     for (idx, tld) in tld_list.iter().enumerate() {
         if interrupted.load(Ordering::SeqCst) {
-            log_warning!("Interrupted by user".to_string());
+            log_warn!("Interrupted by user".to_string());
             break;
         }
 

@@ -105,7 +105,7 @@ macro_rules! log_success {
 }
 
 #[macro_export]
-macro_rules! log_warning {
+macro_rules! log_warn {
     ($message:expr) => {
         $crate::io::logger::status(
             &$crate::io::logger::Status::Warning,

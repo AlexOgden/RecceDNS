@@ -24,7 +24,7 @@ use crate::{
         validation::get_correct_query_types,
         wordlist,
     },
-    log_error, log_info, log_question, log_success, log_warning,
+    log_error, log_info, log_question, log_success, log_warn,
     timing::stats::QueryTimer,
 };
 
@@ -67,7 +67,7 @@ pub fn enumerate_subdomains(cmd_args: &CommandArgs, dns_resolver_list: &[&str]) 
 
     for (index, subdomain) in subdomain_list.iter().enumerate() {
         if interrupted.load(Ordering::SeqCst) {
-            log_warning!("Enumeration interrupted by user");
+            log_warn!("Enumeration interrupted by user");
             break;
         }
 
@@ -156,7 +156,7 @@ fn retry_failed_queries(
     if !context.failed_subdomains.is_empty() {
         let count = context.failed_subdomains.len();
 
-        log_warning!(
+        log_warn!(
             format!("Retrying {} failed queries", count.to_string().bold()),
             true
         );
@@ -292,7 +292,7 @@ fn read_wordlist(wordlist_path: Option<&String>) -> Result<Vec<String>> {
 
 fn handle_wildcard_domain(args: &CommandArgs, dns_resolvers: &[&str]) -> Result<bool> {
     if check_wildcard_domain(args, dns_resolvers)? {
-        log_warning!("Warning: Wildcard domain detected. Results may include false positives!");
+        log_warn!("Warning: Wildcard domain detected. Results may include false positives!");
         log_question!("Do you want to continue? (y/n): ");
 
         io::stdout().flush().expect("Failed to flush stdout");
