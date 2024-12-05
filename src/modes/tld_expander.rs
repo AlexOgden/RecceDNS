@@ -115,7 +115,9 @@ fn process_domain(
                 all_query_results.extend(response.answers);
             }
             Err(error) => {
-                print_query_error(cmd_args, domain_name, resolver, &error);
+                if !error.to_string().contains("(os error 4)") {
+                    print_query_error(cmd_args, domain_name, resolver, &error);
+                }
             }
         }
     }

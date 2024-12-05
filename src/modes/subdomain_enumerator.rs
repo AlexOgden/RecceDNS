@@ -184,15 +184,20 @@ fn retry_failed_queries(
                 Ok(response) => {
                     context.all_query_responses.extend(response.answers);
                 }
-                Err(err) => {
-                    if !matches!(err, DnsError::NoRecordsFound | DnsError::NonExistentDomain) {
+                Err(error) => {
+                    if !matches!(
+                        error,
+                        DnsError::NoRecordsFound | DnsError::NonExistentDomain
+                    ) {
                         retry_failed_count += 1;
                         context.failed_subdomains.insert(subdomain.clone());
                     }
 
-                    print_query_error(cmd_args, &subdomain, query_resolver, &err, true);
+                    if !error.to_string().contains("(os error 4)") {
+                        print_query_error(cmd_args, &subdomain, query_resolver, &error, true);
+                    }
 
-                    if matches!(err, DnsError::NonExistentDomain) {
+                    if matches!(error, DnsError::NonExistentDomain) {
                         break;
                     }
                 }
