@@ -42,13 +42,14 @@ pub async fn expand_tlds(cmd_args: &CommandArgs, dns_resolver_list: &[&str]) -> 
     progress_bar.set_message("Performing TLD expansion search...");
 
     log_info!(format!(
-        "Performing TLD Expansion for {}\n",
+        "Performing TLD Expansion for {}",
         target_base_domain.cyan().italic()
     ));
 
     for (idx, tld) in tld_list.iter().enumerate() {
         if interrupted.load(Ordering::SeqCst) {
-            log_warn!("Interrupted by user".to_string());
+            logger::clear_line();
+            log_warn!("Interrupted by user".to_string(), true);
             break;
         }
 
@@ -109,7 +110,6 @@ fn process_domain(
         );
         query_timer.stop();
 
-        logger::clear_line();
         match query_result {
             Ok(response) => {
                 all_query_results.extend(response.answers);

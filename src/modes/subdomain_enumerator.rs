@@ -21,6 +21,7 @@ use crate::{
         cli::{self, CommandArgs},
         interrupt,
         json::{DnsEnumerationOutput, Output},
+        logger,
         validation::get_correct_query_types,
         wordlist,
     },
@@ -67,7 +68,8 @@ pub fn enumerate_subdomains(cmd_args: &CommandArgs, dns_resolver_list: &[&str]) 
 
     for (index, subdomain) in subdomain_list.iter().enumerate() {
         if interrupted.load(Ordering::SeqCst) {
-            log_warn!("Enumeration interrupted by user");
+            logger::clear_line();
+            log_warn!("Interrupted by user");
             break;
         }
 
@@ -193,9 +195,7 @@ fn retry_failed_queries(
                         context.failed_subdomains.insert(subdomain.clone());
                     }
 
-                    if !error.to_string().contains("(os error 4)") {
-                        print_query_error(cmd_args, &subdomain, query_resolver, &error, true);
-                    }
+                    print_query_error(cmd_args, &subdomain, query_resolver, &error, true);
 
                     if matches!(error, DnsError::NonExistentDomain) {
                         break;
@@ -256,14 +256,19 @@ fn resolve_and_handle(
             Ok(response) => {
                 context.all_query_responses.extend(response.answers);
             }
-            Err(err) => {
+            Err(error) => {
                 if !cmd_args.no_retry
-                    && !matches!(err, DnsError::NoRecordsFound | DnsError::NonExistentDomain)
+                    && !matches!(
+                        error,
+                        DnsError::NoRecordsFound | DnsError::NonExistentDomain
+                    )
                 {
                     context.failed_subdomains.insert(subdomain.to_string());
                 }
 
-                print_query_error(cmd_args, subdomain, resolver, &err, false);
+                if !error.to_string().contains("(os error 4)") {
+                    print_query_error(cmd_args, subdomain, resolver, &error, false);
+                }
                 break;
             }
         }

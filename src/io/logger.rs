@@ -1,5 +1,5 @@
 use colored::{ColoredString, Colorize};
-use std::fmt::Display;
+use std::{fmt::Display, io::Write};
 
 #[derive(PartialEq, Eq)]
 pub enum Status {
@@ -47,7 +47,20 @@ pub fn status(status: &Status, message: &impl Display, newline: bool) {
 
 /// Clears the current line in the terminal
 pub fn clear_line() {
-    print!("\r\x1b[2K");
+    if cfg!(target_os = "windows") {
+        // On Windows clear only the current line
+        print!("\r\x1b[2K");
+    } else {
+        // On Linux Clear the previous line
+        print!("\x1b[F\x1b[K");
+    }
+    if let Err(error) = std::io::stdout().flush() {
+        status(
+            &Status::Error,
+            &format!("Failed to flush stdout: {error}"),
+            false,
+        );
+    }
 }
 
 #[macro_export]
