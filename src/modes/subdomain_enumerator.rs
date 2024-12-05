@@ -155,35 +155,78 @@ fn retry_failed_queries(
     query_timer: &mut QueryTimer,
     context: &mut EnumerationState,
 ) -> Result<()> {
-    if context.failed_subdomains.is_empty() {
-        return Ok(());
+    if !context.failed_subdomains.is_empty() {
+        let count = context.failed_subdomains.len();
+
+        log_warning!(
+            format!("Retrying {} failed queries", count.to_string().bold()),
+            true
+        );
     }
 
-    let failed = std::mem::take(&mut context.failed_subdomains);
-    log_warning!(format!(
-        "Retrying {} failed queries",
-        failed.len().to_string().bold()
-    ));
+    let mut retry_failed_count: u32 = 0;
+    let retries: Vec<String> = context.failed_subdomains.drain().collect();
 
-    let retry_count = u32::try_from(failed.len()).unwrap_or(0);
-
-    for subdomain in failed {
+    for subdomain in retries {
+        let query_resolver = resolver_selector.select()?;
         let fqdn = format!("{}.{}", subdomain, cmd_args.target);
-        resolve_and_handle(
-            cmd_args,
-            resolver_selector,
-            query_types,
-            &fqdn,
-            query_timer,
-            context,
-            &subdomain,
-        )?;
+
+        context.current_query_results.clear();
+
+        for query_type in query_types {
+            query_timer.start();
+            let query_result = resolve_domain(
+                query_resolver,
+                &fqdn,
+                query_type,
+                &cmd_args.transport_protocol,
+                !&cmd_args.no_recursion,
+            );
+            query_timer.stop();
+
+            match query_result {
+                Ok(response) => {
+                    context.current_query_results.extend(response.answers);
+                }
+                Err(err) => {
+                    if !matches!(err, DnsError::NoRecordsFound | DnsError::NonExistentDomain) {
+                        retry_failed_count += 1;
+                        context.failed_subdomains.insert(subdomain.clone());
+                    }
+
+                    print_query_error(cmd_args, &subdomain, query_resolver, &err, true);
+
+                    if matches!(err, DnsError::NonExistentDomain) {
+                        break;
+                    }
+                }
+            }
+        }
+
+        if !context.current_query_results.is_empty() {
+            context.all_query_responses = context.current_query_results.drain().collect();
+            context
+                .all_query_responses
+                .sort_by_key(|r| r.data.to_qtype());
+            let response_data_string = create_query_response_string(&context.all_query_responses);
+
+            if let Some(output) = &mut context.results_output {
+                for response in &context.all_query_responses {
+                    output.add_result(response.clone());
+                }
+            }
+
+            print_query_result(cmd_args, &subdomain, query_resolver, &response_data_string);
+            context.found_subdomain_count += 1;
+        }
+
         thread::sleep(Duration::from_millis(50));
     }
 
-    if retry_count > 0 {
-        log_warning!(format!(
-            "Failed to resolve {retry_count} subdomains after retries"
+    if retry_failed_count > 0 {
+        log_error!(format!(
+            "Failed to resolve {retry_failed_count} subdomains after retries",
+            retry_failed_count = retry_failed_count.to_string().bold()
         ));
     }
 
