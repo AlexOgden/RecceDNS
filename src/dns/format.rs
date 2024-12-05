@@ -1,10 +1,12 @@
+use std::collections::HashSet;
+
 use colored::Colorize;
 
 use crate::dns::protocol::RData;
 
 use super::protocol::ResourceRecord;
 
-pub fn create_query_response_string(query_result: &[ResourceRecord]) -> String {
+pub fn create_query_response_string(query_result: &HashSet<ResourceRecord>) -> String {
     let query_responses: String = query_result
         .iter()
         .map(|response| {

@@ -121,13 +121,11 @@ fn process_domain(
     }
 
     if !all_query_results.is_empty() {
-        let mut query_results: Vec<_> = all_query_results.iter().cloned().collect();
-        query_results.sort_by(|a, b| a.data.to_qtype().cmp(&b.data.to_qtype()));
-        let response_output = create_query_response_string(&query_results);
+        let response_output = create_query_response_string(&all_query_results);
         print_query_result(cmd_args, domain_name, resolver, &response_output);
 
         if let Some(output) = results_output {
-            query_results
+            all_query_results
                 .iter()
                 .for_each(|r| output.add_result(r.clone()));
         }

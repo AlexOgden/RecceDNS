@@ -32,8 +32,7 @@ const DEFAULT_QUERY_TYPES: &[QueryType] =
     &[QueryType::A, QueryType::AAAA, QueryType::MX, QueryType::TXT];
 
 struct EnumerationState {
-    current_query_results: HashSet<ResourceRecord>,
-    all_query_responses: Vec<ResourceRecord>,
+    all_query_responses: HashSet<ResourceRecord>,
     failed_subdomains: HashSet<String>,
     found_subdomain_count: u32,
     results_output: Option<DnsEnumerationOutput>,
@@ -57,8 +56,7 @@ pub fn enumerate_subdomains(cmd_args: &CommandArgs, dns_resolver_list: &[&str]) 
     let start_time = Instant::now();
 
     let mut context = EnumerationState {
-        current_query_results: HashSet::new(),
-        all_query_responses: Vec::new(),
+        all_query_responses: HashSet::new(),
         failed_subdomains: HashSet::new(),
         found_subdomain_count: 0,
         results_output: cmd_args
@@ -171,8 +169,6 @@ fn retry_failed_queries(
         let query_resolver = resolver_selector.select()?;
         let fqdn = format!("{}.{}", subdomain, cmd_args.target);
 
-        context.current_query_results.clear();
-
         for query_type in query_types {
             query_timer.start();
             let query_result = resolve_domain(
@@ -186,7 +182,7 @@ fn retry_failed_queries(
 
             match query_result {
                 Ok(response) => {
-                    context.current_query_results.extend(response.answers);
+                    context.all_query_responses.extend(response.answers);
                 }
                 Err(err) => {
                     if !matches!(err, DnsError::NoRecordsFound | DnsError::NonExistentDomain) {
@@ -203,20 +199,15 @@ fn retry_failed_queries(
             }
         }
 
-        if !context.current_query_results.is_empty() {
-            context.all_query_responses = context.current_query_results.drain().collect();
-            context
-                .all_query_responses
-                .sort_by_key(|r| r.data.to_qtype());
-            let response_data_string = create_query_response_string(&context.all_query_responses);
-
+        if !context.all_query_responses.is_empty() {
             if let Some(output) = &mut context.results_output {
                 for response in &context.all_query_responses {
                     output.add_result(response.clone());
                 }
             }
 
-            print_query_result(cmd_args, &subdomain, query_resolver, &response_data_string);
+            let response_str = create_query_response_string(&context.all_query_responses);
+            print_query_result(cmd_args, &subdomain, query_resolver, &response_str);
             context.found_subdomain_count += 1;
         }
 
@@ -243,7 +234,6 @@ fn resolve_and_handle(
     subdomain: &str,
 ) -> Result<()> {
     let resolver = resolver_selector.select()?;
-    context.current_query_results.clear();
     context.all_query_responses.clear();
 
     for query_type in query_types {
@@ -259,7 +249,7 @@ fn resolve_and_handle(
 
         match result {
             Ok(response) => {
-                context.current_query_results.extend(response.answers);
+                context.all_query_responses.extend(response.answers);
             }
             Err(err) => {
                 if !cmd_args.no_retry
@@ -274,14 +264,7 @@ fn resolve_and_handle(
         }
     }
 
-    if !context.current_query_results.is_empty() {
-        context
-            .all_query_responses
-            .extend(context.current_query_results.drain());
-        context
-            .all_query_responses
-            .sort_by_key(|r| r.data.to_qtype());
-
+    if !context.all_query_responses.is_empty() {
         if let Some(output) = &mut context.results_output {
             context
                 .all_query_responses
