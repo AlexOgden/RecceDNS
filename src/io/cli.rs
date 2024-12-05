@@ -20,6 +20,8 @@ pub enum OperationMode {
     ReverseIp,
     #[value(name = "c")]
     CertSearch,
+    #[value(name = "t")]
+    TldExpansion,
 }
 
 /// Command-line arguments for the program
@@ -155,11 +157,6 @@ pub fn print_ascii_art() {
         "Version: {} | github.com/AlexOgden/RecceDNS\n",
         env!("CARGO_PKG_VERSION")
     );
-}
-
-/// Clears the current line in the terminal
-pub fn clear_line() {
-    println!("\r\x1b[2K");
 }
 
 /// Sets up the progress bar with the given total

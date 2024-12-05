@@ -40,7 +40,7 @@ fn initialize_udp_socket() -> Result<Arc<UdpSocket>> {
 }
 
 pub fn resolve_domain(
-    dns_server: &str,
+    dns_resolver: &str,
     domain: &str,
     query_type: &QueryType,
     transport_protocol: &TransportProtocol,
@@ -52,7 +52,7 @@ pub fn resolve_domain(
     let query_result = execute_dns_query(
         &udp_socket,
         transport_protocol,
-        dns_server,
+        dns_resolver,
         domain,
         query_type,
         recursion,
@@ -67,10 +67,10 @@ pub fn resolve_domain(
             }
         }
         ResultCode::NXDOMAIN => Err(DnsError::NonExistentDomain),
-        ResultCode::SERVFAIL => Err(DnsError::NameserverError("Server failed".to_owned())),
-        ResultCode::NOTIMP => Err(DnsError::NameserverError("Not implemented".to_owned())),
+        ResultCode::SERVFAIL => Err(DnsError::NameserverError("Server Failed".to_owned())),
+        ResultCode::NOTIMP => Err(DnsError::NameserverError("Not Implemented".to_owned())),
         ResultCode::REFUSED => Err(DnsError::NameserverError("Refused".to_owned())),
-        ResultCode::FORMERR => Err(DnsError::ProtocolData("Format error".to_owned())),
+        ResultCode::FORMERR => Err(DnsError::ProtocolData("Format Error".to_owned())),
     }
 }
 
@@ -118,11 +118,9 @@ fn send_dns_query_udp(
     let mut response_buffer = [0; UDP_BUFFER_SIZE];
     let (bytes_received, _) = socket.recv_from(&mut response_buffer).map_err(|error| {
         if error.raw_os_error() == Some(10060) {
-            DnsError::Network(
-                "Failed to receive response (UDP): Connection attempt failed.".to_string(),
-            )
+            DnsError::Network(format!("UDP receive timeout ({dns_server})"))
         } else {
-            DnsError::Network(format!("Failed to receive response (UDP): {error}"))
+            DnsError::Network(format!("UDP receive error: {error}"))
         }
     })?;
 
@@ -246,8 +244,8 @@ mod tests {
 
         assert!(result.is_err());
         assert_eq!(
-            result.unwrap_err().to_string(),
-            "Invalid data: Domain name cannot be empty"
+            result.unwrap_err(),
+            DnsError::InvalidData("Domain name cannot be empty".to_owned())
         );
     }
 
@@ -267,5 +265,23 @@ mod tests {
         let dns_packet = build_dns_query(domain, &query_type, false).unwrap();
 
         assert!(!dns_packet.header.recursion_desired);
+    }
+
+    #[test]
+    fn test_ip_to_ptr() {
+        let ip = Ipv4Addr::new(192, 168, 1, 22);
+        let ptr = ip_to_ptr(ip);
+
+        assert_eq!(ptr, "22.1.168.192.in-addr.arpa");
+    }
+
+    #[test]
+    fn test_build_dns_query_ptr() {
+        let domain = "192.168.1.50";
+        let query_type = QueryType::PTR;
+        let dns_packet = build_dns_query(domain, &query_type, true).unwrap();
+
+        assert_eq!(dns_packet.questions[0].name, "50.1.168.192.in-addr.arpa");
+        assert_eq!(dns_packet.questions[0].qtype, query_type);
     }
 }
