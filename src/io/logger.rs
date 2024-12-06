@@ -31,17 +31,13 @@ impl std::fmt::Display for Status {
 pub fn status(status: &Status, message: &impl Display, newline: bool) {
     let clear_line = "\r\x1b[2K";
     let prefix = format!("{clear_line}[{status}] ");
+    let newline_str = if newline { "\n" } else { "" };
+    let formatted_message = format!("{newline_str}{prefix}{message}");
 
     match status {
-        Status::Error => {
-            eprintln!("{}{}{}", if newline { "\n" } else { "" }, prefix, message);
-        }
-        Status::Question => {
-            print!("{}{}{}", if newline { "\n" } else { "" }, prefix, message);
-        }
-        _ => {
-            println!("{}{}{}", if newline { "\n" } else { "" }, prefix, message);
-        }
+        Status::Error => eprintln!("{formatted_message}"),
+        Status::Question => print!("{formatted_message}"),
+        _ => println!("{formatted_message}"),
     }
 }
 
