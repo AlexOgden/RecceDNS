@@ -34,9 +34,9 @@ jobs:
           ~/.cargo/registry
           ~/.cargo/git
           ~/.rustup/toolchains
-        key: ${{ runner.os }}-rust-toolchain-${{ hashFiles('**/Cargo.lock') }}
+        key: ${{ runner.os }}-rust-toolchain
         restore-keys: |
-          ${{ runner.os }}-rust-toolchain-
+          ${{ runner.os }}-rust-toolchain
 
     - name: Cache target directory
       uses: actions/cache@v3
