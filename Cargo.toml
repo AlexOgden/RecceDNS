@@ -1,7 +1,7 @@
 [package]
 name = "reccedns"
 authors = ["Alex Ogden"]
-version = "0.6.0"
+version = "0.6.1"
 edition = "2021"
 
 [dependencies]

@@ -20,7 +20,7 @@ use crate::{
         cli::{self, CommandArgs},
         interrupt, logger,
     },
-    log_error, log_info, log_success, log_warning,
+    log_error, log_info, log_success, log_warn,
     timing::stats::QueryTimer,
 };
 
@@ -44,7 +44,7 @@ pub fn reverse_ip(cmd_args: &CommandArgs, dns_resolver_list: &[&str]) -> Result<
     for (index, ip) in target_ips.iter().enumerate() {
         if interrupted.load(Ordering::SeqCst) {
             logger::clear_line();
-            log_warning!("Interrupted by user".to_string());
+            log_warn!("Interrupted by user".to_string());
             break;
         }
 

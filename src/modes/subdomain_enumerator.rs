@@ -21,10 +21,11 @@ use crate::{
         cli::{self, CommandArgs},
         interrupt,
         json::{DnsEnumerationOutput, Output},
+        logger,
         validation::get_correct_query_types,
         wordlist,
     },
-    log_error, log_info, log_question, log_success, log_warning,
+    log_error, log_info, log_question, log_success, log_warn,
     timing::stats::QueryTimer,
 };
 
@@ -67,7 +68,8 @@ pub fn enumerate_subdomains(cmd_args: &CommandArgs, dns_resolver_list: &[&str]) 
 
     for (index, subdomain) in subdomain_list.iter().enumerate() {
         if interrupted.load(Ordering::SeqCst) {
-            log_warning!("Enumeration interrupted by user");
+            logger::clear_line();
+            log_warn!("Interrupted by user");
             break;
         }
 
@@ -156,7 +158,7 @@ fn retry_failed_queries(
     if !context.failed_subdomains.is_empty() {
         let count = context.failed_subdomains.len();
 
-        log_warning!(
+        log_warn!(
             format!("Retrying {} failed queries", count.to_string().bold()),
             true
         );
@@ -184,15 +186,18 @@ fn retry_failed_queries(
                 Ok(response) => {
                     context.all_query_responses.extend(response.answers);
                 }
-                Err(err) => {
-                    if !matches!(err, DnsError::NoRecordsFound | DnsError::NonExistentDomain) {
+                Err(error) => {
+                    if !matches!(
+                        error,
+                        DnsError::NoRecordsFound | DnsError::NonExistentDomain
+                    ) {
                         retry_failed_count += 1;
                         context.failed_subdomains.insert(subdomain.clone());
                     }
 
-                    print_query_error(cmd_args, &subdomain, query_resolver, &err, true);
+                    print_query_error(cmd_args, &subdomain, query_resolver, &error, true);
 
-                    if matches!(err, DnsError::NonExistentDomain) {
+                    if matches!(error, DnsError::NonExistentDomain) {
                         break;
                     }
                 }
@@ -251,14 +256,19 @@ fn resolve_and_handle(
             Ok(response) => {
                 context.all_query_responses.extend(response.answers);
             }
-            Err(err) => {
+            Err(error) => {
                 if !cmd_args.no_retry
-                    && !matches!(err, DnsError::NoRecordsFound | DnsError::NonExistentDomain)
+                    && !matches!(
+                        error,
+                        DnsError::NoRecordsFound | DnsError::NonExistentDomain
+                    )
                 {
                     context.failed_subdomains.insert(subdomain.to_string());
                 }
 
-                print_query_error(cmd_args, subdomain, resolver, &err, false);
+                if !error.to_string().contains("(os error 4)") {
+                    print_query_error(cmd_args, subdomain, resolver, &error, false);
+                }
                 break;
             }
         }
@@ -292,7 +302,7 @@ fn read_wordlist(wordlist_path: Option<&String>) -> Result<Vec<String>> {
 
 fn handle_wildcard_domain(args: &CommandArgs, dns_resolvers: &[&str]) -> Result<bool> {
     if check_wildcard_domain(args, dns_resolvers)? {
-        log_warning!("Warning: Wildcard domain detected. Results may include false positives!");
+        log_warn!("Warning: Wildcard domain detected. Results may include false positives!");
         log_question!("Do you want to continue? (y/n): ");
 
         io::stdout().flush().expect("Failed to flush stdout");
