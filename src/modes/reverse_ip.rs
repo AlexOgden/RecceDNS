@@ -49,6 +49,7 @@ pub fn reverse_ip(cmd_args: &CommandArgs, dns_resolver_list: &[&str]) -> Result<
         }
 
         let resolver = resolver_selector.select()?;
+
         query_timer.start();
         let query_result = resolve_domain(
             resolver,
