@@ -16,6 +16,7 @@ use crate::{
         json::{DnsEnumerationOutput, Output},
         logger,
         validation::get_correct_query_types,
+        wordlist,
     },
     log_error, log_info, log_success, log_warn,
     timing::stats::QueryTimer,
@@ -26,7 +27,7 @@ const DEFAULT_QUERY_TYPES: &[QueryType] = &[QueryType::A, QueryType::AAAA];
 
 pub async fn expand_tlds(cmd_args: &CommandArgs, dns_resolver_list: &[&str]) -> Result<()> {
     let interrupted = interrupt::initialize_interrupt_handler()?;
-    let tld_list = attempt_iana_tld_list_fetch(cmd_args).await?;
+    let tld_list = get_tld_list(cmd_args).await?;
 
     let mut resolver_selector = resolver_selector::get_selector(cmd_args, dns_resolver_list);
     let mut query_timer = QueryTimer::new(!cmd_args.no_query_stats);
@@ -136,7 +137,22 @@ fn process_domain(
     Ok(())
 }
 
-async fn attempt_iana_tld_list_fetch(cmd_args: &CommandArgs) -> Result<Vec<String>> {
+async fn get_tld_list(cmd_args: &CommandArgs) -> Result<Vec<String>> {
+    if let Some(tld_list) = &cmd_args.wordlist {
+        let tld_list = wordlist::read_from_file(tld_list)?;
+        log_success!(format!("Using wordlist with {} TLDs", tld_list.len()));
+        Ok(tld_list)
+    } else {
+        let iana_list = retrieve_iana_tld_list(cmd_args).await?;
+        log_success!(format!(
+            "Fetched IANA TLD list with {} TLDs",
+            iana_list.len()
+        ));
+        Ok(iana_list)
+    }
+}
+
+async fn retrieve_iana_tld_list(cmd_args: &CommandArgs) -> Result<Vec<String>> {
     let spinner = cli::setup_basic_spinner();
     spinner.set_message("Fetching IANA TLD list...");
 
@@ -158,10 +174,6 @@ async fn attempt_iana_tld_list_fetch(cmd_args: &CommandArgs) -> Result<Vec<Strin
         }
     };
     spinner.finish_and_clear();
-    log_success!(format!(
-        "Fetched IANA TLD list with {} TLDs",
-        tld_list.len()
-    ));
     Ok(tld_list)
 }
 
