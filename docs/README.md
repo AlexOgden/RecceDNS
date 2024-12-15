@@ -166,3 +166,7 @@ Only check using `A` records
 Check with `A` and `AAAA`
 
 `reccedns -m t -d 8.8.8.8 -t github.com -q a,aaaa`
+
+Provide a wordlist with TLDs
+
+`reccedns -m t -d 8.8.8.8 -t github.com -w tlds.txt`
