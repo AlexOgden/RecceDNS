@@ -1,6 +1,7 @@
 use anyhow::{anyhow, Result};
 use colored::Colorize;
 use rand::Rng;
+use rayon::prelude::*;
 use std::{
     collections::HashSet,
     io::{self, Write},
@@ -137,15 +138,60 @@ fn process_subdomain(
     context: &mut EnumerationState,
 ) -> Result<()> {
     let fqdn = format!("{}.{}", subdomain, cmd_args.target);
-    resolve_and_handle(
-        cmd_args,
-        resolver_selector,
-        query_types,
-        &fqdn,
-        query_timer,
-        context,
-        subdomain,
-    )
+    let resolver = resolver_selector.select()?;
+    context.all_query_responses.clear();
+
+    query_timer.start();
+    let results: Vec<Result<_, _>> = query_types
+        .par_iter()
+        .map(|query_type| {
+            resolve_domain(
+                resolver,
+                &fqdn,
+                query_type,
+                &cmd_args.transport_protocol,
+                !cmd_args.no_recursion,
+            )
+        })
+        .collect();
+    query_timer.stop();
+
+    for result in results {
+        match result {
+            Ok(response) => {
+                context.all_query_responses.extend(response.answers);
+            }
+            Err(error) => {
+                if !cmd_args.no_retry
+                    && !matches!(
+                        error,
+                        DnsError::NoRecordsFound | DnsError::NonExistentDomain
+                    )
+                {
+                    context.failed_subdomains.insert(subdomain.to_string());
+                }
+
+                if !error.to_string().contains("(os error 4)") {
+                    print_query_error(cmd_args, subdomain, resolver, &error, false);
+                }
+            }
+        }
+    }
+
+    if !context.all_query_responses.is_empty() {
+        if let Some(output) = &mut context.results_output {
+            context
+                .all_query_responses
+                .iter()
+                .for_each(|r| output.add_result(r.clone()));
+        }
+
+        let response_str = create_query_response_string(&context.all_query_responses);
+        print_query_result(cmd_args, subdomain, resolver, &response_str);
+        context.found_subdomain_count += 1;
+    }
+
+    Ok(())
 }
 
 fn retry_failed_queries(
@@ -224,67 +270,6 @@ fn retry_failed_queries(
             "Failed to resolve {retry_failed_count} subdomains after retries",
             retry_failed_count = retry_failed_count.to_string().bold()
         ));
-    }
-
-    Ok(())
-}
-
-fn resolve_and_handle(
-    cmd_args: &CommandArgs,
-    resolver_selector: &mut dyn ResolverSelector,
-    query_types: &[QueryType],
-    fqdn: &str,
-    query_timer: &mut QueryTimer,
-    context: &mut EnumerationState,
-    subdomain: &str,
-) -> Result<()> {
-    let resolver = resolver_selector.select()?;
-    context.all_query_responses.clear();
-
-    for query_type in query_types {
-        query_timer.start();
-        let result = resolve_domain(
-            resolver,
-            fqdn,
-            query_type,
-            &cmd_args.transport_protocol,
-            !cmd_args.no_recursion,
-        );
-        query_timer.stop();
-
-        match result {
-            Ok(response) => {
-                context.all_query_responses.extend(response.answers);
-            }
-            Err(error) => {
-                if !cmd_args.no_retry
-                    && !matches!(
-                        error,
-                        DnsError::NoRecordsFound | DnsError::NonExistentDomain
-                    )
-                {
-                    context.failed_subdomains.insert(subdomain.to_string());
-                }
-
-                if !error.to_string().contains("(os error 4)") {
-                    print_query_error(cmd_args, subdomain, resolver, &error, false);
-                }
-                break;
-            }
-        }
-    }
-
-    if !context.all_query_responses.is_empty() {
-        if let Some(output) = &mut context.results_output {
-            context
-                .all_query_responses
-                .iter()
-                .for_each(|r| output.add_result(r.clone()));
-        }
-
-        let response_str = create_query_response_string(&context.all_query_responses);
-        print_query_result(cmd_args, subdomain, resolver, &response_str);
-        context.found_subdomain_count += 1;
     }
 
     Ok(())
