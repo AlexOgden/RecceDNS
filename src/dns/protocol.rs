@@ -42,7 +42,7 @@ pub enum QueryType {
     ANY = 255,
 }
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq, IntoPrimitive, TryFromPrimitive, Serialize)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, IntoPrimitive, TryFromPrimitive, Serialize, Hash)]
 #[repr(u8)]
 pub enum ResultCode {
     NOERROR = 0,
@@ -53,7 +53,7 @@ pub enum ResultCode {
     REFUSED = 5,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Hash)]
 pub struct DnsHeader {
     pub id: u16,
 
@@ -153,7 +153,7 @@ impl DnsHeader {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Hash)]
 pub struct DnsQuestion {
     pub name: String,
     pub qtype: QueryType,
@@ -463,7 +463,7 @@ impl RData {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Hash)]
 pub struct DnsPacket {
     pub header: DnsHeader,
     pub questions: Vec<DnsQuestion>,

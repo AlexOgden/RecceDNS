@@ -37,7 +37,7 @@ impl Output for CertSearchOutput {
 fn write_json<T: Serialize>(data: &T, output_file: &str) -> Result<()> {
     let output_file = if Path::new(output_file)
         .extension()
-        .map_or(false, |ext| ext.eq_ignore_ascii_case("json"))
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("json"))
     {
         output_file.to_string()
     } else {
