@@ -1,7 +1,7 @@
 use thiserror::Error;
 
 #[allow(clippy::module_name_repetitions)]
-#[derive(Error, Debug, PartialEq, Eq)]
+#[derive(Error, Debug, PartialEq, Eq, Hash)]
 pub enum DnsError {
     #[error("No records found")]
     NoRecordsFound,
