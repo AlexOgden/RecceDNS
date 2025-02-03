@@ -189,7 +189,7 @@ fn build_dns_query(
     };
 
     let mut packet = DnsPacket::new();
-    packet.header.id = rand::thread_rng().gen();
+    packet.header.id = rand::rng().random();
     packet.header.questions = 1;
     packet.header.recursion_desired = recursion;
     packet

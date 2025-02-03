@@ -1,6 +1,6 @@
 use crate::io::cli::CommandArgs;
 use anyhow::Result;
-use rand::prelude::*;
+use rand::seq::IndexedRandom;
 
 pub trait ResolverSelector {
     fn select(&mut self) -> Result<&str>;
@@ -36,7 +36,7 @@ impl ResolverSelector for Selector {
     fn select(&mut self) -> Result<&str> {
         match self {
             Self::Random { dns_resolvers } => dns_resolvers
-                .choose(&mut thread_rng())
+                .choose(&mut rand::rng())
                 .map(std::string::String::as_str)
                 .ok_or_else(|| anyhow::anyhow!("DNS Resolvers list is empty")),
             Self::Sequential {

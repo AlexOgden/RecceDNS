@@ -306,7 +306,7 @@ fn handle_wildcard_domain(args: &CommandArgs, dns_resolvers: &[&str]) -> Result<
 }
 
 fn check_wildcard_domain(args: &CommandArgs, dns_resolvers: &[&str]) -> Result<bool> {
-    let mut rng = rand::thread_rng();
+    let mut rng = rand::rng();
     let max_label_length: u8 = 63;
     let attempts: u8 = 3;
 
@@ -314,9 +314,9 @@ fn check_wildcard_domain(args: &CommandArgs, dns_resolvers: &[&str]) -> Result<b
         || Err(anyhow!("No DNS resolvers available")),
         |query_resolver| {
             let is_wildcard = (0..attempts).any(|_| {
-                let random_length = rng.gen_range(10..=max_label_length);
+                let random_length = rng.random_range(10..=max_label_length);
                 let random_subdomain: String = (0..random_length)
-                    .map(|_| rng.gen_range('a'..='z'))
+                    .map(|_| rng.random_range('a'..='z'))
                     .collect();
                 let fqdn = format!("{}.{}", random_subdomain, args.target);
 
