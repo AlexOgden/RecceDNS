@@ -59,9 +59,7 @@ pub fn enumerate_records(cmd_args: &CommandArgs, dns_resolvers: &[&str]) -> Resu
 
         match query_result {
             Ok(mut response) => {
-                response
-                    .answers
-                    .sort_by(|a, b| a.data.to_qtype().cmp(&b.data.to_qtype()));
+                response.answers.sort_by_key(|a| a.data.to_qtype());
                 process_response(
                     &mut seen_cnames,
                     &response.answers,
