@@ -12,8 +12,8 @@ impl Delay {
         match self {
             Self::Single(value) => *value,
             Self::Range(min, max) => {
-                let mut rng = rand::thread_rng();
-                rng.gen_range(*min..=*max)
+                let mut rng = rand::rng();
+                rng.random_range(*min..=*max)
             }
         }
     }

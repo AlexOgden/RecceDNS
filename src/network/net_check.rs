@@ -1,5 +1,6 @@
 use colored::Colorize;
-use rand::{distributions::Alphanumeric, thread_rng, Rng};
+use rand::distr::Alphanumeric;
+use rand::Rng;
 
 use crate::dns::{protocol::QueryType, resolver::resolve_domain};
 use crate::network::types::TransportProtocol;
@@ -7,7 +8,7 @@ use crate::network::types::TransportProtocol;
 const ROOT_SERVER: &str = "rootservers.net";
 
 fn generate_random_domain() -> String {
-    let random_string: String = thread_rng()
+    let random_string: String = rand::rng()
         .sample_iter(&Alphanumeric)
         .take(10)
         .map(char::from)
@@ -54,7 +55,7 @@ pub fn check_dns_resolvers<'a>(
     for &server in dns_resolvers {
         let hijacking = check_nxdomain_hijacking(server, transport_protocol);
 
-        let root_server_letter = thread_rng().gen_range(b'a'..b'm') as char;
+        let root_server_letter = rand::rng().random_range(b'a'..b'm') as char;
         let domain = format!("{root_server_letter}.{ROOT_SERVER}");
         let normal_query = resolve_domain(server, &domain, &QueryType::A, transport_protocol, true);
 
