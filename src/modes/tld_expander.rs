@@ -167,6 +167,7 @@ async fn retrieve_iana_tld_list(cmd_args: &CommandArgs) -> Result<Vec<String>> {
                         "Attempt {}/{} failed: {}. Retrying...",
                         attempt, max_attempts, e
                     ));
+                    thread::sleep(Duration::from_secs(2));
                     attempt += 1;
                 }
                 Err(e) => return Err(e),
