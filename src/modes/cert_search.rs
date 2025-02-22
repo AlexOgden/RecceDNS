@@ -97,7 +97,8 @@ pub async fn search_certificates(cmd_args: &CommandArgs) -> Result<()> {
                         "Attempt {}/{} failed: {}. Retrying...",
                         attempt, max_retries, error
                     ));
-                } else if attempt >= max_retries {
+                    tokio::time::sleep(tokio::time::Duration::from_secs(attempt + 1)).await;
+                } else {
                     log_error!(format!(
                         "Attempt {}/{} failed: {}.",
                         attempt, max_retries, error
