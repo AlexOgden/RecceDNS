@@ -37,7 +37,7 @@ pub async fn expand_tlds(cmd_args: &CommandArgs, dns_resolver_list: &[&str]) -> 
         .map(|_| DnsEnumerationOutput::new(cmd_args.target.clone()));
 
     let target_fqdn = &cmd_args.target;
-    let target_base_domain = target_fqdn.rsplit('.').nth(1).unwrap_or(target_fqdn);
+    let target_base_domain = strip_tld(target_fqdn, &tld_list);
 
     let progress_bar = cli::setup_progress_bar(tld_list.len() as u64);
     progress_bar.set_message("Performing TLD expansion search...");
@@ -137,18 +137,36 @@ fn process_domain(
     Ok(())
 }
 
-async fn get_tld_list(cmd_args: &CommandArgs) -> Result<Vec<String>> {
-    if let Some(tld_list) = &cmd_args.wordlist {
-        let tld_list = wordlist::read_from_file(tld_list)?;
-        log_success!(format!("Using wordlist with {} TLDs", tld_list.len()));
-        Ok(tld_list)
+fn strip_tld(domain: &str, tld_list: &HashSet<String>) -> String {
+    let normalized = domain.replace(',', ".");
+    let mut tlds: Vec<&String> = tld_list.iter().collect();
+    // Sort so that longer TLDs (e.g. "co.uk") come before shorter ones (e.g. "uk")
+    tlds.sort_by_key(|t| std::cmp::Reverse(t.len()));
+
+    for candidate in tlds {
+        let suffix = format!(".{candidate}");
+        if normalized.ends_with(&suffix) {
+            return normalized[..normalized.len() - suffix.len()].to_string();
+        }
+        if normalized.eq_ignore_ascii_case(candidate) {
+            return String::new();
+        }
+    }
+
+    normalized
+}
+
+async fn get_tld_list(cmd_args: &CommandArgs) -> Result<HashSet<String>> {
+    if let Some(wordlist_path) = &cmd_args.wordlist {
+        let tld_list = wordlist::read_from_file(wordlist_path)?;
+        let tld_set: HashSet<String> = tld_list.into_iter().collect();
+        log_success!(format!("Using wordlist with {} TLDs", tld_set.len()));
+        Ok(tld_set)
     } else {
         let iana_list = retrieve_iana_tld_list(cmd_args).await?;
-        log_success!(format!(
-            "Fetched IANA TLD list with {} TLDs",
-            iana_list.len()
-        ));
-        Ok(iana_list)
+        let tld_set: HashSet<String> = iana_list.into_iter().collect();
+        log_success!(format!("Fetched IANA TLD list with {} TLDs", tld_set.len()));
+        Ok(tld_set)
     }
 }
 
