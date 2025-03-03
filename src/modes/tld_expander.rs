@@ -139,16 +139,19 @@ fn process_domain(
 
 fn strip_tld(domain: &str, tld_list: &HashSet<String>) -> String {
     let normalized = domain.replace(',', ".");
+    let normalized_lower = normalized.to_lowercase();
     let mut tlds: Vec<&String> = tld_list.iter().collect();
+
     // Sort so that longer TLDs (e.g. "co.uk") come before shorter ones (e.g. "uk")
     tlds.sort_by_key(|t| std::cmp::Reverse(t.len()));
 
     for candidate in tlds {
-        let suffix = format!(".{candidate}");
-        if normalized.ends_with(&suffix) {
+        let candidate_lower = candidate.to_lowercase();
+        let suffix = format!(".{candidate_lower}");
+        if normalized_lower.ends_with(&suffix) {
             return normalized[..normalized.len() - suffix.len()].to_string();
         }
-        if normalized.eq_ignore_ascii_case(candidate) {
+        if normalized_lower == candidate_lower {
             return String::new();
         }
     }
@@ -244,4 +247,60 @@ fn print_query_error(args: &CommandArgs, domain: &str, resolver: &str, error: &D
     message.push_str(&format!(" {error}"));
 
     log_error!(message);
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn create_tld_set(tlds: &[&str]) -> HashSet<String> {
+        tlds.iter().map(std::string::ToString::to_string).collect()
+    }
+
+    #[test]
+    fn test_strip_tld_simple() {
+        let tlds = create_tld_set(&["com", "net"]);
+        let domain = "example.com";
+        let result = strip_tld(domain, &tlds);
+        assert_eq!(result, "example");
+    }
+
+    #[test]
+    fn test_strip_tld_with_longer_tld_priority() {
+        let tlds = create_tld_set(&["uk", "co.uk"]);
+        let domain = "example.co.uk";
+        let result = strip_tld(domain, &tlds);
+        assert_eq!(result, "example");
+    }
+
+    #[test]
+    fn test_strip_tld_exact_match_returns_empty() {
+        let tlds = create_tld_set(&["org"]);
+        let domain = "org";
+        let result = strip_tld(domain, &tlds);
+        assert_eq!(result, "");
+    }
+
+    #[test]
+    fn test_strip_tld_no_match_returns_original() {
+        let tlds = create_tld_set(&["com", "net"]);
+        let domain = "example.org";
+        let result = strip_tld(domain, &tlds);
+        assert_eq!(result, "example.org");
+    }
+
+    #[test]
+    fn test_strip_tld_comma_replacement() {
+        let tlds = create_tld_set(&["com"]);
+        let domain = "example,com";
+        let result = strip_tld(domain, &tlds);
+        assert_eq!(result, "example");
+    }
+
+    #[test]
+    fn test_strip_tld_case_insensitive() {
+        let tlds = create_tld_set(&["COM"]);
+        let domain = "example.com";
+        let result = strip_tld(domain, &tlds);
+        assert_eq!(result, "example");
+    }
 }
