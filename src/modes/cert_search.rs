@@ -97,7 +97,8 @@ pub async fn search_certificates(cmd_args: &CommandArgs) -> Result<()> {
                         "Attempt {}/{} failed: {}. Retrying...",
                         attempt, max_retries, error
                     ));
-                } else if attempt >= max_retries {
+                    tokio::time::sleep(tokio::time::Duration::from_secs(attempt + 1)).await;
+                } else {
                     log_error!(format!(
                         "Attempt {}/{} failed: {}.",
                         attempt, max_retries, error
@@ -126,7 +127,7 @@ async fn get_results_json(http_client: &Client, target_domain: &str) -> Result<V
         .await
         .map_err(SearchError::HttpRequestError)?;
 
-    if json.as_array().map_or(true, Vec::is_empty) {
+    if json.as_array().is_none_or(Vec::is_empty) {
         return Err(SearchError::EmptyJsonData);
     }
 

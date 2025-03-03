@@ -1,12 +1,12 @@
 [package]
 name = "reccedns"
 authors = ["Alex Ogden"]
-version = "0.7.1"
+version = "0.8.0"
 edition = "2021"
 
 [dependencies]
-anyhow = "1.0.95"
-clap = { version = "4.5.26", features = ["derive"] }
+anyhow = "1.0.97"
+clap = { version = "4.5.31", features = ["derive"] }
 colored = "3.0.0"
 ctrlc = "3.4.5"
 indicatif = "0.17.11"
@@ -17,8 +17,8 @@ rayon = "1.10.0"
 regex = "1.11.0"
 reqwest = {version = "0.12.12", features = ["json", "blocking"] }
 serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0.138"
-strum = "0.27.0"
-strum_macros = "0.27.0"
-thiserror = "2.0.11"
+serde_json = "1.0.140"
+strum = "0.27.1"
+strum_macros = "0.27.1"
+thiserror = "2.0.12"
 tokio = { version = "1.43.0", features = ["macros", "rt-multi-thread"] }
