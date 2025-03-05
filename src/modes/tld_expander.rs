@@ -97,8 +97,7 @@ fn process_domain(
 ) -> Result<()> {
     let resolver = resolver_selector.select()?;
     let query_types = get_correct_query_types(&cmd_args.query_types, DEFAULT_QUERY_TYPES);
-
-    let mut all_query_results: HashSet<ResourceRecord> = HashSet::new();
+    let mut all_query_results = HashSet::<ResourceRecord>::new();
 
     for query_type in query_types {
         query_timer.start();
@@ -111,14 +110,12 @@ fn process_domain(
         );
         query_timer.stop();
 
-        match query_result {
-            Ok(response) => {
-                all_query_results.extend(response.answers);
-            }
-            Err(error) => {
-                if !error.to_string().contains("(os error 4)") {
-                    print_query_error(cmd_args, domain_name, resolver, &error);
-                }
+        // If the query succeeds, add all answer records.
+        if let Ok(response) = query_result {
+            all_query_results.extend(response.answers);
+        } else if let Err(ref error) = query_result {
+            if !error.to_string().contains("(os error 4)") {
+                print_query_error(cmd_args, domain_name, resolver, error);
             }
         }
     }
@@ -128,12 +125,11 @@ fn process_domain(
         print_query_result(cmd_args, domain_name, resolver, &response_output);
 
         if let Some(output) = results_output {
-            all_query_results
-                .iter()
-                .for_each(|r| output.add_result(r.clone()));
+            for record in all_query_results {
+                output.add_result(record);
+            }
         }
     }
-
     Ok(())
 }
 
