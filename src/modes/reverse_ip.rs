@@ -30,7 +30,13 @@ pub fn reverse_ip(cmd_args: &CommandArgs, dns_resolver_list: &[&str]) -> Result<
     let target_ips = parse_ip(&cmd_args.target)?;
     let total_ips = target_ips.len() as u64;
 
-    let mut resolver_selector = resolver_selector::get_selector(cmd_args, dns_resolver_list);
+    let mut resolver_selector = resolver_selector::get_selector(
+        cmd_args.use_random,
+        dns_resolver_list
+            .iter()
+            .map(std::string::ToString::to_string)
+            .collect(),
+    );
     let mut query_timer = QueryTimer::new(!cmd_args.no_query_stats);
     let mut found_count = 0;
 

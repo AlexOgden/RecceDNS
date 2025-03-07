@@ -29,7 +29,13 @@ pub async fn expand_tlds(cmd_args: &CommandArgs, dns_resolver_list: &[&str]) -> 
     let interrupted = interrupt::initialize_interrupt_handler()?;
     let tld_list = get_tld_list(cmd_args).await?;
 
-    let mut resolver_selector = resolver_selector::get_selector(cmd_args, dns_resolver_list);
+    let mut resolver_selector = resolver_selector::get_selector(
+        cmd_args.use_random,
+        dns_resolver_list
+            .iter()
+            .map(std::string::ToString::to_string)
+            .collect(),
+    );
     let mut query_timer = QueryTimer::new(!cmd_args.no_query_stats);
     let mut results_output = cmd_args
         .json
