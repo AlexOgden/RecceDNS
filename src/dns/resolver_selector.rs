@@ -1,4 +1,3 @@
-use crate::io::cli::CommandArgs;
 use anyhow::Result;
 use rand::seq::IndexedRandom;
 
@@ -17,15 +16,12 @@ pub enum Selector {
 }
 
 impl Selector {
-    pub fn new(use_random: bool, dns_resolvers: &[&str]) -> Self {
-        let resolvers = dns_resolvers.iter().map(|&s| s.to_string()).collect();
+    pub const fn new(use_random: bool, dns_resolvers: Vec<String>) -> Self {
         if use_random {
-            Self::Random {
-                dns_resolvers: resolvers,
-            }
+            Self::Random { dns_resolvers }
         } else {
             Self::Sequential {
-                dns_resolvers: resolvers,
+                dns_resolvers,
                 current_index: 0,
             }
         }
@@ -54,6 +50,7 @@ impl ResolverSelector for Selector {
     }
 }
 
-pub fn get_selector(args: &CommandArgs, dns_resolvers: &[&str]) -> Box<dyn ResolverSelector> {
-    Box::new(Selector::new(args.use_random, dns_resolvers))
+pub fn get_selector(random: bool, dns_resolvers: Vec<String>) -> Box<dyn ResolverSelector> {
+    // Copy the slice of resolver strings
+    Box::new(Selector::new(random, dns_resolvers))
 }
