@@ -8,7 +8,7 @@ I originally started working on this project to learn Rust, improve on network p
 ### Features
 
 - Enumerate the following DNS records:
-	- `A`, `AAAA`, `CNAME`, `MX`, `TXT`, `NS`, `SOA`, `SRV`
+	- `A`, `AAAA`, `CNAME`, `MX`, `TXT`, `NS`, `SOA`, `SRV`, `PTR`
 - Check if domain is using DNSSEC.
 - Check for wildcard domains.
 - Check resolver(s) for NXDOMAIN hijacking.
