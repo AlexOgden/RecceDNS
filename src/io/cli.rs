@@ -73,6 +73,11 @@ pub struct CommandArgs {
     #[arg(short = 'D', long, required = false, value_parser = parse_delay)]
     pub delay: Option<Delay>,
 
+    /// Number of threads to use for subdomain enumeration
+    /// Default is the number of logical CPUs minus one
+    #[arg(short = 'T', long, required = false)]
+    pub threads: Option<usize>,
+
     /// Use a random resolver for each query, otherwise use them sequentially
     #[arg(short = 'r', long, required = false, default_value_t = false)]
     pub use_random: bool,
