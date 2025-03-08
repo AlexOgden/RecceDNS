@@ -133,6 +133,10 @@ With random-range delay
 
 `reccedns -m s -d 1.1.1.1 -w .\subdomains-top1million-5000.txt -t github.com --delay 50-900`
 
+With specified thread count
+
+`reccedns -m s -d 1.1.1.1 -w .\subdomains-top1million-5000.txt -t github.com -T 6`
+
 ### Reverse PTR IP Search
 
 Single IP Address
