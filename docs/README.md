@@ -95,6 +95,8 @@ After building, you can find the executable in the `target/release` directory.
 
 - `-Q` `--quiet` : Don't print any results to the terminal. Can be useful for targets with large amount of results that you are outputing to JSON.
 
+- `-T` `--threads` : Number of threads to use for subdomain enumeration. Defaults to logical cores - 1.
+
 ## Example Usage
 
 ### Basic Enumeration
