@@ -2,10 +2,7 @@ use anyhow::{anyhow, ensure, Context, Result};
 use regex::Regex;
 use std::net::{IpAddr, Ipv4Addr};
 
-use crate::{
-    dns::protocol::QueryType,
-    network::{net_check, types::TransportProtocol},
-};
+use crate::network::{net_check, types::TransportProtocol};
 
 lazy_static::lazy_static! {
     static ref DOMAIN_REGEX: Regex =
@@ -111,21 +108,6 @@ pub fn filter_working_dns_resolvers<'a>(
         .copied()
         .filter(|resolver| working_resolvers.contains(resolver))
         .collect()
-}
-
-pub fn get_correct_query_types(
-    query_types_arg: &[QueryType],
-    allowed_types: &[QueryType],
-) -> Vec<QueryType> {
-    if query_types_arg.is_empty() || query_types_arg.contains(&QueryType::ANY) {
-        allowed_types.to_vec()
-    } else {
-        query_types_arg
-            .iter()
-            .filter(|qt| allowed_types.contains(qt))
-            .cloned()
-            .collect()
-    }
 }
 
 #[cfg(test)]
@@ -264,47 +246,5 @@ mod test {
             println!("{range}");
             assert!(validate_target(range).is_err());
         }
-    }
-
-    #[test]
-    fn test_get_correct_query_types_empty_input() {
-        let allowed = vec![QueryType::A, QueryType::AAAA, QueryType::CNAME];
-        let result = get_correct_query_types(&[], &allowed);
-        assert_eq!(result, allowed);
-    }
-
-    #[test]
-    fn test_get_correct_query_types_with_any() {
-        let allowed = vec![QueryType::A, QueryType::AAAA, QueryType::CNAME];
-        let input = vec![QueryType::ANY];
-        let result = get_correct_query_types(&input, &allowed);
-        assert_eq!(result, allowed);
-    }
-
-    #[test]
-    fn test_get_correct_query_types_partial_overlap() {
-        let allowed = vec![QueryType::A, QueryType::AAAA, QueryType::CNAME];
-        let input = vec![QueryType::A, QueryType::MX, QueryType::TXT];
-        let expected = vec![QueryType::A];
-        let result = get_correct_query_types(&input, &allowed);
-        assert_eq!(result, expected);
-    }
-
-    #[test]
-    fn test_get_correct_query_types_all_allowed() {
-        let allowed = vec![QueryType::A, QueryType::AAAA, QueryType::CNAME];
-        let input = vec![QueryType::A, QueryType::CNAME];
-        let expected = vec![QueryType::A, QueryType::CNAME];
-        let result = get_correct_query_types(&input, &allowed);
-        assert_eq!(result, expected);
-    }
-
-    #[test]
-    fn test_get_correct_query_types_no_allowed() {
-        let allowed = vec![QueryType::A, QueryType::AAAA, QueryType::CNAME];
-        let input = vec![QueryType::MX, QueryType::TXT];
-        let expected: Vec<QueryType> = vec![];
-        let result = get_correct_query_types(&input, &allowed);
-        assert_eq!(result, expected);
     }
 }
