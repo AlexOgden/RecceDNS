@@ -1,6 +1,8 @@
 use anyhow::Result;
 use rand::seq::IndexedRandom;
 
+pub const DEFAULT_RESOLVER: &str = "1.1.1.1";
+
 pub trait ResolverSelector {
     fn select(&mut self) -> Result<&str>;
 }
