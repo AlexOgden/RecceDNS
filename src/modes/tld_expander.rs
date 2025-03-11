@@ -14,9 +14,7 @@ use crate::{
         cli::{self, CommandArgs},
         interrupt,
         json::{DnsEnumerationOutput, Output},
-        logger,
-        validation::get_correct_query_types,
-        wordlist,
+        logger, wordlist,
     },
     log_error, log_info, log_success, log_warn,
     timing::stats::QueryTimer,
@@ -102,7 +100,9 @@ fn process_domain(
     cmd_args: &CommandArgs,
 ) -> Result<()> {
     let resolver = resolver_selector.select()?;
-    let query_types = get_correct_query_types(&cmd_args.query_types, DEFAULT_QUERY_TYPES);
+    let query_types = (!cmd_args.query_types.is_empty())
+        .then(|| cmd_args.query_types.clone())
+        .unwrap_or_else(|| DEFAULT_QUERY_TYPES.to_vec());
     let mut all_query_results = HashSet::<ResourceRecord>::new();
 
     for query_type in query_types {

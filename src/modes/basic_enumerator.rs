@@ -9,7 +9,6 @@ use crate::{
     io::{
         cli::CommandArgs,
         json::{DnsEnumerationOutput, Output},
-        validation::get_correct_query_types,
     },
     log_info,
     timing::stats::QueryTimer,
@@ -38,7 +37,9 @@ pub fn enumerate_records(cmd_args: &CommandArgs, dns_resolvers: &[&str]) -> Resu
         .as_ref()
         .map(|_| DnsEnumerationOutput::new(cmd_args.target.clone()));
 
-    let query_types = get_correct_query_types(&cmd_args.query_types, DEFAULT_QUERY_TYPES);
+    let query_types = (!cmd_args.query_types.is_empty())
+        .then(|| cmd_args.query_types.clone())
+        .unwrap_or_else(|| DEFAULT_QUERY_TYPES.to_vec());
     let resolver = dns_resolvers[0];
     let domain = &cmd_args.target;
     let mut seen_cnames = HashSet::new();
