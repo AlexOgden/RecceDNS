@@ -100,9 +100,11 @@ fn process_domain(
     cmd_args: &CommandArgs,
 ) -> Result<()> {
     let resolver = resolver_selector.select()?;
-    let query_types = (!cmd_args.query_types.is_empty())
-        .then(|| cmd_args.query_types.clone())
-        .unwrap_or_else(|| DEFAULT_QUERY_TYPES.to_vec());
+    let query_types = if cmd_args.query_types.is_empty() {
+        DEFAULT_QUERY_TYPES.to_vec()
+    } else {
+        cmd_args.query_types.clone()
+    };
     let mut all_query_results = HashSet::<ResourceRecord>::new();
 
     for query_type in query_types {
