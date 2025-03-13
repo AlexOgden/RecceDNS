@@ -69,7 +69,7 @@ pub struct CommandArgs {
     )]
     pub query_types: Vec<QueryType>,
 
-    /// Delay in milliseconds between DNS requests for subdomain enumeration
+    /// Delay in milliseconds between DNS requests for subdomain enumeration. Either a single value or a range (e.g. 100-200)
     #[arg(short = 'D', long, required = false, value_parser = parse_delay)]
     pub delay: Option<Delay>,
 
