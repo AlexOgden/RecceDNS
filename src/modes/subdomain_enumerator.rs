@@ -1,11 +1,14 @@
 use anyhow::{anyhow, Result};
 use colored::Colorize;
 use rand::Rng;
-use rayon::prelude::*;
 use std::{
+    cmp::max,
     collections::HashSet,
     io::{self, Write},
-    sync::atomic::Ordering,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        mpsc,
+    },
     thread,
     time::{Duration, Instant},
 };
@@ -16,30 +19,44 @@ use crate::{
         format::create_query_response_string,
         protocol::{QueryType, ResourceRecord},
         resolver::resolve_domain,
-        resolver_selector::{self, ResolverSelector},
+        resolver_selector,
     },
     io::{
         cli::{self, CommandArgs},
         interrupt,
         json::{DnsEnumerationOutput, Output},
-        logger,
-        validation::get_correct_query_types,
-        wordlist,
+        logger, wordlist,
     },
     log_error, log_info, log_question, log_success, log_warn,
-    timing::stats::QueryTimer,
+    network::types::TransportProtocol,
+    timing::delay,
 };
 
+// A type alias for the result sent between threads.
+type SubdomainResult =
+    Result<(String, String, HashSet<ResourceRecord>), (String, String, DnsError)>;
+
+// A type alias for the sender channel.
+type SubdomainResultSender = mpsc::Sender<SubdomainResult>;
+
+// Parameters for the worker threads.
+#[derive(Clone)]
+struct WorkerParams {
+    tx: SubdomainResultSender,
+    subdomains: Vec<String>,
+    query_types: Vec<QueryType>,
+    target: String,
+    transport: TransportProtocol,
+    dns_resolvers: Vec<String>,
+    use_random: bool,
+    delay: Option<delay::Delay>,
+}
+
+// Default query types for subdomain enumeration if none provided.
 const DEFAULT_QUERY_TYPES: &[QueryType] =
     &[QueryType::A, QueryType::AAAA, QueryType::MX, QueryType::TXT];
 
-struct EnumerationState {
-    all_query_responses: HashSet<ResourceRecord>,
-    failed_subdomains: HashSet<String>,
-    found_subdomain_count: u32,
-    results_output: Option<DnsEnumerationOutput>,
-}
-
+#[allow(clippy::too_many_lines)]
 pub fn enumerate_subdomains(cmd_args: &CommandArgs, dns_resolver_list: &[&str]) -> Result<()> {
     let interrupted = interrupt::initialize_interrupt_handler()?;
 
@@ -47,232 +64,244 @@ pub fn enumerate_subdomains(cmd_args: &CommandArgs, dns_resolver_list: &[&str]) 
         return Ok(());
     }
 
-    let query_types = get_correct_query_types(&cmd_args.query_types, DEFAULT_QUERY_TYPES);
-    let subdomain_list = read_wordlist(cmd_args.wordlist.as_ref())?;
-    let mut resolver_selector = resolver_selector::get_selector(cmd_args, dns_resolver_list);
+    let query_types =
+        if cmd_args.query_types.is_empty() || cmd_args.query_types.contains(&QueryType::ANY) {
+            DEFAULT_QUERY_TYPES.to_vec()
+        } else {
+            cmd_args.query_types.clone()
+        };
 
+    // Prepare results output if JSON output is enabled.
+    let mut results_output = if cmd_args.json.is_some() {
+        Some(DnsEnumerationOutput::new(cmd_args.target.clone()))
+    } else {
+        None
+    };
+
+    let subdomain_list = read_wordlist(cmd_args.wordlist.as_ref())?;
+
+    let num_threads = cmd_args
+        .threads
+        .map_or_else(|| max(num_cpus::get() - 1, 1), |threads| threads);
+
+    log_info!(format!(
+        "Starting subdomain enumeration with {} threads",
+        num_threads.to_string().bold()
+    ));
+
+    // Split subdomain list into chunks for each thread.
+    let chunk_size = subdomain_list.len().div_ceil(num_threads);
+    let subdomain_chunks: Vec<Vec<String>> = subdomain_list
+        .chunks(chunk_size)
+        .map(<[std::string::String]>::to_vec)
+        .collect();
+
+    // Setup progress bar.
     let total_subdomains = subdomain_list.len() as u64;
     let progress_bar = cli::setup_progress_bar(total_subdomains);
 
-    let mut query_timer = QueryTimer::new(!cmd_args.no_query_stats);
     let start_time = Instant::now();
 
-    let mut context = EnumerationState {
-        all_query_responses: HashSet::new(),
-        failed_subdomains: HashSet::new(),
-        found_subdomain_count: 0,
-        results_output: cmd_args
-            .json
-            .as_ref()
-            .map(|_| DnsEnumerationOutput::new(cmd_args.target.clone())),
-    };
+    // Create an mpsc channel for collecting results.
+    let (tx, rx) = mpsc::channel();
 
-    for (index, subdomain) in subdomain_list.iter().enumerate() {
+    // Spawn worker threads.
+    for chunk in subdomain_chunks {
+        let worker_params = WorkerParams {
+            tx: tx.clone(),
+            subdomains: chunk,
+            query_types: query_types.clone(),
+            target: cmd_args.target.clone(),
+            transport: cmd_args.transport_protocol.clone(),
+            dns_resolvers: dns_resolver_list
+                .iter()
+                .map(std::string::ToString::to_string)
+                .collect(),
+            use_random: cmd_args.use_random,
+            delay: cmd_args.delay.clone(),
+        };
+
+        thread::spawn(move || {
+            process_subdomain_chunk(worker_params);
+        });
+    }
+    drop(tx); // Close original sender.
+
+    // Process results from the receiver.
+    let mut found_count = 0;
+    let mut failed_subdomains = Vec::new();
+    for (i, received) in rx.into_iter().enumerate() {
         if interrupted.load(Ordering::SeqCst) {
             logger::clear_line();
             log_warn!("Interrupted by user");
             break;
         }
+        match received {
+            Ok((subdomain, resolver, results)) => {
+                let response_str = create_query_response_string(&results);
+                found_count += 1;
+                print_query_result(cmd_args, &subdomain, &resolver, &response_str);
 
-        process_subdomain(
-            cmd_args,
-            &mut *resolver_selector,
-            &query_types,
-            subdomain,
-            &mut query_timer,
-            &mut context,
-        )?;
-
-        cli::update_progress_bar(&progress_bar, index, total_subdomains);
-
-        if let Some(delay_ms) = &cmd_args.delay {
-            if let Some(sleep_delay) = delay_ms.get_delay().checked_sub(0) {
-                thread::sleep(Duration::from_millis(sleep_delay));
+                if let Some(output) = &mut results_output {
+                    results.iter().for_each(|r| output.add_result(r.clone()));
+                }
+            }
+            Err((subdomain, resolver, error)) => {
+                print_query_error(cmd_args, &subdomain, &resolver, &error, false);
+                match error {
+                    DnsError::NoRecordsFound | DnsError::NonExistentDomain => {}
+                    _ => failed_subdomains.push(subdomain),
+                }
             }
         }
+        progress_bar.inc(1);
+        cli::update_progress_bar(
+            &progress_bar,
+            ((i as u64) + 1).try_into().unwrap(),
+            total_subdomains,
+        );
     }
 
     progress_bar.finish_and_clear();
 
-    if !interrupted.load(Ordering::SeqCst) {
-        retry_failed_queries(
-            cmd_args,
-            &mut *resolver_selector,
-            &query_types,
-            &mut query_timer,
-            &mut context,
-        )?;
+    if !failed_subdomains.is_empty() && !cmd_args.no_retry {
+        interrupted.store(false, Ordering::SeqCst);
+        let success_retrys =
+            process_failed_subdomains(cmd_args, dns_resolver_list, failed_subdomains, &interrupted);
+        found_count += success_retrys;
     }
 
     let elapsed_time = start_time.elapsed();
-
     log_info!(
         format!(
             "Done! Found {} subdomains in {:.2?}",
-            context.found_subdomain_count.to_string().bold(),
+            found_count.to_string().bold(),
             elapsed_time
         ),
         true
     );
 
-    if let Some(avg) = query_timer.average() {
-        log_info!(format!(
-            "Average query time: {} ms",
-            avg.to_string().bold().bright_yellow()
-        ));
-    }
-
-    if let (Some(output), Some(file)) = (&context.results_output, &cmd_args.json) {
+    if let (Some(output), Some(file)) = (&results_output, &cmd_args.json) {
         output.write_to_file(file)?;
     }
 
     Ok(())
 }
 
-fn process_subdomain(
-    cmd_args: &CommandArgs,
-    resolver_selector: &mut dyn ResolverSelector,
-    query_types: &[QueryType],
-    subdomain: &str,
-    query_timer: &mut QueryTimer,
-    context: &mut EnumerationState,
-) -> Result<()> {
-    let fqdn = format!("{}.{}", subdomain, cmd_args.target);
-    let resolver = resolver_selector.select()?;
-    context.all_query_responses.clear();
+fn process_subdomain_chunk(params: WorkerParams) {
+    let mut resolver_selector =
+        resolver_selector::get_selector(params.use_random, params.dns_resolvers.clone());
 
-    query_timer.start();
-    let results: Vec<Result<_, _>> = query_types
-        .par_iter()
-        .map(|query_type| {
-            resolve_domain(
+    for subdomain in params.subdomains {
+        let resolver = resolver_selector
+            .select()
+            .unwrap_or(resolver_selector::DEFAULT_RESOLVER);
+        let fqdn = format!("{}.{}", subdomain, params.target);
+        let mut all_results = HashSet::new();
+        let mut first_error: Option<DnsError> = None;
+        // Process all query types.
+        for query_type in &params.query_types {
+            match resolve_domain(resolver, &fqdn, query_type, &params.transport, true) {
+                Ok(packet) => {
+                    all_results.extend(packet.answers);
+                }
+                Err(error) => {
+                    // Save the first error encountered.
+                    if first_error.is_none() {
+                        first_error = Some(error);
+                    }
+                }
+            }
+            // Delay between queries if specified.
+            if let Some(delay_ms) = &params.delay {
+                if let Some(sleep_delay) = delay_ms.get_delay().checked_sub(0) {
+                    thread::sleep(Duration::from_millis(sleep_delay));
+                }
+            }
+        }
+
+        // If any answers were found, send the success result.
+        if !all_results.is_empty() {
+            if params
+                .tx
+                .send(Ok((subdomain, resolver.to_string(), all_results)))
+                .is_err()
+            {
+                return;
+            }
+        } else if let Some(err) = first_error {
+            // Otherwise send the error (if any).
+            if params
+                .tx
+                .send(Err((subdomain, resolver.to_string(), err)))
+                .is_err()
+            {
+                return;
+            }
+        }
+    }
+}
+
+fn process_failed_subdomains(
+    cmd_args: &CommandArgs,
+    dns_resolvers: &[&str],
+    failed_subdomains: Vec<String>,
+    interrupt: &AtomicBool,
+) -> usize {
+    log_info!(
+        format!(
+            "Retrying {} failed subdomains",
+            failed_subdomains.len().to_string().bold(),
+        ),
+        true
+    );
+    let mut resolver_selector = resolver_selector::get_selector(
+        cmd_args.use_random,
+        dns_resolvers
+            .iter()
+            .map(std::string::ToString::to_string)
+            .collect(),
+    );
+
+    let mut found_count = 0;
+    for subdomain in failed_subdomains {
+        if interrupt.load(Ordering::SeqCst) {
+            break;
+        }
+        let fqdn = format!("{}.{}", subdomain, cmd_args.target);
+        let resolver = resolver_selector
+            .select()
+            .unwrap_or(resolver_selector::DEFAULT_RESOLVER);
+        let mut results = HashSet::new();
+
+        for query_type in &cmd_args.query_types {
+            match resolve_domain(
                 resolver,
                 &fqdn,
                 query_type,
                 &cmd_args.transport_protocol,
-                !cmd_args.no_recursion,
-            )
-        })
-        .collect();
-    query_timer.stop();
-
-    for result in results {
-        match result {
-            Ok(response) => {
-                context.all_query_responses.extend(response.answers);
-            }
-            Err(error) => {
-                if !cmd_args.no_retry
-                    && !matches!(
-                        error,
-                        DnsError::NoRecordsFound | DnsError::NonExistentDomain
-                    )
-                {
-                    context.failed_subdomains.insert(subdomain.to_string());
-                }
-
-                if !error.to_string().contains("(os error 4)") {
-                    print_query_error(cmd_args, subdomain, resolver, &error, false);
-                }
-            }
-        }
-    }
-
-    if !context.all_query_responses.is_empty() {
-        if let Some(output) = &mut context.results_output {
-            context
-                .all_query_responses
-                .iter()
-                .for_each(|r| output.add_result(r.clone()));
-        }
-
-        let response_str = create_query_response_string(&context.all_query_responses);
-        print_query_result(cmd_args, subdomain, resolver, &response_str);
-        context.found_subdomain_count += 1;
-    }
-
-    Ok(())
-}
-
-fn retry_failed_queries(
-    cmd_args: &CommandArgs,
-    resolver_selector: &mut dyn ResolverSelector,
-    query_types: &[QueryType],
-    query_timer: &mut QueryTimer,
-    context: &mut EnumerationState,
-) -> Result<()> {
-    if !context.failed_subdomains.is_empty() {
-        let count = context.failed_subdomains.len();
-
-        log_warn!(
-            format!("Retrying {} failed queries", count.to_string().bold()),
-            true
-        );
-    }
-
-    let mut retry_failed_count: u32 = 0;
-    let retries: Vec<String> = context.failed_subdomains.drain().collect();
-
-    for subdomain in retries {
-        let query_resolver = resolver_selector.select()?;
-        let fqdn = format!("{}.{}", subdomain, cmd_args.target);
-
-        for query_type in query_types {
-            query_timer.start();
-            let query_result = resolve_domain(
-                query_resolver,
-                &fqdn,
-                query_type,
-                &cmd_args.transport_protocol,
-                !&cmd_args.no_recursion,
-            );
-            query_timer.stop();
-
-            match query_result {
-                Ok(response) => {
-                    context.all_query_responses.extend(response.answers);
-                }
+                true,
+            ) {
+                Ok(packet) => results.extend(packet.answers),
                 Err(error) => {
-                    if !matches!(
-                        error,
-                        DnsError::NoRecordsFound | DnsError::NonExistentDomain
-                    ) {
-                        retry_failed_count += 1;
-                        context.failed_subdomains.insert(subdomain.clone());
-                    }
-
-                    print_query_error(cmd_args, &subdomain, query_resolver, &error, true);
-
-                    if matches!(error, DnsError::NonExistentDomain) {
-                        break;
-                    }
+                    print_query_error(cmd_args, &subdomain, resolver, &error, true);
+                    break;
                 }
             }
+            thread::sleep(Duration::from_millis(125));
         }
 
-        if !context.all_query_responses.is_empty() {
-            if let Some(output) = &mut context.results_output {
-                for response in &context.all_query_responses {
-                    output.add_result(response.clone());
-                }
-            }
-
-            let response_str = create_query_response_string(&context.all_query_responses);
-            print_query_result(cmd_args, &subdomain, query_resolver, &response_str);
-            context.found_subdomain_count += 1;
+        if !results.is_empty() {
+            print_query_result(
+                cmd_args,
+                &subdomain,
+                resolver,
+                &create_query_response_string(&results),
+            );
+            found_count += 1;
         }
-
-        thread::sleep(Duration::from_millis(50));
     }
-
-    if retry_failed_count > 0 {
-        log_error!(format!(
-            "Failed to resolve {retry_failed_count} subdomains after retries",
-            retry_failed_count = retry_failed_count.to_string().bold()
-        ));
-    }
-
-    Ok(())
+    found_count
 }
 
 fn read_wordlist(wordlist_path: Option<&String>) -> Result<Vec<String>> {
@@ -308,7 +337,7 @@ fn handle_wildcard_domain(args: &CommandArgs, dns_resolvers: &[&str]) -> Result<
 fn check_wildcard_domain(args: &CommandArgs, dns_resolvers: &[&str]) -> Result<bool> {
     let mut rng = rand::rng();
     let max_label_length: u8 = 63;
-    let attempts: u8 = 3;
+    let attempts: u8 = 2;
 
     dns_resolvers.first().map_or_else(
         || Err(anyhow!("No DNS resolvers available")),

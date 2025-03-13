@@ -1,9 +1,8 @@
 use anyhow::{Context, Result};
-use lazy_static::lazy_static;
 use rand::Rng;
 use std::io::{Read, Write};
 use std::net::{Ipv4Addr, TcpStream, UdpSocket};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::Duration;
 
 use crate::dns::{
@@ -13,30 +12,21 @@ use crate::dns::{
 use crate::io::packet_buffer::PacketBuffer;
 use crate::network::types::TransportProtocol;
 
-lazy_static! {
-    static ref UDP_SOCKET: Mutex<Option<Arc<UdpSocket>>> = Mutex::new(None);
-}
 const DNS_PORT: u8 = 53;
 const UDP_BUFFER_SIZE: usize = 512;
 
 fn initialize_udp_socket() -> Result<Arc<UdpSocket>> {
-    let mut socket_guard = UDP_SOCKET.lock().expect("Failed to lock the socket mutex");
-    if socket_guard.is_none() {
-        let socket = UdpSocket::bind("0.0.0.0:0")?;
-        let timeout = Duration::from_secs(3);
+    let socket = UdpSocket::bind("0.0.0.0:0")?;
+    let timeout = Duration::from_millis(1500);
 
-        socket
-            .set_read_timeout(Some(timeout))
-            .context("Failed to set read timeout")?;
-        socket
-            .set_write_timeout(Some(timeout))
-            .context("Failed to set write timeout")?;
+    socket
+        .set_read_timeout(Some(timeout))
+        .context("Failed to set read timeout")?;
+    socket
+        .set_write_timeout(Some(timeout))
+        .context("Failed to set write timeout")?;
 
-        *socket_guard = Some(Arc::new(socket));
-    }
-    Ok(Arc::clone(
-        socket_guard.as_ref().expect("Socket should be initialized"),
-    ))
+    Ok(Arc::new(socket))
 }
 
 pub fn resolve_domain(
@@ -85,6 +75,8 @@ fn execute_dns_query(
     let dns_server_address = format!("{dns_resolver}:{DNS_PORT}");
 
     let mut query = build_dns_query(domain, query_type, recursion)?;
+    let query_id = query.header.id;
+
     let mut req_buffer = PacketBuffer::new();
     query.write(&mut req_buffer)?;
     let response = match transport_protocol {
@@ -95,7 +87,15 @@ fn execute_dns_query(
             send_dns_query_tcp(req_buffer.get_buffer_to_pos(), &dns_server_address)?
         }
     };
-    parse_dns_response(&response)
+    let parsed_response = parse_dns_response(&response)?;
+    if parsed_response.header.id != query_id {
+        return Err(DnsError::InvalidData(format!(
+            "Response ID {} does not match query ID {}",
+            parsed_response.header.id, query_id
+        )));
+    }
+
+    Ok(parsed_response)
 }
 
 fn send_dns_query_udp(

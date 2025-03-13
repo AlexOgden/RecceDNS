@@ -116,18 +116,18 @@ async fn get_results_json(http_client: &Client, target_domain: &str) -> Result<V
         .get(&url)
         .send()
         .await
-        .map_err(SearchError::HttpRequestError)?;
-
-    if !response.status().is_success() {
-        return Err(SearchError::NonSuccessStatus(response.status()));
-    }
+        .map_err(SearchError::HttpRequestError)?
+        .error_for_status() // returns error if status is not 2xx
+        .map_err(|err| {
+            SearchError::NonSuccessStatus(err.status().unwrap_or(StatusCode::INTERNAL_SERVER_ERROR))
+        })?;
 
     let json = response
         .json::<Value>()
         .await
         .map_err(SearchError::HttpRequestError)?;
 
-    if json.as_array().is_none_or(Vec::is_empty) {
+    if json.as_array().is_none_or(std::vec::Vec::is_empty) {
         return Err(SearchError::EmptyJsonData);
     }
 
