@@ -8,7 +8,7 @@ I originally started working on this project to learn Rust, improve on network p
 ### Features
 
 - Enumerate the following DNS records:
-	- `A`, `AAAA`, `CNAME`, `MX`, `TXT`, `NS`, `SOA`, `SRV`
+	- `A`, `AAAA`, `CNAME`, `MX`, `TXT`, `NS`, `SOA`, `SRV`, `PTR`
 - Check if domain is using DNSSEC.
 - Check for wildcard domains.
 - Check resolver(s) for NXDOMAIN hijacking.
@@ -95,6 +95,8 @@ After building, you can find the executable in the `target/release` directory.
 
 - `-Q` `--quiet` : Don't print any results to the terminal. Can be useful for targets with large amount of results that you are outputing to JSON.
 
+- `-T` `--threads` : Number of threads to use for subdomain enumeration. Defaults to logical cores - 1.
+
 ## Example Usage
 
 ### Basic Enumeration
@@ -130,6 +132,10 @@ With consistent delay
 With random-range delay
 
 `reccedns -m s -d 1.1.1.1 -w .\subdomains-top1million-5000.txt -t github.com --delay 50-900`
+
+With specified thread count
+
+`reccedns -m s -d 1.1.1.1 -w .\subdomains-top1million-5000.txt -t github.com -T 6`
 
 ### Reverse PTR IP Search
 

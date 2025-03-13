@@ -14,9 +14,7 @@ use crate::{
         cli::{self, CommandArgs},
         interrupt,
         json::{DnsEnumerationOutput, Output},
-        logger,
-        validation::get_correct_query_types,
-        wordlist,
+        logger, wordlist,
     },
     log_error, log_info, log_success, log_warn,
     timing::stats::QueryTimer,
@@ -29,7 +27,13 @@ pub async fn expand_tlds(cmd_args: &CommandArgs, dns_resolver_list: &[&str]) -> 
     let interrupted = interrupt::initialize_interrupt_handler()?;
     let tld_list = get_tld_list(cmd_args).await?;
 
-    let mut resolver_selector = resolver_selector::get_selector(cmd_args, dns_resolver_list);
+    let mut resolver_selector = resolver_selector::get_selector(
+        cmd_args.use_random,
+        dns_resolver_list
+            .iter()
+            .map(std::string::ToString::to_string)
+            .collect(),
+    );
     let mut query_timer = QueryTimer::new(!cmd_args.no_query_stats);
     let mut results_output = cmd_args
         .json
@@ -96,7 +100,11 @@ fn process_domain(
     cmd_args: &CommandArgs,
 ) -> Result<()> {
     let resolver = resolver_selector.select()?;
-    let query_types = get_correct_query_types(&cmd_args.query_types, DEFAULT_QUERY_TYPES);
+    let query_types = if cmd_args.query_types.is_empty() {
+        DEFAULT_QUERY_TYPES.to_vec()
+    } else {
+        cmd_args.query_types.clone()
+    };
     let mut all_query_results = HashSet::<ResourceRecord>::new();
 
     for query_type in query_types {

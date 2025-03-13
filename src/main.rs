@@ -6,6 +6,7 @@ mod timing;
 
 use anyhow::{ensure, Result};
 use io::{cli::OperationMode, validation::filter_working_dns_resolvers};
+use network::types::TransportProtocol;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -27,6 +28,10 @@ async fn main() -> Result<()> {
         !dns_resolvers.is_empty(),
         "No DNS Resolvers in list! At least one resolver must be working!"
     );
+
+    if cmd_args.transport_protocol == TransportProtocol::TCP {
+        log_info!("Using TCP for DNS queries");
+    }
 
     match cmd_args.operation_mode {
         OperationMode::BasicEnumeration => {
