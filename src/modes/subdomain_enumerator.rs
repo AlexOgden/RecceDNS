@@ -214,9 +214,7 @@ fn process_subdomain_chunk(params: WorkerParams) {
             }
             // Delay between queries if specified.
             if let Some(delay_ms) = &params.delay {
-                if let Some(sleep_delay) = delay_ms.get_delay().checked_sub(0) {
-                    thread::sleep(Duration::from_millis(sleep_delay));
-                }
+                thread::sleep(Duration::from_millis(delay_ms.get_delay()));
             }
         }
 

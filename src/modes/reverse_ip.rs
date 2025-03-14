@@ -103,10 +103,7 @@ pub fn reverse_ip(cmd_args: &CommandArgs, dns_resolver_list: &[&str]) -> Result<
         }
 
         if let Some(delay_ms) = &cmd_args.delay {
-            let sleep_delay = delay_ms.get_delay();
-            if sleep_delay > 0 {
-                thread::sleep(Duration::from_millis(sleep_delay));
-            }
+            thread::sleep(Duration::from_millis(delay_ms.get_delay()));
         }
     }
 
