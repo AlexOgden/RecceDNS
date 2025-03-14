@@ -1,7 +1,7 @@
 use anyhow::{Context, Result};
 use rand::Rng;
 use std::io::{Read, Write};
-use std::net::{Ipv4Addr, TcpStream, UdpSocket};
+use std::net::{Ipv4Addr, Ipv6Addr, TcpStream, UdpSocket};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -72,26 +72,26 @@ fn execute_dns_query(
     query_type: &QueryType,
     recursion: bool,
 ) -> Result<DnsPacket, DnsError> {
-    let dns_server_address = format!("{dns_resolver}:{DNS_PORT}");
-
     let mut query = build_dns_query(domain, query_type, recursion)?;
     let query_id = query.header.id;
 
     let mut req_buffer = PacketBuffer::new();
     query.write(&mut req_buffer)?;
+    let request_data = req_buffer.get_buffer_to_pos();
+
+    let dns_server_address = format!("{dns_resolver}:{DNS_PORT}");
     let response = match transport_protocol {
-        TransportProtocol::UDP => {
-            send_query_udp(socket, req_buffer.get_buffer_to_pos(), &dns_server_address)?
-        }
-        TransportProtocol::TCP => {
-            send_query_tcp(req_buffer.get_buffer_to_pos(), &dns_server_address)?
-        }
+        TransportProtocol::UDP => send_query_udp(socket, request_data, &dns_server_address)?,
+        TransportProtocol::TCP => send_query_tcp(request_data, &dns_server_address)?,
     };
+
     let parsed_response = parse_dns_response(&response)?;
+
+    // Verify the response ID matches our query ID to prevent spoofing
     if parsed_response.header.id != query_id {
         return Err(DnsError::InvalidData(format!(
-            "Response ID {} does not match query ID {}",
-            parsed_response.header.id, query_id
+            "Response ID {} does not match query ID {} for domain '{}'",
+            parsed_response.header.id, query_id, domain
         )));
     }
 
@@ -99,27 +99,45 @@ fn execute_dns_query(
 }
 
 fn send_query_udp(socket: &UdpSocket, query: &[u8], dns_server: &str) -> Result<Vec<u8>, DnsError> {
-    socket.send_to(query, dns_server).map_err(|error| {
-        if error.raw_os_error() == Some(10060) {
-            DnsError::Network(format!(
-                "Failed to send query to {dns_server} (UDP): Connection attempt failed."
-            ))
-        } else {
-            DnsError::Network(format!(
+    socket
+        .send_to(query, dns_server)
+        .map_err(|error| match error.kind() {
+            std::io::ErrorKind::TimedOut => {
+                DnsError::Network(format!("Timeout sending query to {dns_server} (UDP)"))
+            }
+            std::io::ErrorKind::ConnectionRefused => {
+                DnsError::Network(format!("Connection refused by {dns_server} (UDP)"))
+            }
+            _ => DnsError::Network(format!(
                 "Failed to send query to {dns_server} (UDP): {error}"
-            ))
-        }
-    })?;
+            )),
+        })?;
 
-    let mut response_buffer = [0; UDP_BUFFER_SIZE];
-    let (bytes_received, _) = socket.recv_from(&mut response_buffer).map_err(|error| {
-        if error.raw_os_error() == Some(10060) {
-            DnsError::Network(format!("UDP receive timeout ({dns_server})"))
-        } else {
-            DnsError::Network(format!("UDP receive error: {error}"))
-        }
-    })?;
+    let mut response_buffer = [0u8; UDP_BUFFER_SIZE];
+    let (bytes_received, remote_addr) =
+        socket
+            .recv_from(&mut response_buffer)
+            .map_err(|error| match error.kind() {
+                std::io::ErrorKind::TimedOut => DnsError::Network(format!(
+                    "Timeout waiting for response from {dns_server} (UDP)"
+                )),
+                _ => DnsError::Network(format!("Error receiving DNS response: {error}")),
+            })?;
 
+    if bytes_received == 0 {
+        return Err(DnsError::Network(format!(
+            "Empty response received from {dns_server}"
+        )));
+    }
+
+    // Verify the response came from the expected server
+    if remote_addr.to_string() != dns_server {
+        return Err(DnsError::Network(format!(
+            "Response received from unexpected address: {remote_addr}, expected: {dns_server}"
+        )));
+    }
+
+    // Create a properly sized response buffer
     Ok(response_buffer[..bytes_received].to_vec())
 }
 
@@ -183,21 +201,35 @@ fn build_dns_query(
     query_type: &QueryType,
     recursion: bool,
 ) -> Result<DnsPacket, DnsError> {
+    // Validate domain name
     if domain.is_empty() {
         return Err(DnsError::InvalidData(
             "Domain name cannot be empty".to_owned(),
         ));
     }
 
-    // Reverse the IP address for PTR queries
+    if domain.len() > 253 {
+        return Err(DnsError::InvalidData(format!(
+            "Domain name exceeds maximum length of 253 characters: {domain}"
+        )));
+    }
+
+    // Convert IP address to PTR format if needed
     let domain = if query_type == &QueryType::PTR {
-        domain
-            .parse::<Ipv4Addr>()
-            .map_or_else(|_| domain.to_owned(), ip_to_ptr)
+        // Try parsing as IPv4 first
+        domain.parse::<Ipv4Addr>().map_or_else(
+            |_| {
+                domain
+                    .parse::<Ipv6Addr>()
+                    .map_or_else(|_| domain.to_owned(), |ipv6| ipv6_to_ptr(&ipv6))
+            },
+            ipv4_to_ptr,
+        )
     } else {
         domain.to_owned()
     };
 
+    // Build the query packet
     let mut packet = DnsPacket::new();
     packet.header.id = rand::rng().random();
     packet.header.questions = 1;
@@ -209,7 +241,7 @@ fn build_dns_query(
     Ok(packet)
 }
 
-fn ip_to_ptr(ip: Ipv4Addr) -> String {
+fn ipv4_to_ptr(ip: Ipv4Addr) -> String {
     ip.octets()
         .iter()
         .rev()
@@ -217,6 +249,23 @@ fn ip_to_ptr(ip: Ipv4Addr) -> String {
         .collect::<Vec<_>>()
         .join(".")
         + ".in-addr.arpa"
+}
+
+fn ipv6_to_ptr(ip: &Ipv6Addr) -> String {
+    // Convert IPv6 to its expanded hex representation without colons
+    let mut expanded = String::with_capacity(32); // 8 segments × 4 chars each
+    for segment in ip.segments() {
+        expanded.push_str(&format!("{segment:04x}"));
+    }
+
+    let reversed = expanded.chars().rev().fold(String::new(), |mut acc, c| {
+        acc.push(c);
+        acc.push('.');
+        acc
+    });
+
+    // Add the ip6.arpa suffix
+    format!("{reversed}ip6.arpa")
 }
 
 fn parse_dns_response(response: &[u8]) -> Result<DnsPacket, DnsError> {
@@ -278,9 +327,9 @@ mod tests {
     }
 
     #[test]
-    fn test_ip_to_ptr() {
+    fn test_ipv4_to_ptr() {
         let ip = Ipv4Addr::new(192, 168, 1, 22);
-        let ptr = ip_to_ptr(ip);
+        let ptr = ipv4_to_ptr(ip);
 
         assert_eq!(ptr, "22.1.168.192.in-addr.arpa");
     }
@@ -293,5 +342,59 @@ mod tests {
 
         assert_eq!(dns_packet.questions[0].name, "50.1.168.192.in-addr.arpa");
         assert_eq!(dns_packet.questions[0].qtype, query_type);
+    }
+
+    #[test]
+    fn test_ipv6_to_ptr() {
+        let ip = Ipv6Addr::new(0x2001, 0xdb8, 0x0, 0x0, 0x0, 0x0, 0x0, 0x1);
+        let ptr = ipv6_to_ptr(&ip);
+
+        assert_eq!(
+            ptr,
+            "1.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.8.b.d.0.1.0.0.2.ip6.arpa"
+        );
+    }
+
+    #[test]
+    fn test_build_dns_query_ipv6_ptr() {
+        let domain = "2001:db8::1";
+        let query_type = QueryType::PTR;
+        let dns_packet = build_dns_query(domain, &query_type, true).unwrap();
+
+        assert_eq!(
+            dns_packet.questions[0].name,
+            "1.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.8.b.d.0.1.0.0.2.ip6.arpa"
+        );
+        assert_eq!(dns_packet.questions[0].qtype, query_type);
+    }
+
+    #[test]
+    fn test_domain_name_too_long() {
+        let long_domain = "a".repeat(254);
+        let query_type = QueryType::A;
+        let result = build_dns_query(&long_domain, &query_type, true);
+
+        assert!(result.is_err());
+        assert!(matches!(result.unwrap_err(), DnsError::InvalidData(_)));
+    }
+
+    #[test]
+    fn test_normal_domain_ptr_unchanged() {
+        let domain = "example.com";
+        let query_type = QueryType::PTR;
+        let dns_packet = build_dns_query(domain, &query_type, true).unwrap();
+
+        assert_eq!(dns_packet.questions[0].name, domain);
+        assert_eq!(dns_packet.questions[0].qtype, query_type);
+    }
+
+    #[test]
+    fn test_query_id_is_random() {
+        let domain = "example.com";
+        let query_type = QueryType::A;
+        let packet1 = build_dns_query(domain, &query_type, true).unwrap();
+        let packet2 = build_dns_query(domain, &query_type, true).unwrap();
+
+        assert_ne!(packet1.header.id, packet2.header.id);
     }
 }
