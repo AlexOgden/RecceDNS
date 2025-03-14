@@ -81,10 +81,10 @@ fn execute_dns_query(
     query.write(&mut req_buffer)?;
     let response = match transport_protocol {
         TransportProtocol::UDP => {
-            send_dns_query_udp(socket, req_buffer.get_buffer_to_pos(), &dns_server_address)?
+            send_query_udp(socket, req_buffer.get_buffer_to_pos(), &dns_server_address)?
         }
         TransportProtocol::TCP => {
-            send_dns_query_tcp(req_buffer.get_buffer_to_pos(), &dns_server_address)?
+            send_query_tcp(req_buffer.get_buffer_to_pos(), &dns_server_address)?
         }
     };
     let parsed_response = parse_dns_response(&response)?;
@@ -98,11 +98,7 @@ fn execute_dns_query(
     Ok(parsed_response)
 }
 
-fn send_dns_query_udp(
-    socket: &UdpSocket,
-    query: &[u8],
-    dns_server: &str,
-) -> Result<Vec<u8>, DnsError> {
+fn send_query_udp(socket: &UdpSocket, query: &[u8], dns_server: &str) -> Result<Vec<u8>, DnsError> {
     socket.send_to(query, dns_server).map_err(|error| {
         if error.raw_os_error() == Some(10060) {
             DnsError::Network(format!(
@@ -127,7 +123,7 @@ fn send_dns_query_udp(
     Ok(response_buffer[..bytes_received].to_vec())
 }
 
-fn send_dns_query_tcp(query: &[u8], dns_server: &str) -> Result<Vec<u8>, DnsError> {
+fn send_query_tcp(query: &[u8], dns_server: &str) -> Result<Vec<u8>, DnsError> {
     const MAX_RESPONSE_SIZE: usize = 16384;
 
     // Establish TCP connection to the DNS server
