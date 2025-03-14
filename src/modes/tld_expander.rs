@@ -69,9 +69,7 @@ pub async fn expand_tlds(cmd_args: &CommandArgs, dns_resolver_list: &[&str]) -> 
         )?;
 
         if let Some(delay_ms) = &cmd_args.delay {
-            if let Some(sleep_delay) = delay_ms.get_delay().checked_sub(0) {
-                thread::sleep(Duration::from_millis(sleep_delay));
-            }
+            thread::sleep(Duration::from_millis(delay_ms.get_delay()));
         }
     }
 
