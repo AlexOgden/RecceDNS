@@ -17,7 +17,7 @@ const UDP_BUFFER_SIZE: usize = 512;
 
 fn initialize_udp_socket() -> Result<Arc<UdpSocket>> {
     let socket = UdpSocket::bind("0.0.0.0:0")?;
-    let timeout = Duration::from_millis(1500);
+    let timeout = Duration::from_millis(1750);
 
     socket
         .set_read_timeout(Some(timeout))
