@@ -128,6 +128,8 @@ fn send_dns_query_udp(
 }
 
 fn send_dns_query_tcp(query: &[u8], dns_server: &str) -> Result<Vec<u8>, DnsError> {
+    const MAX_RESPONSE_SIZE: usize = 16384;
+
     // Establish TCP connection to the DNS server
     let mut stream = TcpStream::connect(dns_server)
         .map_err(|e| DnsError::Network(format!("Failed to connect to {dns_server} (TCP): {e}")))?;
@@ -159,11 +161,23 @@ fn send_dns_query_tcp(query: &[u8], dns_server: &str) -> Result<Vec<u8>, DnsErro
         .map_err(|_| DnsError::Network("Failed to read response length".to_owned()))?;
     let response_len = u16::from_be_bytes(len_buffer) as usize;
 
+    if response_len == 0 {
+        return Err(DnsError::InvalidData("Empty response received".to_owned()));
+    }
+
+    if response_len > MAX_RESPONSE_SIZE {
+        return Err(DnsError::InvalidData(format!(
+            "Response length too large: {response_len} bytes (max: {MAX_RESPONSE_SIZE})"
+        )));
+    }
+
     // Read the actual response
     let mut response_buffer = vec![0u8; response_len];
     stream
         .read_exact(&mut response_buffer)
         .map_err(|_| DnsError::Network("Failed to read response".to_owned()))?;
+
+    let _ = stream.shutdown(std::net::Shutdown::Both);
 
     Ok(response_buffer)
 }
