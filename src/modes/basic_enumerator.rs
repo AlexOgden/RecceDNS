@@ -111,7 +111,9 @@ fn check_dnssec(resolver: &str, domain: &str, cmd_args: &CommandArgs) -> Result<
         Err(err) => return Err(err.into()),
     };
 
-    println!("{}", format_response("DNSSEC", dnssec_status));
+    if !cmd_args.quiet {
+        println!("{}", format_response("DNSSEC", dnssec_status));
+    }
     Ok(())
 }
 
