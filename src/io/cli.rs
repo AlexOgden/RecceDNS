@@ -165,6 +165,7 @@ pub fn print_ascii_art() {
 }
 
 /// Sets up the progress bar with the given total
+#[allow(clippy::literal_string_with_formatting_args)]
 pub fn setup_progress_bar(total: u64) -> ProgressBar {
     let pb = ProgressBar::new(total);
     let style = ProgressStyle::default_bar()
