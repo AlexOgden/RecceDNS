@@ -195,17 +195,23 @@ fn process_subdomain_chunk(params: WorkerParams) {
     for subdomain in params.subdomains {
         let resolver = resolver_selector
             .select()
-            .unwrap_or(resolver_selector::DEFAULT_RESOLVER);
+            .unwrap_or(resolver_selector::DEFAULT_RESOLVER)
+            .to_string();
         let fqdn = format!("{}.{}", subdomain, params.target);
         let mut all_results = HashSet::new();
         let mut first_error: Option<DnsError> = None;
         // Process all query types.
         for query_type in &params.query_types {
-            match resolve_domain(resolver, &fqdn, query_type, &params.transport, true) {
+            match resolve_domain(&resolver, &fqdn, query_type, &params.transport, true) {
                 Ok(packet) => {
                     all_results.extend(packet.answers);
                 }
                 Err(error) => {
+                    if matches!(error, DnsError::Network(_)) {
+                        let duration = rand::rng().random_range(3..=25);
+                        resolver_selector.disable(&resolver, Duration::from_secs(duration));
+                    }
+
                     // Save the first error encountered.
                     if first_error.is_none() {
                         first_error = Some(error);
