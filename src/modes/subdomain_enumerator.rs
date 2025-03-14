@@ -333,33 +333,41 @@ fn handle_wildcard_domain(args: &CommandArgs, dns_resolvers: &[&str]) -> Result<
 }
 
 fn check_wildcard_domain(args: &CommandArgs, dns_resolvers: &[&str]) -> Result<bool> {
+    const ATTEMPTS: u8 = 3;
+    const MAX_PREFIX_LENGTH: usize = 63;
+
+    let resolver = dns_resolvers
+        .first()
+        .ok_or_else(|| anyhow!("No DNS resolvers available"))?;
+
     let mut rng = rand::rng();
-    let max_label_length: u8 = 63;
-    let attempts: u8 = 2;
 
-    dns_resolvers.first().map_or_else(
-        || Err(anyhow!("No DNS resolvers available")),
-        |query_resolver| {
-            let is_wildcard = (0..attempts).any(|_| {
-                let random_length = rng.random_range(10..=max_label_length);
-                let random_subdomain: String = (0..random_length)
-                    .map(|_| rng.random_range('a'..='z'))
-                    .collect();
-                let fqdn = format!("{}.{}", random_subdomain, args.target);
+    // Check if multiple random subdomains successfully resolve
+    // A wildcard domain will resolve ANY subdomain
+    let successful_resolutions = (0..ATTEMPTS)
+        .filter(|_| {
+            // Generate a random subdomain prefix
+            let random_length = rng.random_range(10..=MAX_PREFIX_LENGTH);
+            let random_subdomain: String = (5..random_length)
+                .map(|_| rng.random_range('a'..='z'))
+                .collect();
 
-                resolve_domain(
-                    query_resolver,
-                    &fqdn,
-                    &QueryType::A,
-                    &args.transport_protocol,
-                    true,
-                )
-                .is_err()
-            });
+            // Append a unique identifier to avoid DNS caching issues
+            let fqdn = format!(
+                "{}-{}.{}",
+                random_subdomain,
+                rng.random_range(0..=200),
+                args.target
+            );
 
-            Ok(!is_wildcard) // If any random subdomain fails to resolve, it's not a wildcard domain
-        },
-    )
+            let query_type = &DEFAULT_QUERY_TYPES[rng.random_range(0..DEFAULT_QUERY_TYPES.len())];
+
+            // A wildcard domain will successfully resolve
+            resolve_domain(resolver, &fqdn, query_type, &args.transport_protocol, true).is_ok()
+        })
+        .count();
+
+    Ok(successful_resolutions >= 2)
 }
 
 fn print_query_result(args: &CommandArgs, subdomain: &str, resolver: &str, response: &str) {
