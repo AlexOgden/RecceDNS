@@ -5,7 +5,11 @@ use colored::Colorize;
 use indicatif::{ProgressBar, ProgressStyle};
 
 use super::validation::{self, validate_dns_resolvers};
-use crate::{dns::protocol::QueryType, network::types::TransportProtocol, timing::delay::Delay};
+use crate::{
+    dns::{protocol::QueryType, resolver_selector},
+    network::types::TransportProtocol,
+    timing::delay::Delay,
+};
 
 const PROGRESS_TICK_CHARS: &str = "/|\\- ";
 
@@ -43,7 +47,7 @@ pub struct CommandArgs {
     pub target: String,
 
     /// IPv4 Address of the DNS resolver(s) to use (comma-separated). Multiple resolvers will be selected either randomly or sequentially
-    #[arg(short, long, default_value = "1.1.1.1", value_parser = validate_dns_resolvers, required = false)]
+    #[arg(short, long, default_value = resolver_selector::DEFAULT_RESOLVER, value_parser = validate_dns_resolvers, required = false)]
     pub dns_resolvers: String,
 
     /// Transport protocol to use for DNS queries
@@ -110,6 +114,10 @@ pub struct CommandArgs {
     /// Don't print the DNS records in subdomain enumeration, only show the subdomains
     #[arg(long)]
     pub no_print_records: bool,
+
+    /// Don't print errors for failed queries during subdomain enumeration
+    #[arg(long)]
+    pub no_print_errors: bool,
 
     /// Don't calculate average query time and print it at the end
     #[arg(long)]
