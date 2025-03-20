@@ -60,7 +60,7 @@ jobs:
           draft: false
           prerelease: false
 
-  build_and_upload:
+  build_and_upload_standard:
     needs: create_release
     name: Build and Upload - ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
@@ -70,18 +70,12 @@ jobs:
           - os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
             platform_name: linux-x86_64
-          - os: ubuntu-latest
-            target: armv7-unknown-linux-gnueabihf
-            platform_name: linux-armv7
-          - os: ubuntu-latest
-            target: aarch64-unknown-linux-gnu
-            platform_name: linux-aarch64
           - os: windows-latest
             target: x86_64-pc-windows-msvc
-            platform_name: win
+            platform_name: win-x86_64
           - os: macos-latest
             target: x86_64-apple-darwin
-            platform_name: mac
+            platform_name: mac-x86_64
 
     steps:
       - name: Checkout repository
@@ -94,50 +88,11 @@ jobs:
           target: ${{ matrix.target }}
           override: true
 
-      # Modified cross-compilation tools installation for ARM targets
-      - name: Install cross-compilation tools for ARMv7
-        if: matrix.target == 'armv7-unknown-linux-gnueabihf'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y gcc-arm-linux-gnueabihf g++-arm-linux-gnueabihf libc6-dev-armhf-cross
-          echo 'CARGO_TARGET_ARMV7_UNKNOWN_LINUX_GNUEABIHF_LINKER=arm-linux-gnueabihf-gcc' >> $GITHUB_ENV
-
-      # New step specifically for ARM64
-      - name: Install cross-compilation tools for ARM64
-        if: matrix.target == 'aarch64-unknown-linux-gnu'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu libc6-dev-arm64-cross
-          echo 'CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc' >> $GITHUB_ENV
-
-      # Set up cross build using the cross tool
-      - name: Install cross
-        if: contains(matrix.target, 'arm')
-        uses: taiki-e/install-action@v2
-        with:
-          tool: cross
-
-      # Update Cargo.toml to use vendored OpenSSL
-      - name: Configure vendored OpenSSL
-        if: contains(matrix.target, 'arm')
-        run: |
-          # Add openssl-sys with vendored feature to the workspace dependencies
-          # This is the simplest way to handle OpenSSL cross-compilation
-          cat >> Cargo.toml << EOF
-          
-          [patch.crates-io]
-          openssl-sys = { version = "0.9.106", features = ["vendored"] }
-          EOF
-
       - name: Build
         uses: actions-rs/cargo@v1
         with:
           command: build
           args: --release --target ${{ matrix.target }}
-        env:
-          # Use cross for ARM targets
-          CARGO_BUILD_TARGET: ${{ matrix.target }}
-          CARGO_TERM_COLOR: always
           
       - name: Prepare binary for upload
         shell: bash
@@ -147,7 +102,7 @@ jobs:
           VERSION_NUMBER=${VERSION#v}
           
           # Set the asset name with the requested format
-          if [[ "${{ matrix.platform_name }}" == "win" ]]; then
+          if [[ "${{ matrix.platform_name }}" == "win-x86_64" ]]; then
             ASSET_NAME="reccedns-${VERSION}-${{ matrix.platform_name }}.exe"
           else
             ASSET_NAME="reccedns-${VERSION}-${{ matrix.platform_name }}"
@@ -167,6 +122,90 @@ jobs:
             cp reccedns ../${ASSET_NAME} 2>/dev/null || cp $(find . -type f -perm -u=x | head -1) ../${ASSET_NAME}
             cd ..
           fi
+
+      - name: Upload Release Asset
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ needs.create_release.outputs.upload_url }}
+          asset_path: ./${{ env.ASSET_NAME }}
+          asset_name: ${{ env.ASSET_NAME }}
+          asset_content_type: application/octet-stream
+
+  build_and_upload_arm:
+    needs: create_release
+    name: Build and Upload ARM - ${{ matrix.platform_name }}
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - target: armv7-unknown-linux-musleabihf
+            platform_name: linux-armv7
+            docker_image: messense/rust-musl-cross:armv7-musleabihf
+          - target: aarch64-unknown-linux-musl
+            platform_name: linux-aarch64
+            docker_image: messense/rust-musl-cross:aarch64-musl
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Create Docker build script
+        run: |
+          # Create a build script that will run inside the Docker container
+          cat > build.sh << 'EOF'
+          #!/bin/bash
+          set -e
+          
+          # Set OpenSSL to compile in vendored mode
+          export OPENSSL_STATIC=true
+          
+          # Build the binary with OpenSSL features
+          cargo build --release --target $TARGET --features vendored-openssl
+          
+          # Test that the binary exists
+          echo "Built binary details:"
+          ls -la target/$TARGET/release/reccedns*
+          file target/$TARGET/release/reccedns
+          
+          # Make sure the binary is executable
+          chmod +x target/$TARGET/release/reccedns
+          EOF
+          
+          chmod +x build.sh
+          
+          # Add OpenSSL feature to Cargo.toml if needed
+          if ! grep -q "vendored-openssl" Cargo.toml; then
+            echo "" >> Cargo.toml
+            echo "[features]" >> Cargo.toml
+            echo "vendored-openssl = [\"openssl/vendored\"]" >> Cargo.toml
+            echo "" >> Cargo.toml
+            echo "[dependencies.openssl]" >> Cargo.toml
+            echo "version = \"0.10\"" >> Cargo.toml
+            echo "optional = true" >> Cargo.toml
+          fi
+
+      - name: Build in Docker
+        run: |
+          VERSION=${{ needs.create_release.outputs.version }}
+          ASSET_NAME="reccedns-${VERSION}-${{ matrix.platform_name }}"
+          echo "ASSET_NAME=${ASSET_NAME}" >> $GITHUB_ENV
+          
+          # Run the build in Docker
+          docker run --rm \
+            -v $(pwd):/workdir \
+            -w /workdir \
+            -e TARGET=${{ matrix.target }} \
+            -e CARGO_NET_GIT_FETCH_WITH_CLI=true \
+            ${{ matrix.docker_image }} \
+            ./build.sh
+          
+          # Copy the resulting binary with the correct name
+          cp target/${{ matrix.target }}/release/reccedns ${ASSET_NAME}
+          
+          # Verify the asset exists
+          ls -la ${ASSET_NAME}
 
       - name: Upload Release Asset
         uses: actions/upload-release-asset@v1
