@@ -91,11 +91,12 @@ pub fn reverse_ip(cmd_args: &CommandArgs, dns_resolver_list: &[&str]) -> Result<
                 found_count += 1;
             }
             Err(error) => {
-                if cmd_args.verbose
+                if (cmd_args.verbose
                     || (!matches!(
                         error,
                         DnsError::NoRecordsFound | DnsError::NonExistentDomain
-                    ))
+                    )))
+                    && cmd_args.no_print_errors
                 {
                     log_error!(format!("{} [{}]", ip, error));
                 }

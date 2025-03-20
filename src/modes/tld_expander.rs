@@ -244,6 +244,7 @@ fn print_query_error(args: &CommandArgs, domain: &str, resolver: &str, error: &D
             DnsError::NoRecordsFound | DnsError::NonExistentDomain
         ))
         || args.quiet
+        || args.no_print_errors
     {
         return;
     }

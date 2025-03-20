@@ -421,13 +421,14 @@ fn print_query_error(
     error: &DnsError,
     retry: bool,
 ) {
-    if (!args.verbose
-        && !retry
-        && matches!(
-            error,
-            DnsError::NoRecordsFound | DnsError::NonExistentDomain
-        ))
-        || args.quiet
+    if args.quiet
+        || (args.no_print_errors && !retry)
+        || (!args.verbose
+            && !retry
+            && matches!(
+                error,
+                DnsError::NoRecordsFound | DnsError::NonExistentDomain
+            ))
     {
         return;
     }

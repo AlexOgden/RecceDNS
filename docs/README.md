@@ -18,13 +18,18 @@ I originally started working on this project to learn Rust, improve on network p
 - Bruteforce subdomains with a wordlist.
 	- Show the resource record data for each subdomain or simply just show the domain.
 	- Retry failed queries. If a query fails for networking/protocol issues, retry at the end of enumeration or disable.
-	- Use an optional delay between queries.
+	- Use an optional delay between queries (Fixed, Random Range, and Adaptive)
 - SRV enumeration, use a wordlist with the query argument set to SRV to find common SRV records.
 - Reverse IP PTR for a single IP address, CIDR notation, or range.
 - Search for subdomains based Certificate Transparency using crt.sh.
 - Expland TLD enumeration for a given domain on the full IANA TLD list.
 - Coloured output with progress reporting on bruteforce subdomain enumeration.
 - Output results to a JSON file.
+- High Performance Features:
+	- Multi-Threaded bruteforce enumeration
+	- Use multiple DNS resolvers
+	- Dynamically disable resolver for random time if rate limited
+	- Adaptive delay (increases and decreases dynamically within bounds to reduce rate-limiting)
 
 ## Cloning and Building
 
@@ -49,6 +54,16 @@ To clone the repository and build the software, follow these steps:
 	```
 
 After building, you can find the executable in the `target/release` directory.
+
+## Pre-Built Binaries
+
+Pre-built binaries are available in the releases section for the following platforms:
+
+- Windows (x86_64)
+- macOS (x86_64, arm64)
+- Linux (x86_64, arm64, armv7)
+
+You can download these binaries directly from the releases page without having to build from source.
 
 ## Arguments
 
@@ -85,9 +100,11 @@ After building, you can find the executable in the `target/release` directory.
 
 - `--no-query-stats`: Don't calculate and print the average query time.
 
+- `--no-print-errors`: Don't print failed queries during subdomain enumeration. Errors will still show when failed queries are retried. To silence all output, use `-Q`.
+
 - `--show-resolver`: Print which resolver was used for each query.
 
-- `--delay <MS|RANGE>`: Delay in milliseconds to use between queries in subdomain enumeration. You can specify a single value (e.g., `1000` for a 1-second delay) or a range (e.g., `100-200` for a random delay between 100 and 200 milliseconds). Default: `0`
+- `-D` `--delay <MS|RANGE|ADAPTIVE>`: Delay in milliseconds to use between queries in subdomain enumeration. You can specify a fixed value (e.g., `1000` for a 1-second delay) or a range (e.g., `100-200` for a random delay between 100 and 200 milliseconds), or use the dynamic adaptive mode: default `A` or specify a min and max: `A:10-750`.
 
 - `-r` `--use-random`: When multiple resolvers are provided, randomly select from the list on each query in enumeration.
 
@@ -132,6 +149,10 @@ With consistent delay
 With random-range delay
 
 `reccedns -m s -d 1.1.1.1 -w .\subdomains-top1million-5000.txt -t github.com --delay 50-900`
+
+With adaptive delay
+
+`reccedns -m s -d 1.1.1.1 -w .\subdomains-top1million-5000.txt -t github.com --delay A:5-750`
 
 With specified thread count
 
