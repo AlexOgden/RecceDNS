@@ -143,7 +143,7 @@ fn process_domain(
     if let Some(delay) = &cmd_args.delay {
         delay.report_query_result(query_success);
     }
-    
+
     Ok(())
 }
 
