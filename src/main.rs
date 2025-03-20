@@ -5,7 +5,10 @@ mod network;
 mod timing;
 
 use anyhow::{ensure, Result};
-use io::{cli::OperationMode, validation::filter_working_dns_resolvers};
+use io::{
+    cli::{self, OperationMode},
+    validation::filter_working_dns_resolvers,
+};
 use network::types::TransportProtocol;
 
 #[tokio::main]
@@ -18,9 +21,7 @@ async fn main() -> Result<()> {
 
     let dns_resolvers = initialize_dns_resolvers(&cmd_args)?;
 
-    if cmd_args.transport_protocol == TransportProtocol::TCP {
-        log_info!("Using TCP for DNS queries");
-    }
+    log_argument_info(&cmd_args);
 
     match cmd_args.operation_mode {
         OperationMode::BasicEnumeration => {
@@ -37,7 +38,17 @@ async fn main() -> Result<()> {
     }
 }
 
-fn initialize_dns_resolvers(cmd_args: &io::cli::CommandArgs) -> Result<Vec<&str>> {
+fn log_argument_info(cmd_args: &cli::CommandArgs) {
+    if cmd_args.transport_protocol == TransportProtocol::TCP {
+        log_info!("Using TCP for DNS queries");
+    }
+
+    if let Some(delay) = &cmd_args.delay {
+        log_info!(format!("Using Delay: {}", delay));
+    }
+}
+
+fn initialize_dns_resolvers(cmd_args: &cli::CommandArgs) -> Result<Vec<&str>> {
     let no_dns_check =
         cmd_args.operation_mode == OperationMode::CertSearch || cmd_args.no_dns_check;
 
