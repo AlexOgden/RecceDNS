@@ -200,27 +200,42 @@ fn process_subdomain_chunk(params: WorkerParams) {
         let fqdn = format!("{}.{}", subdomain, params.target);
         let mut all_results = HashSet::new();
         let mut first_error: Option<DnsError> = None;
+
         // Process all query types.
         for query_type in &params.query_types {
             match resolve_domain(&resolver, &fqdn, query_type, &params.transport, true) {
                 Ok(packet) => {
                     all_results.extend(packet.answers);
+                    // Report successful query
+                    if let Some(delay) = &params.delay {
+                        delay.report_query_result(true);
+                    }
                 }
                 Err(error) => {
                     if matches!(error, DnsError::Network(_)) {
-                        let duration = rand::rng().random_range(3..=25);
+                        let duration = rand::rng().random_range(2..=25);
                         resolver_selector.disable(&resolver, Duration::from_secs(duration));
                     }
 
-                    // Save the first error encountered.
+                    // Report failed query (unless it's just NXDOMAIN)
+                    if let Some(delay) = &params.delay {
+                        if matches!(
+                            error,
+                            DnsError::NonExistentDomain | DnsError::NoRecordsFound
+                        ) {
+                            delay.report_query_result(true);
+                        } else {
+                            delay.report_query_result(false);
+                        }
+                    }
+
                     if first_error.is_none() {
                         first_error = Some(error);
                     }
                 }
             }
-            // Delay between queries if specified.
-            if let Some(delay_ms) = &params.delay {
-                thread::sleep(Duration::from_millis(delay_ms.get_delay()));
+            if let Some(delay) = &params.delay {
+                thread::sleep(Duration::from_millis(delay.get_delay()));
             }
         }
 
