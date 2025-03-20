@@ -124,7 +124,7 @@ impl FromStr for Delay {
             let parts: Vec<&str> = s.split(':').collect();
             match parts.len() {
                 // Default adaptive parameters
-                1 => return Ok(Self::adaptive(50, 500)),
+                1 => return Ok(Self::adaptive(10, 500)),
                 2 => {
                     if let Some((min, max)) = parts[1].split_once('-') {
                         let min = min
