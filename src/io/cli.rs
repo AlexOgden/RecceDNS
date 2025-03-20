@@ -69,7 +69,8 @@ pub struct CommandArgs {
     )]
     pub query_types: Vec<QueryType>,
 
-    /// Delay in milliseconds between DNS requests for subdomain enumeration. Either a single value or a range (e.g. 100-200)
+    /// Delay in milliseconds between DNS requests for subdomain enumeration. Fixed value, range, or adaptive delay.
+    /// Fixed: '1000', Range: '500-1000', Adaptive: 'A:500-1000', or default adaptive delay: 'A'
     #[arg(short = 'D', long, required = false, value_parser = parse_delay)]
     pub delay: Option<Delay>,
 
@@ -165,6 +166,7 @@ pub fn print_ascii_art() {
 }
 
 /// Sets up the progress bar with the given total
+#[allow(clippy::literal_string_with_formatting_args)]
 pub fn setup_progress_bar(total: u64) -> ProgressBar {
     let pb = ProgressBar::new(total);
     let style = ProgressStyle::default_bar()

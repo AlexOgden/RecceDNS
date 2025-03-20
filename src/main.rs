@@ -5,7 +5,10 @@ mod network;
 mod timing;
 
 use anyhow::{ensure, Result};
-use io::{cli::OperationMode, validation::filter_working_dns_resolvers};
+use io::{
+    cli::{self, OperationMode},
+    validation::filter_working_dns_resolvers,
+};
 use network::types::TransportProtocol;
 
 #[tokio::main]
@@ -16,22 +19,9 @@ async fn main() -> Result<()> {
         io::cli::print_ascii_art();
     }
 
-    let no_dns_check =
-        cmd_args.operation_mode == OperationMode::CertSearch || cmd_args.no_dns_check;
+    let dns_resolvers = initialize_dns_resolvers(&cmd_args)?;
 
-    let dns_resolvers = filter_working_dns_resolvers(
-        no_dns_check,
-        &cmd_args.transport_protocol,
-        &cmd_args.dns_resolvers.split(',').collect::<Vec<&str>>(),
-    );
-    ensure!(
-        !dns_resolvers.is_empty(),
-        "No DNS Resolvers in list! At least one resolver must be working!"
-    );
-
-    if cmd_args.transport_protocol == TransportProtocol::TCP {
-        log_info!("Using TCP for DNS queries");
-    }
+    log_argument_info(&cmd_args);
 
     match cmd_args.operation_mode {
         OperationMode::BasicEnumeration => {
@@ -46,4 +36,31 @@ async fn main() -> Result<()> {
             modes::tld_expander::expand_tlds(&cmd_args, &dns_resolvers).await
         }
     }
+}
+
+fn log_argument_info(cmd_args: &cli::CommandArgs) {
+    if cmd_args.transport_protocol == TransportProtocol::TCP {
+        log_info!("Using TCP for DNS queries");
+    }
+
+    if let Some(delay) = &cmd_args.delay {
+        log_info!(format!("Using Delay: {}", delay));
+    }
+}
+
+fn initialize_dns_resolvers(cmd_args: &cli::CommandArgs) -> Result<Vec<&str>> {
+    let no_dns_check =
+        cmd_args.operation_mode == OperationMode::CertSearch || cmd_args.no_dns_check;
+
+    let resolver_list = cmd_args.dns_resolvers.split(',').collect::<Vec<&str>>();
+
+    let dns_resolvers =
+        filter_working_dns_resolvers(no_dns_check, &cmd_args.transport_protocol, &resolver_list);
+
+    ensure!(
+        !dns_resolvers.is_empty(),
+        "No working DNS resolvers found! At least one resolver must be operational."
+    );
+
+    Ok(dns_resolvers)
 }
