@@ -104,6 +104,7 @@ fn process_domain(
         cmd_args.query_types.clone()
     };
     let mut all_query_results = HashSet::<ResourceRecord>::new();
+    let mut query_success = false;
 
     for query_type in query_types {
         query_timer.start();
@@ -119,6 +120,7 @@ fn process_domain(
         // If the query succeeds, add all answer records.
         if let Ok(response) = query_result {
             all_query_results.extend(response.answers);
+            query_success = true;
         } else if let Err(ref error) = query_result {
             if !error.to_string().contains("(os error 4)") {
                 print_query_error(cmd_args, domain_name, resolver, error);
@@ -136,6 +138,12 @@ fn process_domain(
             }
         }
     }
+
+    // Report query result to adaptive delay mechanism if it's being used
+    if let Some(delay) = &cmd_args.delay {
+        delay.report_query_result(query_success);
+    }
+    
     Ok(())
 }
 
