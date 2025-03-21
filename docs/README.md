@@ -37,7 +37,7 @@ To clone the repository and build the software, follow these steps:
 
 1. **Clone the repository**:
 	```sh
-	git clone git@github.com:AlexOgden/RecceDNS.git
+	git clone --depth 1 git@github.com:AlexOgden/RecceDNS.git
 	cd reccedns
 	```
 
