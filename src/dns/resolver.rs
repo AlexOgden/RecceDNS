@@ -217,15 +217,14 @@ fn build_dns_query(
 
     // Convert IP address to PTR format if needed
     let domain = if query_type == &QueryType::PTR {
-        // Try parsing as IPv4 first
-        domain.parse::<Ipv4Addr>().map_or_else(
-            |_| {
-                domain
-                    .parse::<Ipv6Addr>()
-                    .map_or_else(|_| domain.to_owned(), |ipv6| ipv6_to_ptr(&ipv6))
-            },
-            ipv4_to_ptr,
-        )
+        #[allow(clippy::option_if_let_else)]
+        if let Ok(ipv4) = domain.parse::<Ipv4Addr>() {
+            ipv4_to_ptr(ipv4)
+        } else if let Ok(ipv6) = domain.parse::<Ipv6Addr>() {
+            ipv6_to_ptr(&ipv6)
+        } else {
+            domain.to_owned()
+        }
     } else {
         domain.to_owned()
     };
