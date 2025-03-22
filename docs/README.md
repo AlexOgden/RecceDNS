@@ -31,7 +31,9 @@ I originally started working on this project to learn Rust, improve on network p
 	- Dynamically disable resolver for random time if rate limited
 	- Adaptive delay (increases and decreases dynamically within bounds to reduce rate-limiting)
 
-## Cloning and Building
+## Installation
+
+### Cloning and Building
 
 To clone the repository and build the software, follow these steps:
 
@@ -55,7 +57,7 @@ To clone the repository and build the software, follow these steps:
 
 After building, you can find the executable in the `target/release` directory.
 
-## Pre-Built Binaries
+### Pre-Built Binaries
 
 Pre-built binaries are available in the releases section for the following platforms:
 
@@ -64,6 +66,29 @@ Pre-built binaries are available in the releases section for the following platf
 - Linux (x86_64, arm64, armv7)
 
 You can download these binaries directly from the releases page without having to build from source.
+
+### Docker
+
+Docker images are also available to use. See the releases for the latest versions.
+
+Two images are provided:
+
+- Basic: comes installed only with the RecceDNS application. Minimal image size.
+- Lists: contains pre-installed with the latest DNS subdomain lists from [SecLists](https://github.com/danielmiessler/SecLists) located in the `/opt/wordlists` directory.
+
+**Usage:**
+
+Basic
+```
+docker pull ghcr.io/AlexOgden/reccedns:basic
+docker run --rm -it ghcr.io/AlexOgden/reccedns:basic -m c -d 1.1.1.1 -t github.com
+```
+
+Lists
+```
+docker pull ghcr.io/AlexOgden/reccedns:lists
+docker run --rm -it ghcr.io/AlexOgden/reccedns:basic -m s -t github.com -w /opt/wordlists/list.txt -D A:10-50 -d 1.1.1.1
+```
 
 ## Arguments
 
