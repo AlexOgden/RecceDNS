@@ -70,14 +70,13 @@ pub fn create_query_response_string(query_result: &HashSet<ResourceRecord>) -> S
     }
 
     // Prepare the final formatted output
-    let formatted_domains: Vec<String> = domain_map
+    let mut formatted_domains: Vec<String> = domain_map
         .iter()
         .map(|(domain, records)| {
             let mut formatted_records: Vec<String> = records
                 .iter()
                 .map(|(record_type, data_set)| {
-                    let mut sorted_data: Vec<&str> =
-                        data_set.iter().map(std::string::String::as_str).collect();
+                    let mut sorted_data: Vec<&str> = data_set.iter().map(AsRef::as_ref).collect();
                     sorted_data.sort_unstable();
                     format!("    {}: [{}]", record_type, sorted_data.join(", "))
                 })
@@ -86,6 +85,9 @@ pub fn create_query_response_string(query_result: &HashSet<ResourceRecord>) -> S
             format!("  {}:\n{}", domain, formatted_records.join("\n"))
         })
         .collect();
+
+    // Sort domains for consistent output
+    formatted_domains.sort();
 
     format!("\n{}", formatted_domains.join("\n\n"))
 }

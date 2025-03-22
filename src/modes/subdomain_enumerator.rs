@@ -53,8 +53,7 @@ struct WorkerParams {
 }
 
 // Default query types for subdomain enumeration if none provided.
-const DEFAULT_QUERY_TYPES: &[QueryType] =
-    &[QueryType::A, QueryType::AAAA, QueryType::MX, QueryType::TXT];
+const DEFAULT_QUERY_TYPES: &[QueryType] = &[QueryType::A, QueryType::AAAA];
 
 #[allow(clippy::too_many_lines)]
 pub fn enumerate_subdomains(cmd_args: &CommandArgs, dns_resolver_list: &[&str]) -> Result<()> {

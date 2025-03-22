@@ -2,7 +2,6 @@ use anyhow::{Context, Result};
 use rand::Rng;
 use std::io::{Read, Write};
 use std::net::{Ipv4Addr, Ipv6Addr, TcpStream, UdpSocket};
-use std::sync::Arc;
 use std::time::Duration;
 
 use crate::dns::{
@@ -14,19 +13,19 @@ use crate::network::types::TransportProtocol;
 
 const DNS_PORT: u8 = 53;
 const UDP_BUFFER_SIZE: usize = 512;
+const TIMEOUT: std::time::Duration = Duration::from_secs(1);
 
-fn initialize_udp_socket() -> Result<Arc<UdpSocket>> {
+fn initialize_udp_socket() -> Result<UdpSocket> {
     let socket = UdpSocket::bind("0.0.0.0:0")?;
-    let timeout = Duration::from_millis(1750);
 
     socket
-        .set_read_timeout(Some(timeout))
+        .set_read_timeout(Some(TIMEOUT))
         .context("Failed to set read timeout")?;
     socket
-        .set_write_timeout(Some(timeout))
+        .set_write_timeout(Some(TIMEOUT))
         .context("Failed to set write timeout")?;
 
-    Ok(Arc::new(socket))
+    Ok(socket)
 }
 
 pub fn resolve_domain(
@@ -36,31 +35,35 @@ pub fn resolve_domain(
     transport_protocol: &TransportProtocol,
     recursion: bool,
 ) -> Result<DnsPacket, DnsError> {
-    let udp_socket =
-        initialize_udp_socket().map_err(|error| DnsError::Network(error.to_string()))?;
+    let socket = initialize_udp_socket()
+        .map_err(|e| DnsError::Network(format!("Failed to create socket: {e}")))?;
 
-    let query_result = execute_dns_query(
-        &udp_socket,
+    let result = execute_dns_query(
+        &socket,
         transport_protocol,
         dns_resolver,
         domain,
         query_type,
         recursion,
-    )?;
+    );
 
-    match query_result.header.rescode {
-        ResultCode::NOERROR => {
-            if query_result.answers.is_empty() {
-                Err(DnsError::NoRecordsFound)
-            } else {
-                Ok(query_result)
+    // Process the result
+    match result {
+        Ok(query_result) => match query_result.header.rescode {
+            ResultCode::NOERROR => {
+                if query_result.answers.is_empty() {
+                    Err(DnsError::NoRecordsFound)
+                } else {
+                    Ok(query_result)
+                }
             }
-        }
-        ResultCode::NXDOMAIN => Err(DnsError::NonExistentDomain),
-        ResultCode::SERVFAIL => Err(DnsError::NameserverError("Server Failed".to_owned())),
-        ResultCode::NOTIMP => Err(DnsError::NameserverError("Not Implemented".to_owned())),
-        ResultCode::REFUSED => Err(DnsError::NameserverError("Refused".to_owned())),
-        ResultCode::FORMERR => Err(DnsError::ProtocolData("Format Error".to_owned())),
+            ResultCode::NXDOMAIN => Err(DnsError::NonExistentDomain),
+            ResultCode::SERVFAIL => Err(DnsError::NameserverError("Server Failed".to_owned())),
+            ResultCode::NOTIMP => Err(DnsError::NameserverError("Not Implemented".to_owned())),
+            ResultCode::REFUSED => Err(DnsError::NameserverError("Refused".to_owned())),
+            ResultCode::FORMERR => Err(DnsError::ProtocolData("Format Error".to_owned())),
+        },
+        Err(e) => Err(e),
     }
 }
 
@@ -87,7 +90,7 @@ fn execute_dns_query(
 
     let parsed_response = parse_dns_response(&response)?;
 
-    // Verify the response ID matches our query ID to prevent spoofing
+    // Verify the response ID matches our query ID to prevent spoofing/detect network issues
     if parsed_response.header.id != query_id {
         return Err(DnsError::InvalidData(format!(
             "Response ID {} does not match query ID {} for domain '{}'",
@@ -137,7 +140,6 @@ fn send_query_udp(socket: &UdpSocket, query: &[u8], dns_server: &str) -> Result<
         )));
     }
 
-    // Create a properly sized response buffer
     Ok(response_buffer[..bytes_received].to_vec())
 }
 
@@ -149,12 +151,11 @@ fn send_query_tcp(query: &[u8], dns_server: &str) -> Result<Vec<u8>, DnsError> {
         .map_err(|e| DnsError::Network(format!("Failed to connect to {dns_server} (TCP): {e}")))?;
 
     // Set read and write timeouts
-    let timeout = Duration::from_secs(3);
     stream
-        .set_read_timeout(Some(timeout))
+        .set_read_timeout(Some(TIMEOUT))
         .map_err(|e| DnsError::Network(format!("Failed to set read timeout: {e}")))?;
     stream
-        .set_write_timeout(Some(timeout))
+        .set_write_timeout(Some(TIMEOUT))
         .map_err(|e| DnsError::Network(format!("Failed to set write timeout: {e}")))?;
 
     // Send query length in big-endian format
@@ -216,20 +217,19 @@ fn build_dns_query(
 
     // Convert IP address to PTR format if needed
     let domain = if query_type == &QueryType::PTR {
-        // Try parsing as IPv4 first
-        domain.parse::<Ipv4Addr>().map_or_else(
-            |_| {
-                domain
-                    .parse::<Ipv6Addr>()
-                    .map_or_else(|_| domain.to_owned(), |ipv6| ipv6_to_ptr(&ipv6))
-            },
-            ipv4_to_ptr,
-        )
+        #[allow(clippy::option_if_let_else)]
+        if let Ok(ipv4) = domain.parse::<Ipv4Addr>() {
+            ipv4_to_ptr(ipv4)
+        } else if let Ok(ipv6) = domain.parse::<Ipv6Addr>() {
+            ipv6_to_ptr(&ipv6)
+        } else {
+            domain.to_owned()
+        }
     } else {
         domain.to_owned()
     };
 
-    // Build the query packet
+    // Build the query packet with thread-safe random ID
     let mut packet = DnsPacket::new();
     packet.header.id = rand::rng().random();
     packet.header.questions = 1;

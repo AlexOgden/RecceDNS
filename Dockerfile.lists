@@ -1,0 +1,48 @@
+FROM rust:slim-bullseye as builder
+
+WORKDIR /app
+COPY . .
+
+# Install build dependencies for Debian
+RUN apt-get update && apt-get install -y \
+	pkg-config \
+	libssl-dev \
+	--no-install-recommends \
+	&& rm -rf /var/lib/apt/lists/*
+
+RUN cargo build --release --locked
+
+
+# RUNTIME STAGE
+FROM debian:bullseye-slim
+
+# Install runtime dependencies
+RUN apt-get update && apt-get install -y \
+	libssl1.1 \
+	ca-certificates \
+	git \
+	--no-install-recommends \
+	&& rm -rf /var/lib/apt/lists/*
+
+# Download SecLists DNS subdomain wordlists
+RUN mkdir -p /opt/wordlists && \
+	git clone --depth 1 https://github.com/danielmiessler/SecLists.git /tmp/SecLists && \
+	cp -r /tmp/SecLists/Discovery/DNS/* /opt/wordlists/ && \
+	rm -rf /tmp/SecLists && \
+	chmod -R 755 /opt/wordlists
+
+# Create a non-root user
+RUN useradd -m reccedns
+
+# Copy only the binary
+COPY --from=builder /app/target/release/reccedns /usr/local/bin/
+
+# Switch to non-root user
+USER reccedns
+
+# Create volume mount point for wordlists and data
+VOLUME ["/wordlists", "/data"]
+WORKDIR /data
+
+ENTRYPOINT ["reccedns"]
+CMD ["--help"]
