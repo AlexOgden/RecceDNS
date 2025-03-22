@@ -10,6 +10,7 @@ RUN apt-get update && apt-get install -y \
     --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
+# Build the binary with optimizations and locked dependencies
 RUN cargo build --release --locked
 
 
@@ -23,6 +24,16 @@ RUN apt-get update && apt-get install -y \
     --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
+# Increase system limits for file descriptors and network connections
+RUN echo "* soft nofile 65536" >> /etc/security/limits.conf && \
+    echo "* hard nofile 65536" >> /etc/security/limits.conf && \
+    echo "net.ipv4.ip_local_port_range = 1024 65535" >> /etc/sysctl.conf && \
+    echo "net.ipv4.tcp_tw_reuse = 1" >> /etc/sysctl.conf && \
+    echo "net.core.somaxconn = 65535" >> /etc/sysctl.conf && \
+    echo "net.ipv4.tcp_max_syn_backlog = 65535" >> /etc/sysctl.conf && \
+    echo "net.core.netdev_max_backlog = 65535" >> /etc/sysctl.conf
+
+    
 # Create a non-root user
 RUN useradd -m reccedns
 
