@@ -79,15 +79,15 @@ Two images are provided:
 **Usage:**
 
 Basic
-```
-docker pull ghcr.io/alexogden/reccedns:basic
-docker run --rm -it ghcr.io/alexogden/reccedns:basic -m c -d 1.1.1.1 -t github.com
+```sh
+docker pull ghcr.io/alexogden/reccedns:latest
+docker run --rm -it ghcr.io/alexogden/reccedns:latest -m c -d 1.1.1.1 -t github.com
 ```
 
 Lists
-```
+```sh
 docker pull ghcr.io/alexogden/reccedns:lists
-docker run --rm -it ghcr.io/alexogden/reccedns:basic -m s -t github.com -w /opt/wordlists/list.txt -D A:10-50 -d 1.1.1.1
+docker run --rm -it ghcr.io/alexogden/reccedns:lists -m s -t github.com -w /opt/wordlists/list.txt -D A:10-50 -d 1.1.1.1
 ```
 
 ## Arguments
