@@ -218,14 +218,11 @@ fn process_subdomain_chunk(params: WorkerParams) {
 
                     // Report failed query (unless it's just NXDOMAIN)
                     if let Some(delay) = &params.delay {
-                        if matches!(
+                        let is_expected_error = matches!(
                             error,
                             DnsError::NonExistentDomain | DnsError::NoRecordsFound
-                        ) {
-                            delay.report_query_result(true);
-                        } else {
-                            delay.report_query_result(false);
-                        }
+                        );
+                        delay.report_query_result(is_expected_error);
                     }
 
                     if first_error.is_none() {
