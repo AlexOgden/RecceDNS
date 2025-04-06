@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::{collections::HashSet, sync::LazyLock};
 
 use crate::{
     io::{
@@ -9,16 +9,13 @@ use crate::{
 };
 use anyhow::Result;
 use colored::Colorize;
-use lazy_static::lazy_static;
 use reqwest::{Client, StatusCode};
 use serde_json::Value;
 use thiserror::Error;
 
 const CRTSH_URL: &str = "https://crt.sh/json?q=";
 
-lazy_static! {
-    static ref HTTP_CLIENT: Client = Client::new();
-}
+static HTTP_CLIENT: LazyLock<Client> = LazyLock::new(Client::new);
 
 #[derive(Error, Debug)]
 pub enum SearchError {
