@@ -2,12 +2,12 @@ use anyhow::{anyhow, ensure, Context, Result};
 use regex::Regex;
 use std::net::{IpAddr, Ipv4Addr};
 
-use crate::network::{net_check, types::TransportProtocol};
+use crate::network::{check, types::TransportProtocol};
+use std::sync::LazyLock;
 
-lazy_static::lazy_static! {
-    static ref DOMAIN_REGEX: Regex =
-        Regex::new(r"^(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$").unwrap();
-}
+static DOMAIN_REGEX: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"^(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$").unwrap()
+});
 
 pub fn validate_target(input: &str) -> Result<String> {
     let input = input.trim();
@@ -101,7 +101,7 @@ pub fn filter_working_dns_resolvers<'a>(
         return dns_resolvers.to_vec();
     }
 
-    let working_resolvers = net_check::check_dns_resolvers(dns_resolvers, transport_protocol);
+    let working_resolvers = check::check_dns_resolvers(dns_resolvers, transport_protocol);
 
     dns_resolvers
         .iter()
