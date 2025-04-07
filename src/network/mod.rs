@@ -1,2 +1,2 @@
-pub mod net_check;
+pub mod check;
 pub mod types;
