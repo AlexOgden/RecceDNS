@@ -146,6 +146,7 @@ pub async fn enumerate_subdomains(
         if interrupted.load(Ordering::SeqCst) {
             logger::clear_line();
             log_warn!("Interrupted by user");
+            pool.shutdown();
             break;
         }
         match received {
