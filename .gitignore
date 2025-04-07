@@ -2,6 +2,7 @@ target/
 lists/
 .vscode/
 .idea/
+.cargo/
 
 *.txt
 *.json

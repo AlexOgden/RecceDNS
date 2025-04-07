@@ -15,6 +15,12 @@ impl PacketBuffer {
         }
     }
 
+    pub fn from_slice(data: &[u8]) -> Result<Self> {
+        let mut buffer = Self::new();
+        buffer.set_data(data)?;
+        Ok(buffer)
+    }
+
     pub fn get_buffer_to_pos(&self) -> &[u8] {
         &self.buf[0..self.pos]
     }
