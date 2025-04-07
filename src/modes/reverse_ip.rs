@@ -11,9 +11,9 @@ use thiserror::Error;
 
 use crate::{
     dns::{
+        async_resolver_pool::AsyncResolverPool,
         error::DnsError,
         protocol::{QueryType, RData},
-        resolver::resolve_domain,
         resolver_selector,
     },
     io::{
@@ -24,7 +24,7 @@ use crate::{
     timing::stats::QueryTimer,
 };
 
-pub fn reverse_ip(cmd_args: &CommandArgs, dns_resolver_list: &[&str]) -> Result<()> {
+pub async fn reverse_ip(cmd_args: &CommandArgs, dns_resolver_list: &[&str]) -> Result<()> {
     let interrupted = interrupt::initialize_interrupt_handler()?;
 
     let target_ips = parse_ip(&cmd_args.target)?;
@@ -47,6 +47,8 @@ pub fn reverse_ip(cmd_args: &CommandArgs, dns_resolver_list: &[&str]) -> Result<
         target_ips.len()
     ));
 
+    let resolver_pool = AsyncResolverPool::new(Some(2)).await?;
+
     for (index, ip) in target_ips.iter().enumerate() {
         if interrupted.load(Ordering::SeqCst) {
             logger::clear_line();
@@ -57,13 +59,15 @@ pub fn reverse_ip(cmd_args: &CommandArgs, dns_resolver_list: &[&str]) -> Result<
         let resolver = resolver_selector.select()?;
 
         query_timer.start();
-        let query_result = resolve_domain(
-            resolver,
-            &ip.to_string(),
-            &QueryType::PTR,
-            &cmd_args.transport_protocol,
-            !&cmd_args.no_recursion,
-        );
+        let query_result = resolver_pool
+            .resolve(
+                resolver,
+                &ip.to_string(),
+                &QueryType::PTR,
+                &cmd_args.transport_protocol,
+                !&cmd_args.no_recursion,
+            )
+            .await;
         query_timer.stop();
 
         cli::update_progress_bar(&progress_bar, index, total_ips);
