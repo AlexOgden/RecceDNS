@@ -1,3 +1,5 @@
+#![allow(clippy::future_not_send)]
+
 use anyhow::{anyhow, Result};
 use colored::Colorize;
 use rand::Rng;
