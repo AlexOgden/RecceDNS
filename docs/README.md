@@ -18,7 +18,7 @@ I originally started working on this project to learn Rust, improve on network p
 - Bruteforce subdomains with a wordlist.
 	- Show the resource record data for each subdomain or simply just show the domain.
 	- Retry failed queries. If a query fails for networking/protocol issues, retry at the end of enumeration or disable.
-	- Use an optional delay between queries (Fixed, Random Range, and Adaptive)
+	- Use an optional delay between queries (Fixed, Random Range, and Adaptive).
 - SRV enumeration, use a wordlist with the query argument set to SRV to find common SRV records.
 - Reverse IP PTR for a single IP address, CIDR notation, or range.
 - Search for subdomains based Certificate Transparency using crt.sh.
@@ -26,10 +26,11 @@ I originally started working on this project to learn Rust, improve on network p
 - Coloured output with progress reporting on bruteforce subdomain enumeration.
 - Output results to a JSON file.
 - High Performance Features:
-	- Multi-Threaded bruteforce enumeration
-	- Use multiple DNS resolvers
-	- Dynamically disable resolver for random time if rate limited
-	- Adaptive delay (increases and decreases dynamically within bounds to reduce rate-limiting)
+	- Multi-Threaded bruteforce enumeration.
+	- Use multiple DNS resolvers.
+	- Dynamically disable resolver for random time if rate limited.
+	- Adaptive delay (increases and decreases dynamically within bounds to reduce rate-limiting).
+	- Asyncronous UDP socket pooling - thousands of queries without locking up file resources.
 
 ## Installation
 
@@ -182,6 +183,14 @@ With adaptive delay
 With specified thread count
 
 `reccedns -m s -d 1.1.1.1 -w .\subdomains-top1million-5000.txt -t github.com -T 6`
+
+Output to JSON
+
+`reccedns -m s -d 1.1.1.1 -w .\combined_names.txt -t github.com -T 6 -q A,AAAA,MX --json query_output`
+
+Don't print errors during enumeration (still prints on retry)
+
+`reccedns -m s -d 8.8.8.8 -w .\combined_names -t github.com -T 4 --no-print-errors`
 
 ### Reverse PTR IP Search
 
