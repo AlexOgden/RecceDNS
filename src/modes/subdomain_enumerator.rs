@@ -1,10 +1,11 @@
 use anyhow::{anyhow, Result};
 use colored::Colorize;
 use rand::Rng;
+use std::fmt::Write;
 use std::{
     cmp::max,
     collections::HashSet,
-    io::{self, Write},
+    io::{self},
     sync::{
         atomic::{AtomicBool, Ordering},
         mpsc,
@@ -15,6 +16,7 @@ use std::{
 
 use crate::{
     dns::{
+        async_resolver_pool::AsyncResolverPool,
         error::DnsError,
         format::create_query_response_string,
         protocol::{QueryType, ResourceRecord},
@@ -42,6 +44,7 @@ type SubdomainResultSender = mpsc::Sender<SubdomainResult>;
 // Parameters for the worker threads.
 #[derive(Clone)]
 struct WorkerParams {
+    connection_pool: AsyncResolverPool,
     tx: SubdomainResultSender,
     subdomains: Vec<String>,
     query_types: Vec<QueryType>,
@@ -56,7 +59,10 @@ struct WorkerParams {
 const DEFAULT_QUERY_TYPES: &[QueryType] = &[QueryType::A, QueryType::AAAA];
 
 #[allow(clippy::too_many_lines)]
-pub fn enumerate_subdomains(cmd_args: &CommandArgs, dns_resolver_list: &[&str]) -> Result<()> {
+pub async fn enumerate_subdomains(
+    cmd_args: &CommandArgs,
+    dns_resolver_list: &[&str],
+) -> Result<()> {
     let interrupted = interrupt::initialize_interrupt_handler()?;
 
     if handle_wildcard_domain(cmd_args, dns_resolver_list)? {
@@ -104,9 +110,13 @@ pub fn enumerate_subdomains(cmd_args: &CommandArgs, dns_resolver_list: &[&str]) 
     // Create an mpsc channel for collecting results.
     let (tx, rx) = mpsc::channel();
 
+    // Create connection pool
+    let pool = AsyncResolverPool::new(Some(2 * num_threads)).await?;
+
     // Spawn worker threads.
     for chunk in subdomain_chunks {
         let worker_params = WorkerParams {
+            connection_pool: pool.clone(),
             tx: tx.clone(),
             subdomains: chunk,
             query_types: query_types.clone(),
@@ -121,7 +131,9 @@ pub fn enumerate_subdomains(cmd_args: &CommandArgs, dns_resolver_list: &[&str]) 
         };
 
         thread::spawn(move || {
-            process_subdomain_chunk(worker_params);
+            tokio::runtime::Runtime::new()
+                .unwrap()
+                .block_on(process_subdomain_chunk(worker_params));
         });
     }
     drop(tx); // Close original sender.
@@ -184,10 +196,13 @@ pub fn enumerate_subdomains(cmd_args: &CommandArgs, dns_resolver_list: &[&str]) 
         output.write_to_file(file)?;
     }
 
+    pool.shutdown();
+
     Ok(())
 }
 
-fn process_subdomain_chunk(params: WorkerParams) {
+async fn process_subdomain_chunk(params: WorkerParams) {
+    let pool = params.connection_pool;
     let mut resolver_selector =
         resolver_selector::get_selector(params.use_random, params.dns_resolvers.clone());
 
@@ -202,7 +217,10 @@ fn process_subdomain_chunk(params: WorkerParams) {
 
         // Process all query types.
         for query_type in &params.query_types {
-            match resolve_domain(&resolver, &fqdn, query_type, &params.transport, true) {
+            match pool
+                .resolve(&resolver, &fqdn, query_type, &params.transport, true)
+                .await
+            {
                 Ok(packet) => {
                     all_results.extend(packet.answers);
                     // Report successful query
@@ -334,7 +352,7 @@ fn handle_wildcard_domain(args: &CommandArgs, dns_resolvers: &[&str]) -> Result<
         log_warn!("Warning: Wildcard domain detected. Results may include false positives!");
         log_question!("Do you want to continue? (y/n): ");
 
-        io::stdout().flush().expect("Failed to flush stdout");
+        io::Write::flush(&mut io::stdout()).expect("Failed to flush stdout");
 
         let mut input = String::new();
         io::stdin()
@@ -401,10 +419,10 @@ fn print_query_result(args: &CommandArgs, subdomain: &str, resolver: &str, respo
     let mut message = domain;
 
     if args.verbose || args.show_resolver {
-        message.push_str(&format!(" [resolver: {}]", resolver.magenta()));
+        write!(message, " [resolver: {}]", resolver.magenta()).unwrap();
     }
     if !args.no_print_records {
-        message.push_str(&format!(" {response}"));
+        write!(message, " {response}").unwrap();
     }
 
     log_success!(message);
@@ -433,9 +451,9 @@ fn print_query_error(
     let mut message = domain;
 
     if args.show_resolver {
-        message.push_str(&format!(" [resolver: {}]", resolver.magenta()));
+        write!(message, " [resolver: {}]", resolver.magenta()).unwrap();
     }
-    message.push_str(&format!(" {error}"));
+    write!(message, " {error}").unwrap();
 
     log_error!(message);
 }
