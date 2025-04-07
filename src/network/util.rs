@@ -14,7 +14,8 @@ pub fn ipv6_to_ptr(ip: &Ipv6Addr) -> String {
     // Convert IPv6 to its expanded hex representation without colons
     let mut expanded = String::with_capacity(32); // 8 segments × 4 chars each
     for segment in ip.segments() {
-        expanded.push_str(&format!("{segment:04x}"));
+        use std::fmt::Write;
+        let _ = write!(expanded, "{segment:04x}");
     }
 
     let reversed = expanded.chars().rev().fold(String::new(), |mut acc, c| {
