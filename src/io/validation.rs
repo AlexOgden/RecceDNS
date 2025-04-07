@@ -92,7 +92,7 @@ pub fn validate_ipv4(ip: &str) -> Result<String> {
         .map(|_| ip.to_string())
 }
 
-pub fn filter_working_dns_resolvers<'a>(
+pub async fn filter_working_dns_resolvers<'a>(
     no_dns_check: bool,
     transport_protocol: &TransportProtocol,
     dns_resolvers: &[&'a str],
@@ -101,7 +101,7 @@ pub fn filter_working_dns_resolvers<'a>(
         return dns_resolvers.to_vec();
     }
 
-    let working_resolvers = check::check_dns_resolvers(dns_resolvers, transport_protocol);
+    let working_resolvers = check::check_dns_resolvers(dns_resolvers, transport_protocol).await;
 
     dns_resolvers
         .iter()

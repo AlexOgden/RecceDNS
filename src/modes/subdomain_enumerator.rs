@@ -20,7 +20,6 @@ use crate::{
         error::DnsError,
         format::create_query_response_string,
         protocol::{QueryType, ResourceRecord},
-        resolver::resolve_domain,
         resolver_selector,
     },
     io::{
@@ -65,7 +64,7 @@ pub async fn enumerate_subdomains(
 ) -> Result<()> {
     let interrupted = interrupt::initialize_interrupt_handler()?;
 
-    if handle_wildcard_domain(cmd_args, dns_resolver_list)? {
+    if handle_wildcard_domain(cmd_args, dns_resolver_list).await? {
         return Ok(());
     }
 
@@ -177,8 +176,14 @@ pub async fn enumerate_subdomains(
 
     if !failed_subdomains.is_empty() && !cmd_args.no_retry {
         interrupted.store(false, Ordering::SeqCst);
-        let success_retrys =
-            process_failed_subdomains(cmd_args, dns_resolver_list, failed_subdomains, &interrupted);
+        let success_retrys = process_failed_subdomains(
+            cmd_args,
+            pool.clone(),
+            dns_resolver_list,
+            failed_subdomains,
+            &interrupted,
+        )
+        .await;
         found_count += success_retrys;
     }
 
@@ -275,8 +280,9 @@ async fn process_subdomain_chunk(params: WorkerParams) {
     }
 }
 
-fn process_failed_subdomains(
+async fn process_failed_subdomains(
     cmd_args: &CommandArgs,
+    pool: AsyncResolverPool,
     dns_resolvers: &[&str],
     failed_subdomains: Vec<String>,
     interrupt: &AtomicBool,
@@ -308,13 +314,16 @@ fn process_failed_subdomains(
         let mut results = HashSet::new();
 
         for query_type in &cmd_args.query_types {
-            match resolve_domain(
-                resolver,
-                &fqdn,
-                query_type,
-                &cmd_args.transport_protocol,
-                true,
-            ) {
+            match pool
+                .resolve(
+                    resolver,
+                    &fqdn,
+                    query_type,
+                    &cmd_args.transport_protocol,
+                    true,
+                )
+                .await
+            {
                 Ok(packet) => results.extend(packet.answers),
                 Err(error) => {
                     print_query_error(cmd_args, &subdomain, resolver, &error, true);
@@ -347,8 +356,8 @@ fn read_wordlist(wordlist_path: Option<&String>) -> Result<Vec<String>> {
     }
 }
 
-fn handle_wildcard_domain(args: &CommandArgs, dns_resolvers: &[&str]) -> Result<bool> {
-    if check_wildcard_domain(args, dns_resolvers)? {
+async fn handle_wildcard_domain(args: &CommandArgs, dns_resolvers: &[&str]) -> Result<bool> {
+    if check_wildcard_domain(args, dns_resolvers).await? {
         log_warn!("Warning: Wildcard domain detected. Results may include false positives!");
         log_question!("Do you want to continue? (y/n): ");
 
@@ -367,9 +376,11 @@ fn handle_wildcard_domain(args: &CommandArgs, dns_resolvers: &[&str]) -> Result<
     Ok(false)
 }
 
-fn check_wildcard_domain(args: &CommandArgs, dns_resolvers: &[&str]) -> Result<bool> {
+async fn check_wildcard_domain(args: &CommandArgs, dns_resolvers: &[&str]) -> Result<bool> {
     const ATTEMPTS: u8 = 3;
     const MAX_PREFIX_LENGTH: usize = 63;
+
+    let resolver_pool = AsyncResolverPool::new(Some(1)).await?;
 
     let resolver = dns_resolvers
         .first()
@@ -377,30 +388,39 @@ fn check_wildcard_domain(args: &CommandArgs, dns_resolvers: &[&str]) -> Result<b
 
     let mut rng = rand::rng();
 
-    // Check if multiple random subdomains successfully resolve
-    // A wildcard domain will resolve ANY subdomain
-    let successful_resolutions = (0..ATTEMPTS)
-        .filter(|_| {
-            // Generate a random subdomain prefix
-            let random_length = rng.random_range(10..=MAX_PREFIX_LENGTH);
-            let random_subdomain: String = (5..random_length)
-                .map(|_| rng.random_range('a'..='z'))
-                .collect();
+    let mut successful_resolutions = 0;
 
-            // Append a unique identifier to avoid DNS caching issues
-            let fqdn = format!(
-                "{}-{}.{}",
-                random_subdomain,
-                rng.random_range(0..=200),
-                args.target
-            );
+    for _ in 0..ATTEMPTS {
+        // Generate a random subdomain prefix
+        let random_length = rng.random_range(10..=MAX_PREFIX_LENGTH);
+        let random_subdomain: String = (5..random_length)
+            .map(|_| rng.random_range('a'..='z'))
+            .collect();
 
-            let query_type = &DEFAULT_QUERY_TYPES[rng.random_range(0..DEFAULT_QUERY_TYPES.len())];
+        // Append a unique identifier to avoid DNS caching issues
+        let fqdn = format!(
+            "{}-{}.{}",
+            random_subdomain,
+            rng.random_range(0..=200),
+            args.target
+        );
 
-            // A wildcard domain will successfully resolve
-            resolve_domain(resolver, &fqdn, query_type, &args.transport_protocol, true).is_ok()
-        })
-        .count();
+        let query_type = &DEFAULT_QUERY_TYPES[rng.random_range(0..DEFAULT_QUERY_TYPES.len())];
+
+        // Check if the subdomain resolves
+        if resolver_pool
+            .resolve(resolver, &fqdn, query_type, &args.transport_protocol, true)
+            .await
+            .is_ok()
+        {
+            successful_resolutions += 1;
+        }
+
+        // Break early if we already have enough successful resolutions
+        if successful_resolutions >= 2 {
+            break;
+        }
+    }
 
     Ok(successful_resolutions >= 2)
 }

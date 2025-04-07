@@ -5,7 +5,6 @@ use crate::{
         async_resolver_pool::AsyncResolverPool,
         error::DnsError,
         protocol::{QueryType, RData, ResourceRecord},
-        resolver::resolve_domain,
     },
     io::{
         cli::CommandArgs,
@@ -48,7 +47,7 @@ pub async fn enumerate_records(cmd_args: &CommandArgs, dns_resolvers: &[&str]) -
     let mut seen_cnames = HashSet::new();
     let mut query_timer = QueryTimer::new(!cmd_args.no_query_stats);
 
-    check_dnssec(resolver, domain, cmd_args)?;
+    check_dnssec(resolver, domain, cmd_args).await?;
 
     let resolver_pool = AsyncResolverPool::new(Some(1)).await?;
 
@@ -74,7 +73,8 @@ pub async fn enumerate_records(cmd_args: &CommandArgs, dns_resolvers: &[&str]) -
                     resolver,
                     &mut data_output,
                     cmd_args,
-                )?;
+                )
+                .await?;
             }
             Err(err) if !matches!(err, DnsError::NoRecordsFound | DnsError::NonExistentDomain) => {
                 eprintln!("{query_type} {err}");
@@ -100,14 +100,17 @@ pub async fn enumerate_records(cmd_args: &CommandArgs, dns_resolvers: &[&str]) -
     Ok(())
 }
 
-fn check_dnssec(resolver: &str, domain: &str, cmd_args: &CommandArgs) -> Result<()> {
-    let response = resolve_domain(
-        resolver,
-        domain,
-        &QueryType::DNSKEY,
-        &cmd_args.transport_protocol,
-        !&cmd_args.no_recursion,
-    );
+async fn check_dnssec(resolver: &str, domain: &str, cmd_args: &CommandArgs) -> Result<()> {
+    let resolver_pool = AsyncResolverPool::new(Some(1)).await?;
+    let response = resolver_pool
+        .resolve(
+            resolver,
+            domain,
+            &QueryType::DNSKEY,
+            &cmd_args.transport_protocol,
+            !&cmd_args.no_recursion,
+        )
+        .await;
 
     let dnssec_status = match response {
         Ok(response) if response.answers.is_empty() => "is not enabled",
@@ -122,7 +125,7 @@ fn check_dnssec(resolver: &str, domain: &str, cmd_args: &CommandArgs) -> Result<
     Ok(())
 }
 
-fn process_response(
+async fn process_response(
     seen_cnames: &mut HashSet<String>,
     response: &[ResourceRecord],
     resolver: &str,
@@ -138,7 +141,7 @@ fn process_response(
         if let Some(data_output) = data_output {
             data_output.add_result(record.clone());
         }
-        let response_data_string = create_query_response_string(record, resolver, cmd_args)?;
+        let response_data_string = create_query_response_string(record, resolver, cmd_args).await?;
         if !cmd_args.quiet {
             println!("{response_data_string}");
         }
@@ -150,7 +153,7 @@ fn format_response(query_type: &str, content: &str) -> String {
     format!("[{} {}]", query_type.bold().bright_cyan(), content)
 }
 
-fn handle_ns_response(
+async fn handle_ns_response(
     query_type_formatted: &str,
     domain: &str,
     resolver: &str,
@@ -158,15 +161,18 @@ fn handle_ns_response(
     cmd_args: &CommandArgs,
 ) -> Result<String, DnsError> {
     let mut result = format_response(query_type_formatted, domain);
-
+    let resolver_pool = AsyncResolverPool::new(Some(1)).await?;
     for query_type in [QueryType::A, QueryType::AAAA] {
-        match resolve_domain(
-            resolver,
-            ns_domain,
-            &query_type,
-            &cmd_args.transport_protocol,
-            !&cmd_args.no_recursion,
-        ) {
+        match resolver_pool
+            .resolve(
+                resolver,
+                ns_domain,
+                &query_type,
+                &cmd_args.transport_protocol,
+                !&cmd_args.no_recursion,
+            )
+            .await
+        {
             Ok(records) => {
                 for record in records.answers {
                     result.push(' ');
@@ -189,7 +195,7 @@ fn handle_ns_response(
     Ok(result)
 }
 
-fn create_query_response_string(
+async fn create_query_response_string(
     query_response: &ResourceRecord,
     resolver: &str,
     cmd_args: &CommandArgs,
@@ -205,13 +211,12 @@ fn create_query_response_string(
         RData::AAAA(record) => Ok(format_response(&query_type_formatted, &record.to_string())),
         RData::TXT(txt_data) => Ok(format_response(&query_type_formatted, txt_data)),
         RData::CNAME(cname) => Ok(format_response(&query_type_formatted, cname)),
-        RData::NS(domain) => Ok(handle_ns_response(
-            &query_type_formatted,
-            domain,
-            resolver,
-            domain,
-            cmd_args,
-        )?),
+        RData::NS(domain) => {
+            Ok(
+                handle_ns_response(&query_type_formatted, domain, resolver, domain, cmd_args)
+                    .await?,
+            )
+        }
         RData::MX {
             preference,
             exchange,
