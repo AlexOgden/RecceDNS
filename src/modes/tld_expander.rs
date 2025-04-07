@@ -1,13 +1,14 @@
 use anyhow::Result;
 use colored::Colorize;
+use std::fmt::Write as _;
 use std::{collections::HashSet, sync::atomic::Ordering, thread, time::Duration};
 
+use crate::dns::async_resolver_pool::AsyncResolverPool;
 use crate::{
     dns::{
         error::DnsError,
         format::create_query_response_string,
         protocol::{QueryType, ResourceRecord},
-        resolver::resolve_domain,
         resolver_selector::{self, ResolverSelector},
     },
     io::{
@@ -66,7 +67,8 @@ pub async fn expand_tlds(cmd_args: &CommandArgs, dns_resolver_list: &[&str]) -> 
             &mut query_timer,
             &mut results_output,
             cmd_args,
-        )?;
+        )
+        .await?;
 
         if let Some(delay_ms) = &cmd_args.delay {
             thread::sleep(Duration::from_millis(delay_ms.get_delay()));
@@ -90,7 +92,7 @@ pub async fn expand_tlds(cmd_args: &CommandArgs, dns_resolver_list: &[&str]) -> 
     Ok(())
 }
 
-fn process_domain(
+async fn process_domain(
     domain_name: &str,
     resolver_selector: &mut dyn ResolverSelector,
     query_timer: &mut QueryTimer,
@@ -106,15 +108,19 @@ fn process_domain(
     let mut all_query_results = HashSet::<ResourceRecord>::new();
     let mut query_success = false;
 
+    let resolver_pool = AsyncResolverPool::new(Some(2)).await?;
+
     for query_type in query_types {
         query_timer.start();
-        let query_result = resolve_domain(
-            resolver,
-            domain_name,
-            &query_type,
-            &cmd_args.transport_protocol,
-            !cmd_args.no_recursion,
-        );
+        let query_result = resolver_pool
+            .resolve(
+                resolver,
+                domain_name,
+                &query_type,
+                &cmd_args.transport_protocol,
+                !cmd_args.no_recursion,
+            )
+            .await;
         query_timer.stop();
 
         // If the query succeeds, add all answer records.
@@ -228,10 +234,10 @@ fn print_query_result(args: &CommandArgs, domain: &str, resolver: &str, response
     let mut message = format!("{domain}");
 
     if args.verbose || args.show_resolver {
-        message.push_str(&format!(" [resolver: {}]", resolver.magenta()));
+        let _ = write!(message, " [resolver: {}]", resolver.magenta());
     }
     if !args.no_print_records {
-        message.push_str(&format!(" {response}"));
+        let _ = write!(message, " {response}");
     }
 
     log_success!(message);
@@ -253,12 +259,13 @@ fn print_query_error(args: &CommandArgs, domain: &str, resolver: &str, error: &D
     let mut message = format!("{domain}");
 
     if args.show_resolver {
-        message.push_str(&format!(" [resolver: {}]", resolver.magenta()));
+        let _ = write!(message, " [resolver: {}]", resolver.magenta());
     }
-    message.push_str(&format!(" {error}"));
+    let _ = write!(message, " {error}");
 
     log_error!(message);
 }
+
 #[cfg(test)]
 mod tests {
     use super::*;
