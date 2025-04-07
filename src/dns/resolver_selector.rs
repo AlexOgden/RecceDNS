@@ -1,11 +1,13 @@
 use anyhow::Result;
+use dashmap::DashMap;
 use rand::seq::IndexedRandom;
-use std::collections::HashMap;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 pub const DEFAULT_RESOLVER: &str = "1.1.1.1";
 
-pub trait ResolverSelector {
+pub trait ResolverSelector: Send + Sync {
     fn select(&mut self) -> Result<&str>;
     fn disable(&mut self, resolver: &str, duration: Duration);
 }
@@ -13,36 +15,39 @@ pub trait ResolverSelector {
 pub enum Selector {
     Random {
         dns_resolvers: Vec<String>,
-        disabled: HashMap<String, Instant>,
+        disabled: Arc<DashMap<String, Instant>>,
     },
     Sequential {
         dns_resolvers: Vec<String>,
-        current_index: usize,
-        disabled: HashMap<String, Instant>,
+        current_index: AtomicUsize,
+        disabled: Arc<DashMap<String, Instant>>,
     },
 }
 
 impl Selector {
     pub fn new(use_random: bool, dns_resolvers: Vec<String>) -> Self {
+        let disabled = Arc::new(DashMap::new());
+
         if use_random {
             Self::Random {
                 dns_resolvers,
-                disabled: HashMap::new(),
+                disabled,
             }
         } else {
             Self::Sequential {
                 dns_resolvers,
-                current_index: 0,
-                disabled: HashMap::new(),
+                current_index: AtomicUsize::new(0),
+                disabled,
             }
         }
     }
 
-    fn clean_disabled(&mut self) {
+    fn clean_disabled(&self) {
         let now = Instant::now();
+
         match self {
             Self::Random { disabled, .. } | Self::Sequential { disabled, .. } => {
-                disabled.retain(|_, expiry| *expiry > now);
+                disabled.retain(|_, &mut expiry| expiry > now);
             }
         }
     }
@@ -76,19 +81,20 @@ impl ResolverSelector for Selector {
                     return Err(anyhow::anyhow!("DNS Resolvers list is empty"));
                 }
 
-                // Find the next available resolver
-                let start_index = *current_index;
+                let start_index = current_index.load(Ordering::SeqCst);
                 loop {
-                    let resolver = &dns_resolvers[*current_index];
-                    *current_index = (*current_index + 1) % dns_resolvers.len();
+                    let resolver = &dns_resolvers[current_index.load(Ordering::SeqCst)];
+                    current_index.fetch_add(1, Ordering::SeqCst);
+                    current_index.store(
+                        current_index.load(Ordering::SeqCst) % dns_resolvers.len(),
+                        Ordering::SeqCst,
+                    );
 
-                    // If resolver is not disabled, return it
                     if !disabled.contains_key(resolver) {
                         return Ok(resolver);
                     }
 
-                    // If we've checked all resolvers and come back to start, they're all disabled
-                    if *current_index == start_index {
+                    if current_index.load(Ordering::SeqCst) == start_index {
                         return Err(anyhow::anyhow!("All DNS resolvers are disabled"));
                     }
                 }
@@ -99,25 +105,24 @@ impl ResolverSelector for Selector {
     fn disable(&mut self, resolver: &str, duration: Duration) {
         self.clean_disabled();
 
-        let (dns_resolvers, disabled) = match self {
-            Self::Sequential {
+        match self {
+            Self::Random {
+                dns_resolvers,
+                disabled,
+            }
+            | Self::Sequential {
                 dns_resolvers,
                 disabled,
                 ..
+            } => {
+                let other_active_resolvers = dns_resolvers
+                    .iter()
+                    .any(|r| r != resolver && !disabled.contains_key(r));
+
+                if other_active_resolvers {
+                    disabled.insert(resolver.to_string(), Instant::now() + duration);
+                }
             }
-            | Self::Random {
-                dns_resolvers,
-                disabled,
-            } => (dns_resolvers, disabled),
-        };
-
-        // Only disable if at least one other resolver will remain enabled
-        let other_active_resolvers = dns_resolvers
-            .iter()
-            .any(|r| r != resolver && !disabled.contains_key(r));
-
-        if other_active_resolvers {
-            disabled.insert(resolver.to_string(), Instant::now() + duration);
         }
     }
 }
@@ -158,7 +163,7 @@ mod tests {
         } = selector
         {
             assert_eq!(dns_resolvers, resolvers);
-            assert_eq!(current_index, 0);
+            assert_eq!(current_index.load(Ordering::SeqCst), 0);
             assert!(disabled.is_empty());
         } else {
             panic!("Expected Sequential selector");
