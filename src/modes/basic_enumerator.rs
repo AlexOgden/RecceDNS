@@ -2,6 +2,7 @@ use colored::Colorize;
 
 use crate::{
     dns::{
+        async_resolver_pool::AsyncResolverPool,
         error::DnsError,
         protocol::{QueryType, RData, ResourceRecord},
         resolver::resolve_domain,
@@ -26,7 +27,7 @@ const DEFAULT_QUERY_TYPES: &[QueryType] = &[
     QueryType::SOA,
 ];
 
-pub fn enumerate_records(cmd_args: &CommandArgs, dns_resolvers: &[&str]) -> Result<()> {
+pub async fn enumerate_records(cmd_args: &CommandArgs, dns_resolvers: &[&str]) -> Result<()> {
     println!(
         "Enumerating records for target domain: {}\n",
         cmd_args.target.bold().bright_blue()
@@ -49,15 +50,19 @@ pub fn enumerate_records(cmd_args: &CommandArgs, dns_resolvers: &[&str]) -> Resu
 
     check_dnssec(resolver, domain, cmd_args)?;
 
+    let resolver_pool = AsyncResolverPool::new(Some(1)).await?;
+
     for query_type in query_types {
         query_timer.start();
-        let query_result = resolve_domain(
-            resolver,
-            domain,
-            &query_type,
-            &cmd_args.transport_protocol,
-            !&cmd_args.no_recursion,
-        );
+        let query_result = resolver_pool
+            .resolve(
+                resolver,
+                domain,
+                &query_type,
+                &cmd_args.transport_protocol,
+                !&cmd_args.no_recursion,
+            )
+            .await;
         query_timer.stop();
 
         match query_result {
