@@ -28,16 +28,32 @@ impl std::fmt::Display for Status {
     }
 }
 
-pub fn status(status: &Status, message: &impl Display, newline: bool) {
-    let clear_line = "\r\x1b[2K";
-    let prefix = format!("{clear_line}[{status}] ");
-    let newline_str = if newline { "\n" } else { "" };
-    let formatted_message = format!("{newline_str}{prefix}{message}");
+pub fn status(status: &Status, message: &impl Display, add_newline: bool) {
+    let prefix = format!("[{status}] ");
+    let formatted_message = format!("{prefix}{message}");
 
+    // Determine the output stream and print method
     match status {
-        Status::Error => eprintln!("{formatted_message}"),
-        Status::Question => print!("{formatted_message}"),
-        _ => println!("{formatted_message}"),
+        Status::Error => {
+            if add_newline {
+                eprintln!("{formatted_message}");
+            } else {
+                eprint!("{formatted_message}");
+                let _ = std::io::stderr().flush();
+            }
+        }
+        Status::Question => {
+            print!("{formatted_message}");
+            let _ = std::io::stdout().flush();
+        }
+        _ => {
+            if add_newline {
+                println!("{formatted_message}");
+            } else {
+                print!("{formatted_message}");
+                let _ = std::io::stdout().flush();
+            }
+        }
     }
 }
 
@@ -60,91 +76,51 @@ pub fn clear_line() {
 }
 
 #[macro_export]
-macro_rules! log_info {
-    ($message:expr) => {
-        $crate::io::logger::status(
-            &$crate::io::logger::Status::Info,
-            &$message.to_string(),
-            false,
-        );
+macro_rules! _log_internal {
+    ($status:expr, $message:expr, $newline:expr) => {
+        $crate::io::logger::status(&$status, &$message, $newline);
     };
-    ($message:expr, $newline:expr) => {
-        $crate::io::logger::status(
-            &$crate::io::logger::Status::Info,
-            &$message.to_string(),
-            $newline,
-        );
+    ($status:expr, $message:expr) => {
+        let newline = !matches!($status, $crate::io::logger::Status::Question);
+        $crate::io::logger::status(&$status, &$message, newline);
+    };
+}
+
+#[macro_export]
+macro_rules! log_info {
+    ($($arg:tt)*) => {
+        $crate::_log_internal!($crate::io::logger::Status::Info, $($arg)*);
     };
 }
 
 #[macro_export]
 macro_rules! log_question {
+    // Question defaults to no newline
     ($message:expr) => {
-        $crate::io::logger::status(
-            &$crate::io::logger::Status::Question,
-            &$message.to_string(),
-            false,
-        );
+        $crate::_log_internal!($crate::io::logger::Status::Question, $message, false);
     };
     ($message:expr, $newline:expr) => {
-        $crate::io::logger::status(
-            &$crate::io::logger::Status::Question,
-            &$message.to_string(),
-            $newline,
-        );
+        $crate::_log_internal!($crate::io::logger::Status::Question, $message, $newline);
     };
 }
 
 #[macro_export]
 macro_rules! log_success {
-    ($message:expr) => {
-        $crate::io::logger::status(
-            &$crate::io::logger::Status::Success,
-            &$message.to_string(),
-            false,
-        );
-    };
-    ($message:expr, $newline:expr) => {
-        $crate::io::logger::status(
-            &$crate::io::logger::Status::Success,
-            &$message.to_string(),
-            $newline,
-        );
+    ($($arg:tt)*) => {
+        $crate::_log_internal!($crate::io::logger::Status::Success, $($arg)*);
     };
 }
 
 #[macro_export]
 macro_rules! log_warn {
-    ($message:expr) => {
-        $crate::io::logger::status(
-            &$crate::io::logger::Status::Warning,
-            &$message.to_string(),
-            false,
-        );
-    };
-    ($message:expr, $newline:expr) => {
-        $crate::io::logger::status(
-            &$crate::io::logger::Status::Warning,
-            &$message.to_string(),
-            $newline,
-        );
+    ($($arg:tt)*) => {
+        $crate::_log_internal!($crate::io::logger::Status::Warning, $($arg)*);
     };
 }
 
 #[macro_export]
 macro_rules! log_error {
-    ($message:expr) => {
-        $crate::io::logger::status(
-            &$crate::io::logger::Status::Error,
-            &$message.to_string(),
-            false,
-        );
-    };
-    ($message:expr, $newline:expr) => {
-        $crate::io::logger::status(
-            &$crate::io::logger::Status::Error,
-            &$message.to_string(),
-            $newline,
-        );
+    ($($arg:tt)*) => {
+        $crate::_log_internal!($crate::io::logger::Status::Error, $($arg)*);
     };
 }
