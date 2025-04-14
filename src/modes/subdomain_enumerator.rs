@@ -70,12 +70,20 @@ pub async fn enumerate_subdomains(
         return Ok(());
     }
 
-    let query_types =
-        if cmd_args.query_types.is_empty() || cmd_args.query_types.contains(&QueryType::ANY) {
-            DEFAULT_QUERY_TYPES.to_vec()
-        } else {
-            cmd_args.query_types.clone()
-        };
+    let query_types: &[QueryType] = match cmd_args.query_types.as_slice() {
+        [] | [QueryType::ANY] => DEFAULT_QUERY_TYPES,
+        qt => qt,
+    };
+
+    log_info!(format!(
+        "Using query types: {}",
+        query_types
+            .iter()
+            .map(|t| format!("{t:?}"))
+            .collect::<Vec<String>>()
+            .join(", ")
+            .bold()
+    ));
 
     // Prepare results output if JSON output is enabled.
     let mut results_output = if cmd_args.json.is_some() {
@@ -120,7 +128,7 @@ pub async fn enumerate_subdomains(
             connection_pool: pool.clone(),
             tx: tx.clone(),
             subdomains: chunk,
-            query_types: query_types.clone(),
+            query_types: query_types.to_vec(),
             target: cmd_args.target.clone(),
             transport: cmd_args.transport_protocol.clone(),
             dns_resolvers: dns_resolver_list

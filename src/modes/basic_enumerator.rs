@@ -37,10 +37,11 @@ pub async fn enumerate_records(cmd_args: &CommandArgs, dns_resolvers: &[&str]) -
         .as_ref()
         .map(|_| DnsEnumerationOutput::new(cmd_args.target.clone()));
 
-    let query_types = match cmd_args.query_types.as_slice() {
-        [] | [QueryType::ANY] => DEFAULT_QUERY_TYPES.to_vec(),
-        _ => cmd_args.query_types.clone(),
+    let query_types: &[QueryType] = match cmd_args.query_types.as_slice() {
+        [] | [QueryType::ANY] => DEFAULT_QUERY_TYPES,
+        qt => qt,
     };
+
     let resolver = dns_resolvers[0];
     let domain = &cmd_args.target;
     let mut seen_cnames = HashSet::new();
@@ -56,7 +57,7 @@ pub async fn enumerate_records(cmd_args: &CommandArgs, dns_resolvers: &[&str]) -
             .resolve(
                 resolver,
                 domain,
-                &query_type,
+                query_type,
                 &cmd_args.transport_protocol,
                 !&cmd_args.no_recursion,
             )
