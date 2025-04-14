@@ -37,10 +37,9 @@ pub async fn enumerate_records(cmd_args: &CommandArgs, dns_resolvers: &[&str]) -
         .as_ref()
         .map(|_| DnsEnumerationOutput::new(cmd_args.target.clone()));
 
-    let query_types = if cmd_args.query_types.is_empty() {
-        DEFAULT_QUERY_TYPES.to_vec()
-    } else {
-        cmd_args.query_types.clone()
+    let query_types = match cmd_args.query_types.as_slice() {
+        [] | [QueryType::ANY] => DEFAULT_QUERY_TYPES.to_vec(),
+        _ => cmd_args.query_types.clone(),
     };
     let resolver = dns_resolvers[0];
     let domain = &cmd_args.target;
