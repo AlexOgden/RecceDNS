@@ -89,11 +89,11 @@ pub async fn search_certificates(cmd_args: &CommandArgs) -> Result<()> {
             }
             Err(error) => {
                 spinner.finish_and_clear();
+                log_error!(format!(
+                    "Attempt {}/{} failed: {}. Retrying...",
+                    attempt, max_retries, error
+                ));
                 if attempt < max_retries && matches!(error, SearchError::NonSuccessStatus(_)) {
-                    log_error!(format!(
-                        "Attempt {}/{} failed: {}. Retrying...",
-                        attempt, max_retries, error
-                    ));
                     tokio::time::sleep(tokio::time::Duration::from_secs(attempt + 1)).await;
                 } else {
                     log_error!(format!(
