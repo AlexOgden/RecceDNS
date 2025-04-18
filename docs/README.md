@@ -1,7 +1,7 @@
 # RecceDNS 
 
 RecceDNS is a DNS enumeration/OSINT tool written in Rust 
-that provides functionality to gather information about domain names. It performs various DNS queries to discover subdomains, IP addresses, and other DNS records associated with a target domain. The tool is designed to be fast, efficient, and easy to use, leveraging the performance benefits of Rust.
+that provides functionality to gather information about domain names. It performs various DNS queries to discover subdomains, IP addresses, and other DNS records associated with a target domain. The tool is designed to be fast, efficient, and easy to use. This tool places emphasis on high-performance subdomain bruteforcing with advanced functionality for rapid enumeration and rate limiting mitigation.
 
 I originally started working on this project to learn Rust, improve on network programming, and gain a deeper understanding of DNS. This software includes its own stub resolver built from scratch, it is not a fully-featured DNS implementation and only supports the functionality required of it. I am still learning/improving my Rust skills, if you're experienced in Rust and think something could be improved, be more idomatic, or any other suggestions, feel free to let me know or submit a pull request!
 
@@ -138,7 +138,7 @@ docker run --rm -it ghcr.io/alexogden/reccedns:lists -m s -t github.com -w /opt/
 
 - `-Q` `--quiet` : Don't print any results to the terminal. Can be useful for targets with large amount of results that you are outputing to JSON.
 
-- `-T` `--threads` : Number of threads to use for subdomain enumeration. Defaults to logical cores - 1.
+- `-T` `--threads` : Number of threads to use for subdomain enumeration. Defaults to (logical cores - 1), however if cores is greater than 6 it will default to 6.
 
 ## Example Usage
 
