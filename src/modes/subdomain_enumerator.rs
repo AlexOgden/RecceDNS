@@ -276,7 +276,7 @@ async fn process_subdomain_chunk(params: WorkerParams) {
                 }
             }
             if let Some(delay) = &params.delay {
-                thread::sleep(Duration::from_millis(delay.get_delay()));
+                time::sleep(Duration::from_millis(delay.get_delay())).await;
             }
         }
 
