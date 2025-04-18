@@ -46,10 +46,9 @@ pub async fn enumerate_records(cmd_args: &CommandArgs, dns_resolvers: &[&str]) -
     let domain = &cmd_args.target;
     let mut seen_cnames = HashSet::new();
     let mut query_timer = QueryTimer::new(!cmd_args.no_query_stats);
-
-    check_dnssec(resolver, domain, cmd_args).await?;
-
     let resolver_pool = AsyncResolverPool::new(Some(1)).await?;
+
+    check_dnssec(&resolver_pool, resolver, domain, cmd_args).await?;
 
     for query_type in query_types {
         query_timer.start();
@@ -68,6 +67,7 @@ pub async fn enumerate_records(cmd_args: &CommandArgs, dns_resolvers: &[&str]) -
             Ok(mut response) => {
                 response.answers.sort_by_key(|a| a.data.to_qtype());
                 process_response(
+                    &resolver_pool,
                     &mut seen_cnames,
                     &response.answers,
                     resolver,
@@ -100,8 +100,12 @@ pub async fn enumerate_records(cmd_args: &CommandArgs, dns_resolvers: &[&str]) -
     Ok(())
 }
 
-async fn check_dnssec(resolver: &str, domain: &str, cmd_args: &CommandArgs) -> Result<()> {
-    let resolver_pool = AsyncResolverPool::new(Some(1)).await?;
+async fn check_dnssec(
+    resolver_pool: &AsyncResolverPool,
+    resolver: &str,
+    domain: &str,
+    cmd_args: &CommandArgs,
+) -> Result<()> {
     let response = resolver_pool
         .resolve(
             resolver,
@@ -126,6 +130,7 @@ async fn check_dnssec(resolver: &str, domain: &str, cmd_args: &CommandArgs) -> R
 }
 
 async fn process_response(
+    resolver_pool: &AsyncResolverPool,
     seen_cnames: &mut HashSet<String>,
     response: &[ResourceRecord],
     resolver: &str,
@@ -133,89 +138,84 @@ async fn process_response(
     cmd_args: &CommandArgs,
 ) -> Result<()> {
     for record in response {
-        if let RData::CNAME(cname) = &record.data {
-            if !seen_cnames.insert(cname.clone()) {
-                continue; // Skip if CNAME is already seen
-            }
-        }
-        if let Some(data_output) = data_output {
-            data_output.add_result(record.clone());
-        }
-        let response_data_string = create_query_response_string(record, resolver, cmd_args).await?;
-        if !cmd_args.quiet {
-            println!("{response_data_string}");
-        }
+        process_and_format_record(
+            resolver_pool,
+            seen_cnames,
+            record,
+            resolver,
+            data_output,
+            cmd_args,
+        )
+        .await?;
     }
     Ok(())
 }
 
-fn format_response(query_type: &str, content: &str) -> String {
-    format!("[{} {}]", query_type.bold().bright_cyan(), content)
-}
-
-async fn handle_ns_response(
-    query_type_formatted: &str,
-    domain: &str,
+async fn process_and_format_record(
+    resolver_pool: &AsyncResolverPool,
+    seen_cnames: &mut HashSet<String>,
+    record: &ResourceRecord,
     resolver: &str,
-    ns_domain: &str,
+    data_output: &mut Option<DnsEnumerationOutput>,
     cmd_args: &CommandArgs,
-) -> Result<String, DnsError> {
-    let mut result = format_response(query_type_formatted, domain);
-    let resolver_pool = AsyncResolverPool::new(Some(1)).await?;
-    for query_type in [QueryType::A, QueryType::AAAA] {
-        match resolver_pool
-            .resolve(
-                resolver,
-                ns_domain,
-                &query_type,
-                &cmd_args.transport_protocol,
-                !&cmd_args.no_recursion,
-            )
-            .await
-        {
-            Ok(records) => {
-                for record in records.answers {
-                    result.push(' ');
-                    match record.data {
-                        RData::A(a_record) => {
-                            result.push_str(&format_response("A", &a_record.to_string()));
-                        }
-                        RData::AAAA(aaaa_record) => {
-                            result.push_str(&format_response("AAAA", &aaaa_record.to_string()));
-                        }
-                        _ => {}
-                    }
-                }
-            }
-            Err(DnsError::NoRecordsFound) => {}
-            Err(err) => return Err(err),
+) -> Result<()> {
+    if let RData::CNAME(cname) = &record.data {
+        if !seen_cnames.insert(cname.clone()) {
+            return Ok(()); // Skip if CNAME is already seen
         }
     }
 
-    Ok(result)
-}
+    // Add to JSON output
+    if let Some(output) = data_output {
+        output.add_result(record.clone());
+    }
 
-async fn create_query_response_string(
-    query_response: &ResourceRecord,
-    resolver: &str,
-    cmd_args: &CommandArgs,
-) -> Result<String> {
-    let query_type_formatted = query_response
-        .data
-        .to_qtype()
-        .to_string()
-        .bold()
-        .bright_cyan();
-    match &query_response.data {
-        RData::A(record) => Ok(format_response(&query_type_formatted, &record.to_string())),
-        RData::AAAA(record) => Ok(format_response(&query_type_formatted, &record.to_string())),
+    let query_type_formatted = record.data.to_qtype().to_string().bold().bright_cyan();
+
+    let response_data_string_result = match &record.data {
+        RData::A(a_record) => Ok(format_response(
+            &query_type_formatted,
+            &a_record.to_string(),
+        )),
+        RData::AAAA(aaaa_record) => Ok(format_response(
+            &query_type_formatted,
+            &aaaa_record.to_string(),
+        )),
         RData::TXT(txt_data) => Ok(format_response(&query_type_formatted, txt_data)),
         RData::CNAME(cname) => Ok(format_response(&query_type_formatted, cname)),
-        RData::NS(domain) => {
-            Ok(
-                handle_ns_response(&query_type_formatted, domain, resolver, domain, cmd_args)
-                    .await?,
-            )
+        RData::NS(ns_domain) => {
+            let mut result = format_response(&query_type_formatted, ns_domain);
+            for query_type in [QueryType::A, QueryType::AAAA] {
+                match resolver_pool
+                    .resolve(
+                        resolver,
+                        ns_domain,
+                        &query_type,
+                        &cmd_args.transport_protocol,
+                        !&cmd_args.no_recursion,
+                    )
+                    .await
+                {
+                    Ok(ip_records) => {
+                        for ip_record in ip_records.answers {
+                            result.push(' ');
+                            match ip_record.data {
+                                RData::A(a_rec) => {
+                                    result.push_str(&format_response("A", &a_rec.to_string()));
+                                }
+                                RData::AAAA(aaaa_rec) => {
+                                    result
+                                        .push_str(&format_response("AAAA", &aaaa_rec.to_string()));
+                                }
+                                _ => {}
+                            }
+                        }
+                    }
+                    Err(DnsError::NoRecordsFound) => {}
+                    Err(err) => return Err(err.into()),
+                }
+            }
+            Ok(result)
         }
         RData::MX {
             preference,
@@ -245,5 +245,17 @@ async fn create_query_response_string(
             "Unsupported data type: {qtype} with length {data_len} bytes"
         ))),
         RData::PTR { .. } => Err(anyhow::Error::msg("PTR query type is unsupported")),
+    };
+
+    let response_data_string = response_data_string_result?;
+
+    if !cmd_args.quiet {
+        println!("{response_data_string}");
     }
+
+    Ok(())
+}
+
+fn format_response(query_type: &str, content: &str) -> String {
+    format!("[{} {}]", query_type.bold().bright_cyan(), content)
 }
