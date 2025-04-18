@@ -59,7 +59,14 @@ pub async fn expand_tlds(cmd_args: &CommandArgs, dns_resolver_list: &[&str]) -> 
             break;
         }
 
-        cli::update_progress_bar(&progress_bar, idx, tld_list.len() as u64);
+        cli::update_progress_bar(
+            &progress_bar,
+            idx,
+            tld_list.len() as u64,
+            None,
+            cmd_args.delay.as_ref(),
+        );
+
         let query_fqdn = format!("{target_base_domain}.{tld}");
         process_domain(
             &query_fqdn,

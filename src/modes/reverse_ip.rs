@@ -70,7 +70,7 @@ pub async fn reverse_ip(cmd_args: &CommandArgs, dns_resolver_list: &[&str]) -> R
             .await;
         query_timer.stop();
 
-        cli::update_progress_bar(&progress_bar, index, total_ips);
+        cli::update_progress_bar(&progress_bar, index, total_ips, None, None);
 
         match query_result {
             Ok(response) => {

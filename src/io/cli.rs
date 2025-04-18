@@ -184,7 +184,6 @@ pub fn setup_progress_bar(total: u64) -> ProgressBar {
         .tick_chars(PROGRESS_TICK_CHARS);
     pb.set_style(style);
     pb.set_prefix(format!("[{}/{}]", 0, total));
-    pb.set_message("Enumerating...");
     pb.enable_steady_tick(Duration::from_millis(100));
     pb
 }
@@ -202,8 +201,31 @@ pub fn setup_basic_spinner() -> ProgressBar {
     spinner
 }
 
-/// Updates the progress bar based on the current index and total
-pub fn update_progress_bar(pb: &ProgressBar, index: usize, total: u64) {
-    pb.set_prefix(format!("[{}/{}]", index + 1, total));
+pub fn update_progress_bar(
+    pb: &ProgressBar,
+    index: usize,
+    total: u64,
+    failed_count: Option<usize>,
+    delay: Option<&Delay>,
+) {
+    // Set message based on delay
+    if let Some(d) = delay {
+        let delay_str = format!("{}ms", d.get_delay());
+        pb.set_message(format!("[Delay: {delay_str}]"));
+    } else {
+        // Clear message if no delay is provided
+        pb.set_message("");
+    }
+
+    // Set prefix with failed count
+    let failed_count = failed_count.unwrap_or(0);
+    let failed_str = if failed_count > 0 {
+        format!("[{}]", failed_count.to_string().red())
+    } else {
+        String::new()
+    };
+    pb.set_prefix(format!("[{}/{}] {}", index + 1, total, failed_str));
+
+    // Increment progress bar
     pb.inc(1);
 }

@@ -175,11 +175,13 @@ pub async fn enumerate_subdomains(
                 }
             }
         }
-        progress_bar.inc(1);
+
         cli::update_progress_bar(
             &progress_bar,
             ((i as u64) + 1).try_into().unwrap(),
             total_subdomains,
+            Some(failed_subdomains.len()),
+            cmd_args.delay.as_ref(),
         );
     }
 
@@ -246,7 +248,7 @@ async fn process_subdomain_chunk(params: WorkerParams) {
                 }
                 Err(error) => {
                     if matches!(error, DnsError::Network(_)) {
-                        let duration = rand::rng().random_range(2..=25);
+                        let duration = rand::rng().random_range(5..=30);
                         resolver_selector.disable(&resolver, Duration::from_secs(duration));
                     }
 
@@ -313,6 +315,9 @@ async fn process_failed_subdomains(
             .collect(),
     );
 
+    // Always use a delay for retries, even if the user didn't specify one.
+    let adaptive_delay = delay::Delay::adaptive(100, 750);
+
     let mut found_count = 0;
     for subdomain in failed_subdomains {
         if interrupt.load(Ordering::SeqCst) {
@@ -325,6 +330,8 @@ async fn process_failed_subdomains(
         let mut results = HashSet::new();
 
         for query_type in &cmd_args.query_types {
+            thread::sleep(Duration::from_millis(adaptive_delay.get_delay()));
+
             match pool
                 .resolve(
                     resolver,
@@ -335,13 +342,16 @@ async fn process_failed_subdomains(
                 )
                 .await
             {
-                Ok(packet) => results.extend(packet.answers),
+                Ok(packet) => {
+                    results.extend(packet.answers);
+                    adaptive_delay.report_query_result(true);
+                }
                 Err(error) => {
                     print_query_error(cmd_args, &subdomain, resolver, &error, true);
+                    adaptive_delay.report_query_result(false);
                     break;
                 }
             }
-            thread::sleep(Duration::from_millis(125));
         }
 
         if !results.is_empty() {
