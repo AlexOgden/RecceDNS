@@ -15,6 +15,7 @@ use std::{
     thread,
     time::{Duration, Instant},
 };
+use tokio::time;
 
 use crate::{
     dns::{
@@ -338,7 +339,7 @@ async fn process_failed_subdomains(
         let mut results = HashSet::new();
 
         for query_type in &cmd_args.query_types {
-            thread::sleep(Duration::from_millis(adaptive_delay.get_delay()));
+            time::sleep(Duration::from_millis(adaptive_delay.get_delay())).await;
 
             match pool
                 .resolve(
