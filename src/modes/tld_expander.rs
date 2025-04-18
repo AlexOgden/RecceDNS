@@ -63,9 +63,17 @@ pub async fn expand_tlds(cmd_args: &CommandArgs, dns_resolver_list: &[&str]) -> 
         .as_ref()
         .map(|_| DnsEnumerationOutput::new(cmd_args.target.clone()));
 
-    let num_threads = cmd_args
-        .threads
-        .map_or_else(|| max(num_cpus::get() - 1, 1), |threads| threads);
+    let num_threads = cmd_args.threads.map_or_else(
+        || {
+            let cpus = num_cpus::get();
+            if cpus > 6 {
+                6
+            } else {
+                max(cpus - 1, 1)
+            }
+        },
+        |threads| threads,
+    );
 
     log_info!(format!(
         "Starting TLD expansion for {} with {} threads",

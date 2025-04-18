@@ -94,9 +94,17 @@ pub async fn enumerate_subdomains(
 
     let subdomain_list = read_wordlist(cmd_args.wordlist.as_ref())?;
 
-    let num_threads = cmd_args
-        .threads
-        .map_or_else(|| max(num_cpus::get() - 1, 1), |threads| threads);
+    let num_threads = cmd_args.threads.map_or_else(
+        || {
+            let cpus = num_cpus::get();
+            if cpus > 6 {
+                6
+            } else {
+                max(cpus - 1, 1)
+            }
+        },
+        |threads| threads,
+    );
 
     log_info!(format!(
         "Starting subdomain enumeration with {} threads",
