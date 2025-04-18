@@ -11,7 +11,6 @@ pub enum Delay {
     Adaptive(Arc<AdaptiveDelayState>),
 }
 
-/// State tracking for adaptive delay adjustments
 #[derive(Debug)]
 pub struct AdaptiveDelayState {
     min_delay: u64,
@@ -40,7 +39,7 @@ impl AdaptiveDelayState {
         self.total_queries.fetch_add(1, Ordering::Relaxed);
 
         // Only adjust every 20 queries to avoid overreacting
-        if self.total_queries.load(Ordering::Relaxed) % 25 == 0 {
+        if self.total_queries.load(Ordering::Relaxed) % 20 == 0 {
             let current = self.current_delay.load(Ordering::Relaxed);
             let success_rate = self.get_success_rate();
 
@@ -66,7 +65,6 @@ impl AdaptiveDelayState {
             // For very small values, use a fixed increment
             current + 5
         } else {
-            // Normal 25% increase for larger values
             (current * 5) / 4
         };
 
@@ -80,7 +78,7 @@ impl AdaptiveDelayState {
         let total = self.total_queries.load(Ordering::Relaxed) as f64;
 
         if total == 0.0 {
-            return 1.0; // Default to optimistic
+            return 1.0;
         }
 
         success / total

@@ -1,11 +1,11 @@
 [package]
 name = "reccedns"
 authors = ["Alex Ogden"]
-version = "0.11.0"
+version = "0.12.0"
 edition = "2021"
 
 [dependencies]
-anyhow = "1.0.97"
+anyhow = "1.0.98"
 clap = { version = "4.5.34", features = ["derive"] }
 colored = "3.0.0"
 ctrlc = "3.4.5"

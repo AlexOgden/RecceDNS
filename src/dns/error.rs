@@ -17,6 +17,6 @@ pub enum DnsError {
     ProtocolData(String),
     #[error("Internal Error: {0}")]
     Internal(String),
-    #[error("Connection Timeout")]
+    #[error("Resolver Timeout")]
     Timeout,
 }

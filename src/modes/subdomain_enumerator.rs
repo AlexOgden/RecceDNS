@@ -15,6 +15,7 @@ use std::{
     thread,
     time::{Duration, Instant},
 };
+use tokio::time;
 
 use crate::{
     dns::{
@@ -70,12 +71,20 @@ pub async fn enumerate_subdomains(
         return Ok(());
     }
 
-    let query_types =
-        if cmd_args.query_types.is_empty() || cmd_args.query_types.contains(&QueryType::ANY) {
-            DEFAULT_QUERY_TYPES.to_vec()
-        } else {
-            cmd_args.query_types.clone()
-        };
+    let query_types: &[QueryType] = match cmd_args.query_types.as_slice() {
+        [] | [QueryType::ANY] => DEFAULT_QUERY_TYPES,
+        qt => qt,
+    };
+
+    log_info!(format!(
+        "Using query types: {}",
+        query_types
+            .iter()
+            .map(|t| format!("{t:?}"))
+            .collect::<Vec<String>>()
+            .join(", ")
+            .bold()
+    ));
 
     // Prepare results output if JSON output is enabled.
     let mut results_output = if cmd_args.json.is_some() {
@@ -86,9 +95,17 @@ pub async fn enumerate_subdomains(
 
     let subdomain_list = read_wordlist(cmd_args.wordlist.as_ref())?;
 
-    let num_threads = cmd_args
-        .threads
-        .map_or_else(|| max(num_cpus::get() - 1, 1), |threads| threads);
+    let num_threads = cmd_args.threads.map_or_else(
+        || {
+            let cpus = num_cpus::get();
+            if cpus > 6 {
+                6
+            } else {
+                max(cpus - 1, 1)
+            }
+        },
+        |threads| threads,
+    );
 
     log_info!(format!(
         "Starting subdomain enumeration with {} threads",
@@ -120,7 +137,7 @@ pub async fn enumerate_subdomains(
             connection_pool: pool.clone(),
             tx: tx.clone(),
             subdomains: chunk,
-            query_types: query_types.clone(),
+            query_types: query_types.to_vec(),
             target: cmd_args.target.clone(),
             transport: cmd_args.transport_protocol.clone(),
             dns_resolvers: dns_resolver_list
@@ -167,11 +184,13 @@ pub async fn enumerate_subdomains(
                 }
             }
         }
-        progress_bar.inc(1);
+
         cli::update_progress_bar(
             &progress_bar,
             ((i as u64) + 1).try_into().unwrap(),
             total_subdomains,
+            Some(failed_subdomains.len()),
+            cmd_args.delay.as_ref(),
         );
     }
 
@@ -238,7 +257,7 @@ async fn process_subdomain_chunk(params: WorkerParams) {
                 }
                 Err(error) => {
                     if matches!(error, DnsError::Network(_)) {
-                        let duration = rand::rng().random_range(2..=25);
+                        let duration = rand::rng().random_range(5..=30);
                         resolver_selector.disable(&resolver, Duration::from_secs(duration));
                     }
 
@@ -305,6 +324,9 @@ async fn process_failed_subdomains(
             .collect(),
     );
 
+    // Always use a delay for retries, even if the user didn't specify one.
+    let adaptive_delay = delay::Delay::adaptive(100, 750);
+
     let mut found_count = 0;
     for subdomain in failed_subdomains {
         if interrupt.load(Ordering::SeqCst) {
@@ -317,6 +339,8 @@ async fn process_failed_subdomains(
         let mut results = HashSet::new();
 
         for query_type in &cmd_args.query_types {
+            time::sleep(Duration::from_millis(adaptive_delay.get_delay())).await;
+
             match pool
                 .resolve(
                     resolver,
@@ -327,13 +351,16 @@ async fn process_failed_subdomains(
                 )
                 .await
             {
-                Ok(packet) => results.extend(packet.answers),
+                Ok(packet) => {
+                    results.extend(packet.answers);
+                    adaptive_delay.report_query_result(true);
+                }
                 Err(error) => {
                     print_query_error(cmd_args, &subdomain, resolver, &error, true);
+                    adaptive_delay.report_query_result(false);
                     break;
                 }
             }
-            thread::sleep(Duration::from_millis(125));
         }
 
         if !results.is_empty() {
