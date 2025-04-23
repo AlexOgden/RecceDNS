@@ -4,8 +4,8 @@
 <p align="center">
 	<a title="Build Status" target="_blank" href="https://github.com/AlexOgden/RecceDNS/actions/workflows/cargo_test.yml"><img src="https://img.shields.io/github/actions/workflow/status/tursodatabase/limbo/rust.yml?style=flat-square"></a>
 	<a title="Latest Release" target="_blank" href="https://github.com/AlexOgden/RecceDNS/releases/latest"><img src="https://img.shields.io/github/v/release/AlexOgden/RecceDNS?style=flat-square&color=aqua"></a>
-	<a title="GitHub Commits" target="_blank" href="https://github.com/AlexOgden/RecceDNS/commits/main"><img src="https://img.shields.io/github/commit-activity/m/AlexOgden/RecceDNS.svg?style=flat-square"></a>
-	<a title="Last Commit" target="_blank" href="https://github.com/AlexOgden/RecceDNS/commits/main"><img src="https://img.shields.io/github/last-commit/AlexOgden/RecceDNS.svg?style=flat-square&color=FF9900"></a>
+	<a title="GitHub Commits" target="_blank" href="https://github.com/AlexOgden/RecceDNS/commits/master"><img src="https://img.shields.io/github/commit-activity/m/AlexOgden/RecceDNS.svg?style=flat-square"></a>
+	<a title="Last Commit" target="_blank" href="https://github.com/AlexOgden/RecceDNS/commits/master"><img src="https://img.shields.io/github/last-commit/AlexOgden/RecceDNS.svg?style=flat-square&color=FF9900"></a>
 </p>
 
 ---
