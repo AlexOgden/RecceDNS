@@ -1,6 +1,6 @@
 #![allow(dead_code)]
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 
 pub struct PacketBuffer {
     pub buf: [u8; 512],

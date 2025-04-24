@@ -1,8 +1,8 @@
 use rand::Rng;
 use std::fmt;
 use std::str::FromStr;
-use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 
 #[derive(Debug, Clone)]
 pub enum Delay {
