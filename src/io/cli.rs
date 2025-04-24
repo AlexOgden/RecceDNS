@@ -39,27 +39,27 @@ pub enum OperationMode {
 )]
 pub struct CommandArgs {
     /// The operation mode to run, bruteforce subdomains or enumerate records
-    #[arg(short = 'm', long = "mode", required = true)]
+    #[arg(short = 'm', long = "mode", required = true, env = "RECCEDNS_MODE")]
     pub operation_mode: OperationMode,
 
     /// The target base domain name or IP address (single, CIDR, or range)
-    #[arg(short, long, required = true, value_parser = validation::validate_target)]
+    #[arg(short, long, required = true, value_parser = validation::validate_target, env = "RECCEDNS_TARGET")]
     pub target: String,
 
     /// IPv4 Address of the DNS resolver(s) to use (comma-separated). Multiple resolvers will be selected either randomly or sequentially
-    #[arg(short, long, default_value = resolver_selector::DEFAULT_RESOLVER, value_parser = validate_dns_resolvers, required = false)]
+    #[arg(short, long, default_value = resolver_selector::DEFAULT_RESOLVER, value_parser = validate_dns_resolvers, required = false, env = "RECCEDNS_DNS_RESOLVERS")]
     pub dns_resolvers: String,
 
     /// Transport protocol to use for DNS queries
-    #[arg(short = 'p', long = "protocol", value_enum, default_value_t = TransportProtocol::UDP, required = false, ignore_case = true)]
+    #[arg(short = 'p', long = "protocol", value_enum, default_value_t = TransportProtocol::UDP, required = false, ignore_case = true, env = "RECCEDNS_PROTOCOL")]
     pub transport_protocol: TransportProtocol,
 
     /// Path to subdomain wordlist
-    #[arg(short, long, required = false)]
+    #[arg(short, long, required = false, env = "RECCEDNS_WORDLIST")]
     pub wordlist: Option<String>,
 
     /// Print extra information
-    #[arg(short, long, default_value_t = false)]
+    #[arg(short, long, default_value_t = false, env = "RECCEDNS_VERBOSE")]
     pub verbose: bool,
 
     /// Query type(s) to use for DNS queries
@@ -69,62 +69,69 @@ pub struct CommandArgs {
         value_enum,
         value_delimiter = ',',
         default_values_t = vec![QueryType::ANY],
-        ignore_case = true
+        ignore_case = true,
+        env = "RECCEDNS_QUERY_TYPES"
     )]
     pub query_types: Vec<QueryType>,
 
     /// Delay in milliseconds between DNS requests for subdomain enumeration. Fixed value, range, or adaptive delay.
     /// Fixed: '1000', Range: '500-1000', Adaptive: 'A:500-1000', or default adaptive delay: 'A'
-    #[arg(short = 'D', long, required = false, value_parser = parse_delay)]
+    #[arg(short = 'D', long, required = false, value_parser = parse_delay, env = "RECCEDNS_DELAY")]
     pub delay: Option<Delay>,
 
     /// Number of threads to use for subdomain enumeration
     /// Default is the number of logical CPUs minus one
-    #[arg(short = 'T', long, required = false)]
+    #[arg(short = 'T', long, required = false, env = "RECCEDNS_THREADS")]
     pub threads: Option<usize>,
 
     /// Use a random resolver for each query, otherwise use them sequentially
-    #[arg(short = 'r', long, required = false, default_value_t = false)]
+    #[arg(
+        short = 'r',
+        long,
+        required = false,
+        default_value_t = false,
+        env = "RECCEDNS_USE_RANDOM"
+    )]
     pub use_random: bool,
 
     /// Path of output file to write JSON results to. Extension is optional.
-    #[arg(long, required = false)]
+    #[arg(long, required = false, env = "RECCEDNS_JSON_OUTPUT")]
     pub json: Option<String>,
 
     /// Don't print results to the console, only write to the output file
-    #[arg(short = 'Q', long, required = false)]
+    #[arg(short = 'Q', long, required = false, env = "RECCEDNS_QUIET")]
     pub quiet: bool,
 
     /// Don't show the welcome ASCII art
-    #[arg(long)]
+    #[arg(long, env = "RECCEDNS_NO_WELCOME")]
     pub no_welcome: bool,
 
     /// Don't check if the DNS servers are working
-    #[arg(long)]
+    #[arg(long, env = "RECCEDNS_NO_DNS_CHECK")]
     pub no_dns_check: bool,
 
     /// Don't request recursion in DNS queries
-    #[arg(long)]
+    #[arg(long, env = "RECCEDNS_NO_RECURSION")]
     pub no_recursion: bool,
 
     /// Don't retry failed queries
-    #[arg(long)]
+    #[arg(long, env = "RECCEDNS_NO_RETRY")]
     pub no_retry: bool,
 
     /// Don't print the DNS records in subdomain enumeration, only show the subdomains
-    #[arg(long)]
+    #[arg(long, env = "RECCEDNS_NO_PRINT_RECORDS")]
     pub no_print_records: bool,
 
     /// Don't print errors for failed queries during subdomain enumeration
-    #[arg(long)]
+    #[arg(long, env = "RECCEDNS_NO_PRINT_ERRORS")]
     pub no_print_errors: bool,
 
     /// Don't calculate average query time and print it at the end
-    #[arg(long)]
+    #[arg(long, env = "RECCEDNS_NO_QUERY_STATS")]
     pub no_query_stats: bool,
 
     /// Print which resolver was used for each query
-    #[arg(long)]
+    #[arg(long, env = "RECCEDNS_SHOW_RESOLVER")]
     pub show_resolver: bool,
 }
 
