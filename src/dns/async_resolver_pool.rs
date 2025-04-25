@@ -1,6 +1,6 @@
 use std::{
     net::{Ipv4Addr, Ipv6Addr, SocketAddr},
-    sync::{atomic, Arc},
+    sync::{Arc, atomic},
     time::Duration,
 };
 
@@ -228,12 +228,12 @@ impl AsyncResolverPool {
             Ok(Err(e)) => {
                 return Err(DnsError::Network(format!(
                     "Failed to connect to {target_addr_str}: {e}"
-                )))
+                )));
             }
             Err(_) => {
                 return Err(DnsError::Network(format!(
                     "Timeout connecting to {target_addr_str}"
-                )))
+                )));
             }
         };
         let (mut reader, mut writer) = stream.into_split();

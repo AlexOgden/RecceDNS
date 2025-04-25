@@ -1,6 +1,6 @@
 use colored::Colorize;
-use rand::distr::Alphanumeric;
 use rand::Rng;
+use rand::distr::Alphanumeric;
 
 use crate::dns::async_resolver_pool::AsyncResolverPool;
 use crate::dns::protocol::QueryType;

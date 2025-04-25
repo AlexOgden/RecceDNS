@@ -66,11 +66,7 @@ pub async fn expand_tlds(cmd_args: &CommandArgs, dns_resolver_list: &[&str]) -> 
     let num_threads = cmd_args.threads.map_or_else(
         || {
             let cpus = num_cpus::get();
-            if cpus > 6 {
-                6
-            } else {
-                max(cpus - 1, 1)
-            }
+            if cpus > 6 { 6 } else { max(cpus - 1, 1) }
         },
         |threads| threads,
     );

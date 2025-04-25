@@ -1,7 +1,7 @@
 use anyhow::Result;
 use std::sync::{
-    atomic::{AtomicBool, Ordering},
     Arc,
+    atomic::{AtomicBool, Ordering},
 };
 
 pub fn initialize_interrupt_handler() -> Result<Arc<AtomicBool>> {

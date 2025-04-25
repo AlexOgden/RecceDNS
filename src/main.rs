@@ -4,7 +4,7 @@ mod modes;
 mod network;
 mod timing;
 
-use anyhow::{ensure, Result};
+use anyhow::{Result, ensure};
 use io::{
     cli::{self, OperationMode},
     validation::filter_working_dns_resolvers,

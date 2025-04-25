@@ -1,6 +1,6 @@
 #![allow(clippy::future_not_send)]
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use colored::Colorize;
 use rand::Rng;
 use std::fmt::Write;
@@ -98,11 +98,7 @@ pub async fn enumerate_subdomains(
     let num_threads = cmd_args.threads.map_or_else(
         || {
             let cpus = num_cpus::get();
-            if cpus > 6 {
-                6
-            } else {
-                max(cpus - 1, 1)
-            }
+            if cpus > 6 { 6 } else { max(cpus - 1, 1) }
         },
         |threads| threads,
     );
@@ -276,7 +272,7 @@ async fn process_subdomain_chunk(params: WorkerParams) {
                 }
             }
             if let Some(delay) = &params.delay {
-                thread::sleep(Duration::from_millis(delay.get_delay()));
+                time::sleep(Duration::from_millis(delay.get_delay())).await;
             }
         }
 

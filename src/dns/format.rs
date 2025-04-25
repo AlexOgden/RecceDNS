@@ -41,9 +41,7 @@ pub fn create_query_response_string(query_result: &HashSet<ResourceRecord>) -> S
                 target,
             } => (
                 "SRV",
-                format!(
-                    "Priority:{priority} Weight:{weight} Port:{port} Target:{target}"
-                ),
+                format!("Priority:{priority} Weight:{weight} Port:{port} Target:{target}"),
             ),
             RData::DNSKEY {
                 flags,
@@ -52,13 +50,9 @@ pub fn create_query_response_string(query_result: &HashSet<ResourceRecord>) -> S
                 public_key: _,
             } => (
                 "DNSKEY",
-                format!(
-                    "Flags:{flags} Protocol:{protocol} Algorithm:{algorithm}"
-                ),
+                format!("Flags:{flags} Protocol:{protocol} Algorithm:{algorithm}"),
             ),
-            RData::Unknown { qtype, data_len } => {
-                ("Unknown", format!("{qtype}: {data_len} bytes"))
-            }
+            RData::Unknown { qtype, data_len } => ("Unknown", format!("{qtype}: {data_len} bytes")),
         };
 
         domain_map
