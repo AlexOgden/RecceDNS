@@ -4,10 +4,10 @@ use std::fmt::Write as _;
 use std::{
     cmp::max,
     collections::HashSet,
-    sync::{atomic::Ordering, mpsc},
-    thread,
+    sync::atomic::Ordering,
     time::{Duration, Instant},
 };
+use tokio::sync::mpsc;
 
 use crate::dns::async_resolver_pool::AsyncResolverPool;
 use crate::{
@@ -89,7 +89,7 @@ pub async fn expand_tlds(cmd_args: &CommandArgs, dns_resolver_list: &[&str]) -> 
 
     let start_time = Instant::now();
 
-    let (tx, rx) = mpsc::channel();
+    let (tx, mut rx) = mpsc::channel(1000);
     let pool = AsyncResolverPool::new(Some(2 * num_threads)).await?;
 
     let query_types = if cmd_args.query_types.is_empty() {
@@ -116,18 +116,15 @@ pub async fn expand_tlds(cmd_args: &CommandArgs, dns_resolver_list: &[&str]) -> 
             no_recursion: cmd_args.no_recursion,
         };
 
-        thread::spawn(move || {
-            tokio::runtime::Runtime::new()
-                .unwrap()
-                .block_on(process_tld_chunk(worker_params));
-        });
+        tokio::spawn(process_tld_chunk(worker_params));
     }
     drop(tx); // Close original sender.
 
     // Process results from the receiver.
     let mut found_count = 0;
     let mut error_count = 0;
-    for (i, received) in rx.into_iter().enumerate() {
+    let mut i: u64 = 0;
+    while let Some(received) = rx.recv().await {
         if interrupted.load(Ordering::SeqCst) {
             logger::clear_line();
             log_warn!("Interrupted by user".to_string(), true);
@@ -157,11 +154,12 @@ pub async fn expand_tlds(cmd_args: &CommandArgs, dns_resolver_list: &[&str]) -> 
 
         cli::update_progress_bar(
             &progress_bar,
-            ((i as u64) + 1).try_into().unwrap(),
+            (i + 1).try_into().unwrap(),
             tld_list_vec.len() as u64,
-            Some(error_count), // Show error count instead of failed subdomains
+            Some(error_count),
             cmd_args.delay.as_ref(),
         );
+        i += 1;
     }
 
     progress_bar.finish_and_clear();
@@ -244,8 +242,12 @@ async fn process_tld_chunk(params: WorkerParams) {
             params
                 .tx
                 .send(Ok((query_fqdn, resolver.to_string(), all_query_results)))
+                .await
         } else if let Some(err) = first_error {
-            params.tx.send(Err((query_fqdn, resolver.to_string(), err)))
+            params
+                .tx
+                .send(Err((query_fqdn, resolver.to_string(), err)))
+                .await
         } else {
             Ok(())
         };
@@ -256,7 +258,7 @@ async fn process_tld_chunk(params: WorkerParams) {
         }
 
         if let Some(delay) = &params.delay {
-            thread::sleep(Duration::from_millis(delay.get_delay()));
+            tokio::time::sleep(Duration::from_millis(delay.get_delay())).await;
         }
     }
 }

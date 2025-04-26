@@ -78,7 +78,7 @@ pub async fn check_dns_resolvers<'a>(
             failed_servers.push((server, "No response"));
         } else {
             print_status(server, "OK");
-            working_servers.push(server); // Push &str directly
+            working_servers.push(server);
         }
     }
 
