@@ -65,7 +65,7 @@ impl AdaptiveDelayState {
             // For very small values, use a fixed increment
             current + 5
         } else {
-            (current * 5) / 4
+            (current * 115) / 100
         };
 
         let new_delay = new_delay.min(self.max_delay);
