@@ -322,7 +322,7 @@ async fn process_failed_subdomains(
         resolver_selector::get_selector(cmd_args.use_random, dns_resolvers.to_vec());
 
     // Always use a delay for retries, even if the user didn't specify one.
-    let adaptive_delay = delay::Delay::adaptive(100, 750);
+    let adaptive_delay = delay::Delay::adaptive(75, 750);
 
     let mut found_count = 0;
     for subdomain in failed_subdomains {
@@ -354,7 +354,12 @@ async fn process_failed_subdomains(
                 }
                 Err(error) => {
                     print_query_error(cmd_args, &subdomain, resolver, &error, true);
-                    adaptive_delay.report_query_result(false);
+                    if !matches!(
+                        error,
+                        DnsError::NoRecordsFound | DnsError::NonExistentDomain
+                    ) {
+                        adaptive_delay.report_query_result(false);
+                    }
                     break;
                 }
             }
