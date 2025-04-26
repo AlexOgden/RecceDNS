@@ -5,11 +5,7 @@ use colored::Colorize;
 use indicatif::{ProgressBar, ProgressStyle};
 
 use super::validation::{self, validate_dns_resolvers};
-use crate::{
-    dns::{protocol::QueryType, resolver_selector},
-    network::types::TransportProtocol,
-    timing::delay::Delay,
-};
+use crate::{dns::protocol::QueryType, network::types::TransportProtocol, timing::delay::Delay};
 
 const PROGRESS_TICK_CHARS: &str = "/|\\- ";
 
@@ -47,7 +43,7 @@ pub struct CommandArgs {
     pub target: String,
 
     /// IPv4 Address of the DNS resolver(s) to use (comma-separated). Multiple resolvers will be selected either randomly or sequentially
-    #[arg(short, long, default_value = resolver_selector::DEFAULT_RESOLVER, value_parser = validate_dns_resolvers, required = false, env = "RECCEDNS_DNS_RESOLVERS")]
+    #[arg(short, long, value_parser = validate_dns_resolvers, required = false, env = "RECCEDNS_DNS_RESOLVERS")]
     pub dns_resolvers: String,
 
     /// Transport protocol to use for DNS queries

@@ -4,10 +4,12 @@ mod modes;
 mod network;
 mod timing;
 
-use anyhow::{Result, ensure};
+use std::{net::Ipv4Addr, path::Path};
+
+use anyhow::{Result, anyhow, ensure};
 use io::{
     cli::{self, OperationMode},
-    validation::filter_working_dns_resolvers,
+    validation::filter_working_resolvers,
 };
 use network::types::TransportProtocol;
 
@@ -18,9 +20,7 @@ async fn main() -> Result<()> {
     if !cmd_args.no_welcome {
         io::cli::print_ascii_art();
     }
-
     let dns_resolvers = initialize_dns_resolvers(&cmd_args).await?;
-
     log_argument_info(&cmd_args);
 
     match cmd_args.operation_mode {
@@ -31,7 +31,9 @@ async fn main() -> Result<()> {
         OperationMode::SubdomainEnumeration => {
             modes::subdomain_enumerator::enumerate_subdomains(&cmd_args, &dns_resolvers).await
         }
-        OperationMode::ReverseIp => modes::reverse_ip::reverse_ip(&cmd_args, &dns_resolvers).await,
+        OperationMode::ReverseIp => {
+            modes::reverse_ip::reverse_ip(&cmd_args, &dns_resolvers).await
+        }
         OperationMode::TldExpansion => {
             modes::tld_expander::expand_tlds(&cmd_args, &dns_resolvers).await
         }
@@ -48,20 +50,47 @@ fn log_argument_info(cmd_args: &cli::CommandArgs) {
     }
 }
 
-async fn initialize_dns_resolvers(cmd_args: &cli::CommandArgs) -> Result<Vec<&str>> {
+async fn initialize_dns_resolvers(cmd_args: &cli::CommandArgs) -> Result<Vec<Ipv4Addr>> {
     let no_dns_check =
-        cmd_args.operation_mode == OperationMode::CertSearch || cmd_args.no_dns_check;
+        matches!(cmd_args.operation_mode, OperationMode::CertSearch) || cmd_args.no_dns_check;
 
-    let resolver_list = cmd_args.dns_resolvers.split(',').collect::<Vec<&str>>();
-
-    let dns_resolvers =
-        filter_working_dns_resolvers(no_dns_check, &cmd_args.transport_protocol, &resolver_list)
-            .await;
+    let dns_resolvers_arg = cmd_args.dns_resolvers.trim();
+    let resolver_list: Vec<String> = if Path::new(dns_resolvers_arg).exists() {
+        std::fs::read_to_string(dns_resolvers_arg)
+            .map_err(|_| anyhow!("Failed to read DNS resolvers file"))?
+            .lines()
+            .flat_map(|line| line.split(',').map(str::trim).filter(|s| !s.is_empty()))
+            .map(str::to_string)
+            .collect()
+    } else {
+        dns_resolvers_arg
+            .split(',')
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_string)
+            .collect()
+    };
 
     ensure!(
-        !dns_resolvers.is_empty(),
+        !resolver_list.is_empty(),
+        "No DNS resolvers provided! At least one resolver must be specified."
+    );
+
+    let ipv4_resolvers: Vec<Ipv4Addr> = resolver_list
+        .iter()
+        .map(|s| {
+            s.parse::<Ipv4Addr>()
+                .map_err(|_| anyhow!("Invalid IPv4 address: {}", s))
+        })
+        .collect::<Result<_, _>>()?;
+
+    let working_resolvers =
+        filter_working_resolvers(no_dns_check, &cmd_args.transport_protocol, &ipv4_resolvers).await;
+
+    ensure!(
+        !working_resolvers.is_empty(),
         "No working DNS resolvers found! At least one resolver must be operational."
     );
 
-    Ok(dns_resolvers)
+    Ok(working_resolvers)
 }

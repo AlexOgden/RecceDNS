@@ -106,7 +106,7 @@ impl AsyncResolverPool {
 
     pub async fn resolve(
         &self,
-        dns_resolver: &str,
+        dns_resolver: &Ipv4Addr,
         domain: &str,
         query_type: &QueryType,
         protocol: &TransportProtocol,
@@ -136,7 +136,7 @@ impl AsyncResolverPool {
 
     async fn resolve_udp(
         &self,
-        dns_resolver: &str,
+        dns_resolver: &Ipv4Addr,
         mut query_packet: DnsPacket,
     ) -> Result<DnsPacket, DnsError> {
         if self.sockets.is_empty() {
@@ -169,21 +169,12 @@ impl AsyncResolverPool {
             % self.sockets.len();
         let socket = &self.sockets[socket_index];
 
-        let target_addr_str = format!("{dns_resolver}:{DNS_PORT}");
-        let target_sock_addr: SocketAddr = match target_addr_str.parse() {
-            Ok(addr) => addr,
-            Err(e) => {
-                self.pending_queries.remove(&query_id);
-                return Err(DnsError::Network(format!(
-                    "UDP: Invalid resolver address '{target_addr_str}': {e}"
-                )));
-            }
-        };
+        let target_sock_addr = SocketAddr::new((*dns_resolver).into(), DNS_PORT);
 
         if let Err(e) = socket.send_to(&request_data, target_sock_addr).await {
             self.pending_queries.remove(&query_id);
             return Err(DnsError::Network(format!(
-                "UDP: Failed to send query to {target_addr_str}: {e}"
+                "UDP: Failed to send query to {target_sock_addr}: {e}"
             )));
         }
 
@@ -204,13 +195,13 @@ impl AsyncResolverPool {
             }
             Err(_timeout_elapsed) => {
                 self.pending_queries.remove(&query_id);
-                Err(DnsError::Timeout(dns_resolver.to_owned()))
+                Err(DnsError::Timeout(dns_resolver.to_string()))
             }
         }
     }
 
     async fn resolve_tcp(
-        dns_resolver: &str,
+        dns_resolver: &Ipv4Addr,
         mut query_packet: DnsPacket,
     ) -> Result<DnsPacket, DnsError> {
         let query_id = query_packet.header.id;
@@ -235,19 +226,19 @@ impl AsyncResolverPool {
         tcp_request_data.extend_from_slice(&query_len.to_be_bytes());
         tcp_request_data.extend_from_slice(query_data);
 
-        let target_addr_str = format!("{dns_resolver}:{DNS_PORT}");
+        let target_sock_addr = SocketAddr::new((*dns_resolver).into(), DNS_PORT);
 
         // Establish TCP connection with timeout
-        let stream = match timeout(DEFAULT_TIMEOUT, TcpStream::connect(&target_addr_str)).await {
+        let stream = match timeout(DEFAULT_TIMEOUT, TcpStream::connect(target_sock_addr)).await {
             Ok(Ok(s)) => s,
             Ok(Err(e)) => {
                 return Err(DnsError::Network(format!(
-                    "Failed to connect to {target_addr_str}: {e}"
+                    "Failed to connect to {target_sock_addr}: {e}"
                 )));
             }
             Err(_) => {
                 return Err(DnsError::Network(format!(
-                    "Timeout connecting to {target_addr_str}"
+                    "Timeout connecting to {target_sock_addr}"
                 )));
             }
         };
@@ -257,11 +248,11 @@ impl AsyncResolverPool {
             Ok(Ok(())) => { /* Write successful */ }
             Ok(Err(e)) => {
                 return Err(DnsError::Network(format!(
-                    "Failed to write request to {target_addr_str}: {e}"
+                    "Failed to write request to {target_sock_addr}: {e}"
                 )));
             }
             Err(_) => {
-                return Err(DnsError::Timeout(dns_resolver.to_owned()));
+                return Err(DnsError::Timeout(dns_resolver.to_string()));
             }
         }
 
@@ -271,11 +262,11 @@ impl AsyncResolverPool {
             Ok(Ok(_)) => { /* Read length successful */ }
             Ok(Err(e)) => {
                 return Err(DnsError::Network(format!(
-                    "Failed to read response length from {target_addr_str}: {e}"
+                    "Failed to read response length from {target_sock_addr}: {e}"
                 )));
             }
             Err(_) => {
-                return Err(DnsError::Timeout(dns_resolver.to_owned()));
+                return Err(DnsError::Timeout(dns_resolver.to_string()));
             }
         }
         let response_len = u16::from_be_bytes(len_buffer) as usize;
@@ -298,11 +289,11 @@ impl AsyncResolverPool {
             Ok(Ok(_)) => { /* Read body successful */ }
             Ok(Err(e)) => {
                 return Err(DnsError::Network(format!(
-                    "Failed to read response from {target_addr_str}: {e}"
+                    "Failed to read response from {target_sock_addr}: {e}"
                 )));
             }
             Err(_) => {
-                return Err(DnsError::Timeout(dns_resolver.to_owned()));
+                return Err(DnsError::Timeout(dns_resolver.to_string()));
             }
         }
 

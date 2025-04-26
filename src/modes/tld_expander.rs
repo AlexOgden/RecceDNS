@@ -1,6 +1,7 @@
 use anyhow::Result;
 use colored::Colorize;
 use std::fmt::Write as _;
+use std::net::Ipv4Addr;
 use std::{
     cmp::max,
     collections::HashSet,
@@ -43,14 +44,14 @@ struct WorkerParams {
     query_types: Vec<QueryType>,
     target_base_domain: String,
     transport: TransportProtocol,
-    dns_resolvers: Vec<String>,
+    dns_resolvers: Vec<Ipv4Addr>,
     use_random: bool,
     delay: Option<delay::Delay>,
     no_recursion: bool,
 }
 
 #[allow(clippy::too_many_lines)]
-pub async fn expand_tlds(cmd_args: &CommandArgs, dns_resolver_list: &[&str]) -> Result<()> {
+pub async fn expand_tlds(cmd_args: &CommandArgs, dns_resolver_list: &[Ipv4Addr]) -> Result<()> {
     let interrupted = interrupt::initialize_interrupt_handler()?;
     let tld_list_vec = get_tld_list(cmd_args).await?;
     let tld_set: HashSet<String> = tld_list_vec.iter().cloned().collect(); // Keep set for strip_tld
@@ -107,10 +108,7 @@ pub async fn expand_tlds(cmd_args: &CommandArgs, dns_resolver_list: &[&str]) -> 
             query_types: query_types.clone(),
             target_base_domain: target_base_domain.clone(),
             transport: cmd_args.transport_protocol.clone(),
-            dns_resolvers: dns_resolver_list
-                .iter()
-                .map(std::string::ToString::to_string)
-                .collect(),
+            dns_resolvers: dns_resolver_list.to_vec(),
             use_random: cmd_args.use_random,
             delay: cmd_args.delay.clone(),
             no_recursion: cmd_args.no_recursion,
@@ -192,8 +190,7 @@ async fn process_tld_chunk(params: WorkerParams) {
     for tld in params.tlds {
         let resolver = resolver_selector
             .select()
-            .unwrap_or(resolver_selector::DEFAULT_RESOLVER)
-            .to_string();
+            .unwrap_or(resolver_selector::DEFAULT_RESOLVER);
         let query_fqdn = format!("{}.{}", params.target_base_domain, tld);
         let mut all_query_results = HashSet::<ResourceRecord>::new();
         let mut first_error: Option<DnsError> = None;
@@ -218,7 +215,7 @@ async fn process_tld_chunk(params: WorkerParams) {
                 // If it's a network error, temporarily disable this resolver.
                 if let DnsError::Network(_) = error {
                     let duration = Duration::from_secs(rand::random::<u64>() % 26 + 5); // 5-30 seconds
-                    resolver_selector.disable(&resolver, duration);
+                    resolver_selector.disable(resolver, duration);
                 }
                 // Treat "no records" and "non-existent domain" as successful queries for delay logic.
                 if matches!(

@@ -24,19 +24,14 @@ use crate::{
     timing::stats::QueryTimer,
 };
 
-pub async fn reverse_ip(cmd_args: &CommandArgs, dns_resolver_list: &[&str]) -> Result<()> {
+pub async fn reverse_ip(cmd_args: &CommandArgs, dns_resolver_list: &[Ipv4Addr]) -> Result<()> {
     let interrupted = interrupt::initialize_interrupt_handler()?;
 
     let target_ips = parse_ip(&cmd_args.target)?;
     let total_ips = target_ips.len() as u64;
 
-    let mut resolver_selector = resolver_selector::get_selector(
-        cmd_args.use_random,
-        dns_resolver_list
-            .iter()
-            .map(std::string::ToString::to_string)
-            .collect(),
-    );
+    let mut resolver_selector =
+        resolver_selector::get_selector(cmd_args.use_random, dns_resolver_list.to_vec());
     let mut query_timer = QueryTimer::new(!cmd_args.no_query_stats);
     let mut found_count = 0;
 
@@ -61,7 +56,7 @@ pub async fn reverse_ip(cmd_args: &CommandArgs, dns_resolver_list: &[&str]) -> R
         query_timer.start();
         let query_result = resolver_pool
             .resolve(
-                resolver,
+                &resolver,
                 &ip.to_string(),
                 &QueryType::PTR,
                 &cmd_args.transport_protocol,

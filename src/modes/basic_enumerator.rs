@@ -14,7 +14,7 @@ use crate::{
     timing::stats::QueryTimer,
 };
 use anyhow::Result;
-use std::collections::HashSet;
+use std::{collections::HashSet, net::Ipv4Addr};
 
 const DEFAULT_QUERY_TYPES: &[QueryType] = &[
     QueryType::A,
@@ -26,7 +26,7 @@ const DEFAULT_QUERY_TYPES: &[QueryType] = &[
     QueryType::SOA,
 ];
 
-pub async fn enumerate_records(cmd_args: &CommandArgs, dns_resolvers: &[&str]) -> Result<()> {
+pub async fn enumerate_records(cmd_args: &CommandArgs, dns_resolvers: &[Ipv4Addr]) -> Result<()> {
     println!(
         "Enumerating records for target domain: {}\n",
         cmd_args.target.bold().bright_blue()
@@ -48,13 +48,13 @@ pub async fn enumerate_records(cmd_args: &CommandArgs, dns_resolvers: &[&str]) -
     let mut query_timer = QueryTimer::new(!cmd_args.no_query_stats);
     let resolver_pool = AsyncResolverPool::new(Some(1)).await?;
 
-    check_dnssec(&resolver_pool, resolver, domain, cmd_args).await?;
+    check_dnssec(&resolver_pool, &resolver, domain, cmd_args).await?;
 
     for query_type in query_types {
         query_timer.start();
         let query_result = resolver_pool
             .resolve(
-                resolver,
+                &resolver,
                 domain,
                 query_type,
                 &cmd_args.transport_protocol,
@@ -70,7 +70,7 @@ pub async fn enumerate_records(cmd_args: &CommandArgs, dns_resolvers: &[&str]) -
                     &resolver_pool,
                     &mut seen_cnames,
                     &response.answers,
-                    resolver,
+                    &resolver,
                     &mut data_output,
                     cmd_args,
                 )
@@ -102,7 +102,7 @@ pub async fn enumerate_records(cmd_args: &CommandArgs, dns_resolvers: &[&str]) -
 
 async fn check_dnssec(
     resolver_pool: &AsyncResolverPool,
-    resolver: &str,
+    resolver: &Ipv4Addr,
     domain: &str,
     cmd_args: &CommandArgs,
 ) -> Result<()> {
@@ -133,7 +133,7 @@ async fn process_response(
     resolver_pool: &AsyncResolverPool,
     seen_cnames: &mut HashSet<String>,
     response: &[ResourceRecord],
-    resolver: &str,
+    resolver: &Ipv4Addr,
     data_output: &mut Option<DnsEnumerationOutput>,
     cmd_args: &CommandArgs,
 ) -> Result<()> {
@@ -155,7 +155,7 @@ async fn process_and_format_record(
     resolver_pool: &AsyncResolverPool,
     seen_cnames: &mut HashSet<String>,
     record: &ResourceRecord,
-    resolver: &str,
+    resolver: &Ipv4Addr,
     data_output: &mut Option<DnsEnumerationOutput>,
     cmd_args: &CommandArgs,
 ) -> Result<()> {

@@ -105,11 +105,11 @@ pub fn validate_ipv4(ip: &str) -> Result<String> {
         .map(|_| ip.to_string())
 }
 
-pub async fn filter_working_dns_resolvers<'a>(
+pub async fn filter_working_resolvers(
     no_dns_check: bool,
     transport_protocol: &TransportProtocol,
-    dns_resolvers: &[&'a str],
-) -> Vec<&'a str> {
+    dns_resolvers: &[Ipv4Addr],
+) -> Vec<Ipv4Addr> {
     if no_dns_check {
         return dns_resolvers.to_vec();
     }

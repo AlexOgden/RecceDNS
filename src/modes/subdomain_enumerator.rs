@@ -4,6 +4,7 @@ use anyhow::{Result, anyhow};
 use colored::Colorize;
 use rand::Rng;
 use std::fmt::Write;
+use std::net::Ipv4Addr;
 use std::{
     cmp::max,
     collections::HashSet,
@@ -34,7 +35,7 @@ use crate::{
 
 // A type alias for the result sent between threads.
 type SubdomainResult =
-    Result<(String, String, HashSet<ResourceRecord>), (String, String, DnsError)>;
+    Result<(String, Ipv4Addr, HashSet<ResourceRecord>), (String, Ipv4Addr, DnsError)>;
 
 // A type alias for the sender channel.
 type SubdomainResultSender = mpsc::Sender<SubdomainResult>;
@@ -48,7 +49,7 @@ struct WorkerParams {
     query_types: Vec<QueryType>,
     target: String,
     transport: TransportProtocol,
-    dns_resolvers: Vec<String>,
+    dns_resolvers: Vec<Ipv4Addr>,
     use_random: bool,
     delay: Option<delay::Delay>,
 }
@@ -59,7 +60,7 @@ const DEFAULT_QUERY_TYPES: &[QueryType] = &[QueryType::A, QueryType::AAAA];
 #[allow(clippy::too_many_lines)]
 pub async fn enumerate_subdomains(
     cmd_args: &CommandArgs,
-    dns_resolver_list: &[&str],
+    dns_resolver_list: &[Ipv4Addr],
 ) -> Result<()> {
     let interrupted = interrupt::initialize_interrupt_handler()?;
 
@@ -141,10 +142,7 @@ pub async fn enumerate_subdomains(
             query_types: query_types.to_vec(),
             target: cmd_args.target.clone(),
             transport: cmd_args.transport_protocol.clone(),
-            dns_resolvers: dns_resolver_list
-                .iter()
-                .map(std::string::ToString::to_string)
-                .collect(),
+            dns_resolvers: dns_resolver_list.to_vec(),
             use_random: cmd_args.use_random,
             delay: cmd_args.delay.clone(),
         };
@@ -168,14 +166,14 @@ pub async fn enumerate_subdomains(
             Ok((subdomain, resolver, results)) => {
                 let response_str = create_query_response_string(&results);
                 found_count += 1;
-                print_query_result(cmd_args, &subdomain, &resolver, &response_str);
+                print_query_result(cmd_args, &subdomain, resolver, &response_str);
 
                 if let Some(output) = &mut results_output {
                     results.iter().for_each(|r| output.add_result(r.clone()));
                 }
             }
             Err((subdomain, resolver, error)) => {
-                print_query_error(cmd_args, &subdomain, &resolver, &error, false);
+                print_query_error(cmd_args, &subdomain, resolver, &error, false);
                 match error {
                     DnsError::NoRecordsFound | DnsError::NonExistentDomain => {}
                     _ => failed_subdomains.push(subdomain),
@@ -196,17 +194,22 @@ pub async fn enumerate_subdomains(
 
     progress_bar.finish_and_clear();
 
+    pool.shutdown();
+
     if !failed_subdomains.is_empty() && !cmd_args.no_retry {
         interrupted.store(false, Ordering::SeqCst);
+        // Use a new resolver pool for retries
+        let retry_pool = AsyncResolverPool::new(Some(2 * num_threads)).await?;
         let success_retrys = process_failed_subdomains(
             cmd_args,
-            pool.clone(),
+            &retry_pool,
             dns_resolver_list,
             failed_subdomains,
             &interrupted,
         )
         .await;
         found_count += success_retrys;
+        retry_pool.shutdown();
     }
 
     let elapsed_time = start_time.elapsed();
@@ -223,8 +226,6 @@ pub async fn enumerate_subdomains(
         output.write_to_file(file)?;
     }
 
-    pool.shutdown();
-
     Ok(())
 }
 
@@ -236,8 +237,7 @@ async fn process_subdomain_chunk(params: WorkerParams) {
     for subdomain in params.subdomains {
         let resolver = resolver_selector
             .select()
-            .unwrap_or(resolver_selector::DEFAULT_RESOLVER)
-            .to_string();
+            .unwrap_or(resolver_selector::DEFAULT_RESOLVER);
         let fqdn = format!("{}.{}", subdomain, params.target);
         let mut all_results = HashSet::new();
         let mut first_error: Option<DnsError> = None;
@@ -258,7 +258,7 @@ async fn process_subdomain_chunk(params: WorkerParams) {
                 Err(error) => {
                     if matches!(error, DnsError::Network(_)) {
                         let duration = rand::rng().random_range(5..=30);
-                        resolver_selector.disable(&resolver, Duration::from_secs(duration));
+                        resolver_selector.disable(resolver, Duration::from_secs(duration));
                     }
 
                     // Report failed query (unless it's just NXDOMAIN)
@@ -284,7 +284,7 @@ async fn process_subdomain_chunk(params: WorkerParams) {
         if !all_results.is_empty() {
             if params
                 .tx
-                .send(Ok((subdomain, resolver.to_string(), all_results)))
+                .send(Ok((subdomain, resolver, all_results)))
                 .await
                 .is_err()
             {
@@ -294,7 +294,7 @@ async fn process_subdomain_chunk(params: WorkerParams) {
             // Otherwise send the error (if any).
             if params
                 .tx
-                .send(Err((subdomain, resolver.to_string(), err)))
+                .send(Err((subdomain, resolver, err)))
                 .await
                 .is_err()
             {
@@ -306,8 +306,8 @@ async fn process_subdomain_chunk(params: WorkerParams) {
 
 async fn process_failed_subdomains(
     cmd_args: &CommandArgs,
-    pool: AsyncResolverPool,
-    dns_resolvers: &[&str],
+    pool: &AsyncResolverPool,
+    dns_resolvers: &[Ipv4Addr],
     failed_subdomains: Vec<String>,
     interrupt: &AtomicBool,
 ) -> usize {
@@ -318,13 +318,8 @@ async fn process_failed_subdomains(
         ),
         true
     );
-    let mut resolver_selector = resolver_selector::get_selector(
-        cmd_args.use_random,
-        dns_resolvers
-            .iter()
-            .map(std::string::ToString::to_string)
-            .collect(),
-    );
+    let mut resolver_selector =
+        resolver_selector::get_selector(cmd_args.use_random, dns_resolvers.to_vec());
 
     // Always use a delay for retries, even if the user didn't specify one.
     let adaptive_delay = delay::Delay::adaptive(100, 750);
@@ -345,7 +340,7 @@ async fn process_failed_subdomains(
 
             match pool
                 .resolve(
-                    resolver,
+                    &resolver,
                     &fqdn,
                     query_type,
                     &cmd_args.transport_protocol,
@@ -388,7 +383,7 @@ fn read_wordlist(wordlist_path: Option<&String>) -> Result<Vec<String>> {
     }
 }
 
-async fn handle_wildcard_domain(args: &CommandArgs, dns_resolvers: &[&str]) -> Result<bool> {
+async fn handle_wildcard_domain(args: &CommandArgs, dns_resolvers: &[Ipv4Addr]) -> Result<bool> {
     if check_wildcard_domain(args, dns_resolvers).await? {
         log_warn!("Warning: Wildcard domain detected. Results may include false positives!");
         log_question!("Do you want to continue? (y/n): ");
@@ -408,7 +403,7 @@ async fn handle_wildcard_domain(args: &CommandArgs, dns_resolvers: &[&str]) -> R
     Ok(false)
 }
 
-async fn check_wildcard_domain(args: &CommandArgs, dns_resolvers: &[&str]) -> Result<bool> {
+async fn check_wildcard_domain(args: &CommandArgs, dns_resolvers: &[Ipv4Addr]) -> Result<bool> {
     const ATTEMPTS: u8 = 3;
     const MAX_PREFIX_LENGTH: usize = 63;
 
@@ -457,7 +452,7 @@ async fn check_wildcard_domain(args: &CommandArgs, dns_resolvers: &[&str]) -> Re
     Ok(successful_resolutions >= 2)
 }
 
-fn print_query_result(args: &CommandArgs, subdomain: &str, resolver: &str, response: &str) {
+fn print_query_result(args: &CommandArgs, subdomain: &str, resolver: Ipv4Addr, response: &str) {
     if args.quiet {
         return;
     }
@@ -471,7 +466,7 @@ fn print_query_result(args: &CommandArgs, subdomain: &str, resolver: &str, respo
     let mut message = domain;
 
     if args.verbose || args.show_resolver {
-        write!(message, " [resolver: {}]", resolver.magenta()).unwrap();
+        write!(message, " [resolver: {}]", resolver.to_string().magenta()).unwrap();
     }
     if !args.no_print_records {
         write!(message, " {response}").unwrap();
@@ -483,7 +478,7 @@ fn print_query_result(args: &CommandArgs, subdomain: &str, resolver: &str, respo
 fn print_query_error(
     args: &CommandArgs,
     subdomain: &str,
-    resolver: &str,
+    resolver: Ipv4Addr,
     error: &DnsError,
     retry: bool,
 ) {
@@ -503,7 +498,7 @@ fn print_query_error(
     let mut message = domain;
 
     if args.show_resolver {
-        write!(message, " [resolver: {}]", resolver.magenta()).unwrap();
+        write!(message, " [resolver: {}]", resolver.to_string().magenta()).unwrap();
     }
     write!(message, " {error}").unwrap();
 
