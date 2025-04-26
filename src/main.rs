@@ -31,9 +31,7 @@ async fn main() -> Result<()> {
         OperationMode::SubdomainEnumeration => {
             modes::subdomain_enumerator::enumerate_subdomains(&cmd_args, &dns_resolvers).await
         }
-        OperationMode::ReverseIp => {
-            modes::reverse_ip::reverse_ip(&cmd_args, &dns_resolvers).await
-        }
+        OperationMode::ReverseIp => modes::reverse_ip::reverse_ip(&cmd_args, &dns_resolvers).await,
         OperationMode::TldExpansion => {
             modes::tld_expander::expand_tlds(&cmd_args, &dns_resolvers).await
         }
