@@ -84,11 +84,16 @@ pub fn validate_target(input: &str) -> Result<String> {
 pub fn validate_dns_resolvers(servers: &str) -> Result<String> {
     let server_list: Vec<&str> = servers.split(',').collect();
 
+    let invalid: Vec<&str> = server_list
+        .iter()
+        .filter(|&&server| validate_ipv4(server).is_err())
+        .copied()
+        .collect();
+
     ensure!(
-        server_list
-            .iter()
-            .all(|&server| validate_ipv4(server).is_ok()),
-        "DNS Resolver(s) invalid. Comma-separated IPv4 only."
+        invalid.is_empty(),
+        "DNS Resolver(s) invalid. Comma-separated IPv4 only. Invalid: {}",
+        invalid.join(", ")
     );
 
     Ok(servers.to_string())
