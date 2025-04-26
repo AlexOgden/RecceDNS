@@ -166,7 +166,9 @@ impl PacketBuffer {
             outstr.push_str(delim);
 
             let label_bytes = self.get_range(pos, len as usize)?;
-            outstr.push_str(&String::from_utf8_lossy(label_bytes).to_lowercase());
+            for &b in label_bytes {
+                outstr.push((b as char).to_ascii_lowercase());
+            }
 
             delim = ".";
 
