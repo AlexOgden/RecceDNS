@@ -5,7 +5,6 @@ use std::{
 };
 
 use dashmap::DashMap;
-use rand::prelude::*;
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::{TcpStream, UdpSocket},
@@ -34,6 +33,7 @@ const DNS_PORT: u16 = 53; // Standard DNS port
 #[derive(Clone)]
 pub struct AsyncResolverPool {
     sockets: Vec<Arc<UdpSocket>>,
+    next_query_id: Arc<atomic::AtomicU16>,
     pending_queries: Arc<DashMap<u16, QueryResultSender>>,
     next_socket_index: Arc<atomic::AtomicUsize>,
     shutdown_tx: Arc<broadcast::Sender<()>>,
@@ -97,6 +97,7 @@ impl AsyncResolverPool {
 
         Ok(Self {
             sockets,
+            next_query_id: Arc::new(atomic::AtomicU16::new(0)),
             pending_queries,
             next_socket_index: Arc::new(atomic::AtomicUsize::new(0)),
             shutdown_tx: shutdown_tx_arc,
@@ -111,7 +112,21 @@ impl AsyncResolverPool {
         protocol: &TransportProtocol,
         recursion: bool,
     ) -> Result<DnsPacket, DnsError> {
-        let query_packet = Self::build_dns_query(domain, query_type, recursion)?;
+        let mut attempts = 0;
+        let query_id = loop {
+            let id = self
+                .next_query_id
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            let id = id % 65535;
+            if !self.pending_queries.contains_key(&id) {
+                break id;
+            }
+            attempts += 1;
+            if attempts > 65536 {
+                return Err(DnsError::Internal("No available query IDs".to_string()));
+            }
+        };
+        let query_packet = Self::build_dns_query(query_id, domain, query_type, recursion)?;
 
         match protocol {
             TransportProtocol::UDP => self.resolve_udp(dns_resolver, query_packet).await,
@@ -331,6 +346,7 @@ impl AsyncResolverPool {
     }
 
     fn build_dns_query(
+        query_id: u16,
         domain: &str,
         query_type: &QueryType,
         recursion: bool,
@@ -362,7 +378,7 @@ impl AsyncResolverPool {
         };
 
         let mut packet = DnsPacket::new();
-        packet.header.id = rand::rng().random();
+        packet.header.id = query_id;
         packet.header.questions = 1;
         packet.header.recursion_desired = recursion;
         packet
