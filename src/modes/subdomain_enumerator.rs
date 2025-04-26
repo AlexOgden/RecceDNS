@@ -8,14 +8,10 @@ use std::{
     cmp::max,
     collections::HashSet,
     io::{self},
-    sync::{
-        atomic::{AtomicBool, Ordering},
-        mpsc,
-    },
-    thread,
+    sync::atomic::{AtomicBool, Ordering},
     time::{Duration, Instant},
 };
-use tokio::time;
+use tokio::{sync::mpsc, time};
 
 use crate::{
     dns::{
@@ -110,10 +106,19 @@ pub async fn enumerate_subdomains(
 
     // Split subdomain list into chunks for each thread.
     let chunk_size = subdomain_list.len().div_ceil(num_threads);
-    let subdomain_chunks: Vec<Vec<String>> = subdomain_list
-        .chunks(chunk_size)
-        .map(<[std::string::String]>::to_vec)
-        .collect();
+    let subdomain_chunks: Vec<Vec<String>> = if subdomain_list.len() > 10_000 {
+        // For large lists, use par_chunks for better cache locality and speed.
+        use rayon::prelude::*;
+        subdomain_list
+            .par_chunks(chunk_size)
+            .map(<[std::string::String]>::to_vec)
+            .collect()
+    } else {
+        subdomain_list
+            .chunks(chunk_size)
+            .map(<[String]>::to_vec)
+            .collect()
+    };
 
     // Setup progress bar.
     let total_subdomains = subdomain_list.len() as u64;
@@ -121,8 +126,8 @@ pub async fn enumerate_subdomains(
 
     let start_time = Instant::now();
 
-    // Create an mpsc channel for collecting results.
-    let (tx, rx) = mpsc::channel();
+    let buffer_size = std::cmp::min(1000, subdomain_list.len().max(1));
+    let (tx, mut rx) = mpsc::channel(buffer_size);
 
     // Create connection pool
     let pool = AsyncResolverPool::new(Some(2 * num_threads)).await?;
@@ -144,18 +149,15 @@ pub async fn enumerate_subdomains(
             delay: cmd_args.delay.clone(),
         };
 
-        thread::spawn(move || {
-            tokio::runtime::Runtime::new()
-                .unwrap()
-                .block_on(process_subdomain_chunk(worker_params));
-        });
+        tokio::spawn(process_subdomain_chunk(worker_params));
     }
     drop(tx); // Close original sender.
 
     // Process results from the receiver.
     let mut found_count = 0;
     let mut failed_subdomains = Vec::new();
-    for (i, received) in rx.into_iter().enumerate() {
+    let mut i: u64 = 0;
+    while let Some(received) = rx.recv().await {
         if interrupted.load(Ordering::SeqCst) {
             logger::clear_line();
             log_warn!("Interrupted by user");
@@ -183,11 +185,13 @@ pub async fn enumerate_subdomains(
 
         cli::update_progress_bar(
             &progress_bar,
-            ((i as u64) + 1).try_into().unwrap(),
+            (i + 1).try_into().unwrap(),
             total_subdomains,
             Some(failed_subdomains.len()),
             cmd_args.delay.as_ref(),
         );
+
+        i += 1;
     }
 
     progress_bar.finish_and_clear();
@@ -281,6 +285,7 @@ async fn process_subdomain_chunk(params: WorkerParams) {
             if params
                 .tx
                 .send(Ok((subdomain, resolver.to_string(), all_results)))
+                .await
                 .is_err()
             {
                 return;
@@ -290,6 +295,7 @@ async fn process_subdomain_chunk(params: WorkerParams) {
             if params
                 .tx
                 .send(Err((subdomain, resolver.to_string(), err)))
+                .await
                 .is_err()
             {
                 return;
