@@ -1,6 +1,10 @@
 use anyhow::{Context, Result, anyhow, ensure};
 use regex::Regex;
-use std::net::{IpAddr, Ipv4Addr};
+use std::{
+    fs,
+    net::{IpAddr, Ipv4Addr},
+    path::Path,
+};
 
 use crate::network::{check, types::TransportProtocol};
 use std::sync::LazyLock;
@@ -82,12 +86,36 @@ pub fn validate_target(input: &str) -> Result<String> {
 }
 
 pub fn validate_dns_resolvers(servers: &str) -> Result<String> {
-    let server_list: Vec<&str> = servers.split(',').collect();
+    let mut server_list: Vec<String> = Vec::new();
 
-    let invalid: Vec<&str> = server_list
+    if Path::new(servers).exists() {
+        let contents = fs::read_to_string(servers)
+            .map_err(|e| anyhow!("Failed to read DNS resolver file: {e}"))?;
+        for line in contents.lines() {
+            for part in line.split(',') {
+                let trimmed = part.trim();
+                if !trimmed.is_empty() {
+                    server_list.push(trimmed.to_string());
+                }
+            }
+        }
+    } else {
+        for part in servers.split(',') {
+            let trimmed = part.trim();
+            if !trimmed.is_empty() {
+                server_list.push(trimmed.to_string());
+            }
+        }
+    }
+
+    if server_list.is_empty() {
+        return Err(anyhow!("No DNS resolvers provided."));
+    }
+
+    let invalid: Vec<String> = server_list
         .iter()
-        .filter(|&&server| validate_ipv4(server).is_err())
-        .copied()
+        .filter(|server| validate_ipv4(server).is_err())
+        .cloned()
         .collect();
 
     ensure!(
@@ -96,7 +124,7 @@ pub fn validate_dns_resolvers(servers: &str) -> Result<String> {
         invalid.join(", ")
     );
 
-    Ok(servers.to_string())
+    Ok(server_list.join(","))
 }
 
 pub fn validate_ipv4(ip: &str) -> Result<String> {
