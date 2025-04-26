@@ -204,7 +204,7 @@ impl AsyncResolverPool {
             }
             Err(_timeout_elapsed) => {
                 self.pending_queries.remove(&query_id);
-                Err(DnsError::Timeout)
+                Err(DnsError::Timeout(dns_resolver.to_owned()))
             }
         }
     }
@@ -261,7 +261,7 @@ impl AsyncResolverPool {
                 )));
             }
             Err(_) => {
-                return Err(DnsError::Timeout);
+                return Err(DnsError::Timeout(dns_resolver.to_owned()));
             }
         }
 
@@ -275,7 +275,7 @@ impl AsyncResolverPool {
                 )));
             }
             Err(_) => {
-                return Err(DnsError::Timeout);
+                return Err(DnsError::Timeout(dns_resolver.to_owned()));
             }
         }
         let response_len = u16::from_be_bytes(len_buffer) as usize;
@@ -302,7 +302,7 @@ impl AsyncResolverPool {
                 )));
             }
             Err(_) => {
-                return Err(DnsError::Timeout);
+                return Err(DnsError::Timeout(dns_resolver.to_owned()));
             }
         }
 
