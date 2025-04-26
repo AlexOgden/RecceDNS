@@ -130,7 +130,7 @@ pub async fn enumerate_subdomains(
     let (tx, mut rx) = mpsc::channel(buffer_size);
 
     // Create connection pool
-    let pool = AsyncResolverPool::new(Some(2 * num_threads)).await?;
+    let pool = AsyncResolverPool::new(Some(10 * num_threads)).await?;
 
     // Spawn worker threads.
     for chunk in subdomain_chunks {
