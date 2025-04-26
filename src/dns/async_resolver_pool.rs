@@ -25,7 +25,7 @@ type QueryResultSender = oneshot::Sender<PendingQueryResult>;
 
 // Constants for default settings
 const DEFAULT_POOL_SIZE: usize = 10; // Default number of UDP sockets in the pool
-const DEFAULT_TIMEOUT: Duration = Duration::from_secs(2); // Default request timeout (UDP/TCP)
+const DEFAULT_TIMEOUT: Duration = Duration::from_secs(1); // Default request timeout (UDP/TCP)
 const UDP_BUFFER_SIZE: usize = 512; // Standard DNS UDP buffer size for receiving
 const TCP_BUFFER_SIZE: usize = 65535; // Max DNS TCP message size
 const DNS_PORT: u16 = 53; // Standard DNS port
@@ -87,7 +87,7 @@ impl AsyncResolverPool {
                                         }
                                     } else if len > 0 { /* Packet too small */ }
                                 }
-                                Err(e) => { /* Handle UDP recv error */ log_error!(format!("ERROR: UDP Recv on {:?}: {}", local_addr, e)); tokio::time::sleep(Duration::from_millis(10)).await; }
+                                Err(e) => { /* Handle UDP recv error */ log_error!(format!("ERROR: UDP Recv: {}", e)); }
                             }
                         },
                     }
