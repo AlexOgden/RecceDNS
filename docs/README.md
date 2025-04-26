@@ -110,7 +110,6 @@ See the [releases](https://github.com/AlexOgden/RecceDNS/releases) page for the 
 
 ## Arguments
 
-> **Note:**  
 > All command-line arguments can also be set using environment variables.  
 > **CLI arguments always take precedence over environment variables.**
 
