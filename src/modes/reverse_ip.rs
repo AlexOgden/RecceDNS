@@ -95,12 +95,11 @@ pub async fn reverse_ip(cmd_args: &CommandArgs, dns_resolver_list: &[&str]) -> R
                 found_count += 1;
             }
             Err(error) => {
-                if (cmd_args.verbose
+                if cmd_args.verbose
                     || (!matches!(
                         error,
                         DnsError::NoRecordsFound | DnsError::NonExistentDomain
-                    )))
-                    && cmd_args.no_print_errors
+                    ) && !cmd_args.no_print_errors)
                 {
                     log_error!(format!("{} [{}]", ip, error));
                 }
@@ -153,6 +152,11 @@ fn parse_ip(ip: &str) -> Result<Vec<IpAddr>, ParseIpError> {
         expand_ip_range(start.trim(), end.trim())
     } else if let Some((ip_str, cidr_str)) = ip.split_once('/') {
         expand_cidr(ip_str.trim(), cidr_str.trim())
+    } else if ip.contains(',') {
+        ip.split(',')
+            .map(|ip| ip.trim().parse())
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|_| ParseIpError::InvalidIp)
     } else {
         let ip = ip.parse().map_err(|_| ParseIpError::InvalidIp)?;
         Ok(vec![ip])

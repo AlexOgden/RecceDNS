@@ -70,6 +70,14 @@ pub fn validate_target(input: &str) -> Result<String> {
         }
     }
 
+    // Check for CSV list of IP addresses
+    if input.contains(',') {
+        let ips: Vec<&str> = input.split(',').collect();
+        if ips.iter().all(|&ip| ip.parse::<IpAddr>().is_ok()) {
+            return Ok(input.to_string());
+        }
+    }
+
     Err(anyhow!("Invalid input: {}", input))
 }
 
