@@ -285,7 +285,7 @@ fn strip_tld(domain: &str, tld_list: &HashSet<String>) -> String {
 
 async fn get_tld_list(cmd_args: &CommandArgs) -> Result<Vec<String>> {
     if let Some(wordlist_path) = &cmd_args.wordlist {
-        let tld_list = wordlist::read_from_file(wordlist_path)?;
+        let tld_list = wordlist::read_subdomain_list(wordlist_path)?;
         log_success!(format!("Using wordlist with {} TLDs", tld_list.len()));
         Ok(tld_list)
     } else {

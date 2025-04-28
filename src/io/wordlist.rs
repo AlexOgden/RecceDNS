@@ -12,7 +12,7 @@ pub enum Error {
     ReadError(String),
 }
 
-pub fn read_from_file<P: AsRef<Path>>(file_path: P) -> Result<Vec<String>, Error> {
+pub fn read_subdomain_list<P: AsRef<Path>>(file_path: P) -> Result<Vec<String>, Error> {
     let file_path_ref = file_path.as_ref();
     let file = File::open(file_path_ref).map_err(|e| match e.kind() {
         io::ErrorKind::NotFound => Error::FileNotFound(file_path_ref.display().to_string()),

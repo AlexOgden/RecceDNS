@@ -380,7 +380,7 @@ async fn process_failed_subdomains(
 
 fn read_wordlist(wordlist_path: Option<&String>) -> Result<Vec<String>> {
     if let Some(path) = wordlist_path {
-        Ok(wordlist::read_from_file(path)?)
+        Ok(wordlist::read_subdomain_list(path)?)
     } else {
         Err(anyhow!(
             "Wordlist path is required for subdomain enumeration"
