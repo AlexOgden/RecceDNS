@@ -383,3 +383,9 @@ impl AsyncResolver {
         let _ = self.shutdown_tx.send(());
     }
 }
+
+impl Drop for AsyncResolver {
+    fn drop(&mut self) {
+        self.shutdown();
+    }
+}
