@@ -211,7 +211,6 @@ pub fn update_progress_bar(
     failed_count: Option<usize>,
     delay: Option<&Delay>,
 ) {
-    // Set message based on delay
     if let Some(d) = delay {
         let delay_str = format!("{}ms", d.get_delay());
         pb.set_message(format!("[Delay: {delay_str}]"));
@@ -228,7 +227,5 @@ pub fn update_progress_bar(
         String::new()
     };
     pb.set_prefix(format!("[{}/{}] {}", index + 1, total, failed_str));
-
-    // Increment progress bar
     pb.inc(1);
 }

@@ -2,7 +2,7 @@ use colored::Colorize;
 use rand::Rng;
 use rand::distr::Alphanumeric;
 
-use crate::dns::async_resolver_pool::AsyncResolverPool;
+use crate::dns::async_resolver::AsyncResolver;
 use crate::dns::protocol::QueryType;
 use crate::network::types::TransportProtocol;
 use std::net::Ipv4Addr;
@@ -19,7 +19,7 @@ fn generate_random_domain() -> String {
 }
 
 async fn check_nxdomain_hijacking(
-    resolver_pool: &AsyncResolverPool,
+    resolver_pool: &AsyncResolver,
     server_address: &Ipv4Addr,
     transport_protocol: &TransportProtocol,
 ) -> bool {
@@ -58,7 +58,7 @@ pub async fn check_dns_resolvers(
     let mut working_servers: Vec<Ipv4Addr> = Vec::new();
     let mut failed_servers: Vec<(Ipv4Addr, &str)> = Vec::new();
 
-    let resolver_pool = AsyncResolverPool::new(Some(1)).await.unwrap();
+    let resolver_pool = AsyncResolver::new(Some(1)).await.unwrap();
 
     println!("Checking DNS Resolvers...");
 

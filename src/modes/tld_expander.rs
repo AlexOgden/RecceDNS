@@ -10,7 +10,7 @@ use std::{
 };
 use tokio::sync::mpsc;
 
-use crate::dns::async_resolver_pool::AsyncResolverPool;
+use crate::dns::async_resolver::AsyncResolver;
 use crate::{
     dns::{
         error::DnsError,
@@ -38,7 +38,7 @@ type TldResultSender = mpsc::Sender<TldResult>;
 // Parameters for the worker threads.
 #[derive(Clone)]
 struct WorkerParams {
-    connection_pool: AsyncResolverPool,
+    connection_pool: AsyncResolver,
     tx: TldResultSender,
     tlds: Vec<String>,
     query_types: Vec<QueryType>,
@@ -91,7 +91,7 @@ pub async fn expand_tlds(cmd_args: &CommandArgs, dns_resolver_list: &[Ipv4Addr])
     let start_time = Instant::now();
 
     let (tx, mut rx) = mpsc::channel(1000);
-    let pool = AsyncResolverPool::new(Some(2 * num_threads)).await?;
+    let pool = AsyncResolver::new(Some(2 * num_threads)).await?;
 
     let query_types = if cmd_args.query_types.is_empty() {
         DEFAULT_QUERY_TYPES.to_vec()

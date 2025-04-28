@@ -2,7 +2,7 @@ use colored::Colorize;
 
 use crate::{
     dns::{
-        async_resolver_pool::AsyncResolverPool,
+        async_resolver::AsyncResolver,
         error::DnsError,
         protocol::{QueryType, RData, ResourceRecord},
     },
@@ -46,7 +46,7 @@ pub async fn enumerate_records(cmd_args: &CommandArgs, dns_resolvers: &[Ipv4Addr
     let domain = &cmd_args.target;
     let mut seen_cnames = HashSet::new();
     let mut query_timer = QueryTimer::new(!cmd_args.no_query_stats);
-    let resolver_pool = AsyncResolverPool::new(Some(1)).await?;
+    let resolver_pool = AsyncResolver::new(Some(1)).await?;
 
     check_dnssec(&resolver_pool, &resolver, domain, cmd_args).await?;
 
@@ -101,7 +101,7 @@ pub async fn enumerate_records(cmd_args: &CommandArgs, dns_resolvers: &[Ipv4Addr
 }
 
 async fn check_dnssec(
-    resolver_pool: &AsyncResolverPool,
+    resolver_pool: &AsyncResolver,
     resolver: &Ipv4Addr,
     domain: &str,
     cmd_args: &CommandArgs,
@@ -130,7 +130,7 @@ async fn check_dnssec(
 }
 
 async fn process_response(
-    resolver_pool: &AsyncResolverPool,
+    resolver_pool: &AsyncResolver,
     seen_cnames: &mut HashSet<String>,
     response: &[ResourceRecord],
     resolver: &Ipv4Addr,
@@ -152,7 +152,7 @@ async fn process_response(
 }
 
 async fn process_and_format_record(
-    resolver_pool: &AsyncResolverPool,
+    resolver_pool: &AsyncResolver,
     seen_cnames: &mut HashSet<String>,
     record: &ResourceRecord,
     resolver: &Ipv4Addr,

@@ -31,7 +31,7 @@ const TCP_BUFFER_SIZE: usize = 65535; // Max DNS TCP message size
 const DNS_PORT: u16 = 53; // Standard DNS port
 
 #[derive(Clone)]
-pub struct AsyncResolverPool {
+pub struct AsyncResolver {
     sockets: Vec<Arc<UdpSocket>>,
     next_query_id: Arc<atomic::AtomicU16>,
     pending_queries: Arc<DashMap<u16, QueryResultSender>>,
@@ -39,7 +39,7 @@ pub struct AsyncResolverPool {
     shutdown_tx: Arc<broadcast::Sender<()>>,
 }
 
-impl AsyncResolverPool {
+impl AsyncResolver {
     pub async fn new(pool_size: Option<usize>) -> Result<Self, DnsError> {
         let pool_size = pool_size.unwrap_or(DEFAULT_POOL_SIZE);
 

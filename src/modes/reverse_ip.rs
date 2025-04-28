@@ -11,7 +11,7 @@ use thiserror::Error;
 
 use crate::{
     dns::{
-        async_resolver_pool::AsyncResolverPool,
+        async_resolver::AsyncResolver,
         error::DnsError,
         protocol::{QueryType, RData},
         resolver_selector,
@@ -42,7 +42,7 @@ pub async fn reverse_ip(cmd_args: &CommandArgs, dns_resolver_list: &[Ipv4Addr]) 
         target_ips.len()
     ));
 
-    let resolver_pool = AsyncResolverPool::new(Some(2)).await?;
+    let resolver_pool = AsyncResolver::new(Some(2)).await?;
 
     for (index, ip) in target_ips.iter().enumerate() {
         if interrupted.load(Ordering::SeqCst) {

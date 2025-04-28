@@ -16,7 +16,7 @@ use tokio::{sync::mpsc, time};
 
 use crate::{
     dns::{
-        async_resolver_pool::AsyncResolverPool,
+        async_resolver::AsyncResolver,
         error::DnsError,
         format::create_query_response_string,
         protocol::{QueryType, ResourceRecord},
@@ -43,7 +43,7 @@ type SubdomainResultSender = mpsc::Sender<SubdomainResult>;
 // Parameters for the worker threads.
 #[derive(Clone)]
 struct WorkerParams {
-    connection_pool: AsyncResolverPool,
+    connection_pool: AsyncResolver,
     tx: SubdomainResultSender,
     subdomains: Vec<String>,
     query_types: Vec<QueryType>,
@@ -131,7 +131,7 @@ pub async fn enumerate_subdomains(
     let (tx, mut rx) = mpsc::channel(buffer_size);
 
     // Create connection pool
-    let pool = AsyncResolverPool::new(Some(10 * num_threads)).await?;
+    let pool = AsyncResolver::new(Some(10 * num_threads)).await?;
 
     // Spawn worker threads.
     for chunk in subdomain_chunks {
@@ -199,7 +199,7 @@ pub async fn enumerate_subdomains(
     if !failed_subdomains.is_empty() && !cmd_args.no_retry {
         interrupted.store(false, Ordering::SeqCst);
         // Use a new resolver pool for retries
-        let retry_pool = AsyncResolverPool::new(Some(2 * num_threads)).await?;
+        let retry_pool = AsyncResolver::new(Some(2 * num_threads)).await?;
         let success_retrys = process_failed_subdomains(
             cmd_args,
             &retry_pool,
@@ -306,7 +306,7 @@ async fn process_subdomain_chunk(params: WorkerParams) {
 
 async fn process_failed_subdomains(
     cmd_args: &CommandArgs,
-    pool: &AsyncResolverPool,
+    pool: &AsyncResolver,
     dns_resolvers: &[Ipv4Addr],
     failed_subdomains: Vec<String>,
     interrupt: &AtomicBool,
@@ -412,7 +412,7 @@ async fn check_wildcard_domain(args: &CommandArgs, dns_resolvers: &[Ipv4Addr]) -
     const ATTEMPTS: u8 = 3;
     const MAX_PREFIX_LENGTH: usize = 63;
 
-    let resolver_pool = AsyncResolverPool::new(Some(1)).await?;
+    let resolver_pool = AsyncResolver::new(Some(1)).await?;
 
     let resolver = dns_resolvers
         .first()
