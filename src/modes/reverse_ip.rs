@@ -3,7 +3,6 @@ use colored::Colorize;
 use std::{
     net::{IpAddr, Ipv4Addr, Ipv6Addr},
     sync::atomic::Ordering,
-    thread,
     time::Duration,
     vec,
 };
@@ -47,7 +46,7 @@ pub async fn reverse_ip(cmd_args: &CommandArgs, dns_resolver_list: &[Ipv4Addr]) 
     for (index, ip) in target_ips.iter().enumerate() {
         if interrupted.load(Ordering::SeqCst) {
             logger::clear_line();
-            log_warn!("Interrupted by user".to_string());
+            log_warn!("Interrupted by user");
             break;
         }
 
@@ -86,7 +85,7 @@ pub async fn reverse_ip(cmd_args: &CommandArgs, dns_resolver_list: &[Ipv4Addr]) 
                     ptr_records.join(", ")
                 };
 
-                log_success!(format!("{} [{}]", ip, display_record.to_string().cyan()));
+                log_success!(format!("{} [{}]", ip, display_record.cyan()));
                 found_count += 1;
             }
             Err(error) => {
@@ -102,7 +101,7 @@ pub async fn reverse_ip(cmd_args: &CommandArgs, dns_resolver_list: &[Ipv4Addr]) 
         }
 
         if let Some(delay_ms) = &cmd_args.delay {
-            thread::sleep(Duration::from_millis(delay_ms.get_delay()));
+            tokio::time::sleep(Duration::from_millis(delay_ms.get_delay())).await;
         }
     }
 
