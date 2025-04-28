@@ -48,25 +48,30 @@ fn log_argument_info(cmd_args: &cli::CommandArgs) {
     }
 }
 
+fn parse_resolvers(input: &str) -> Vec<String> {
+    input
+        .split(',')
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
+        .collect()
+}
+
+fn load_resolvers_from_file(path: &str) -> Result<Vec<String>> {
+    let content = std::fs::read_to_string(path)
+        .map_err(|e| anyhow!("Failed to read DNS resolvers file '{}': {}", path, e))?;
+    Ok(content.lines().flat_map(parse_resolvers).collect())
+}
+
 async fn initialize_dns_resolvers(cmd_args: &cli::CommandArgs) -> Result<Vec<Ipv4Addr>> {
     let no_dns_check =
         matches!(cmd_args.operation_mode, OperationMode::CertSearch) || cmd_args.no_dns_check;
 
     let dns_resolvers_arg = cmd_args.dns_resolvers.trim();
     let resolver_list: Vec<String> = if Path::new(dns_resolvers_arg).exists() {
-        std::fs::read_to_string(dns_resolvers_arg)
-            .map_err(|_| anyhow!("Failed to read DNS resolvers file"))?
-            .lines()
-            .flat_map(|line| line.split(',').map(str::trim).filter(|s| !s.is_empty()))
-            .map(str::to_string)
-            .collect()
+        load_resolvers_from_file(dns_resolvers_arg)?
     } else {
-        dns_resolvers_arg
-            .split(',')
-            .map(str::trim)
-            .filter(|s| !s.is_empty())
-            .map(str::to_string)
-            .collect()
+        parse_resolvers(dns_resolvers_arg)
     };
 
     ensure!(
@@ -78,7 +83,7 @@ async fn initialize_dns_resolvers(cmd_args: &cli::CommandArgs) -> Result<Vec<Ipv
         .iter()
         .map(|s| {
             s.parse::<Ipv4Addr>()
-                .map_err(|_| anyhow!("Invalid IPv4 address: {}", s))
+                .map_err(|_| anyhow!("Invalid IPv4 address: '{}'", s))
         })
         .collect::<Result<_, _>>()?;
 
