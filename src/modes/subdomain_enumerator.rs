@@ -487,14 +487,17 @@ fn print_query_error(
     error: &DnsError,
     retry: bool,
 ) {
-    if args.quiet
-        || (args.no_print_errors && !retry)
-        || (!args.verbose
-            && !retry
-            && matches!(
-                error,
-                DnsError::NoRecordsFound | DnsError::NonExistentDomain
-            ))
+    // Skip printing the error if any of the following are true:
+    if args.quiet // 1. Quiet mode: suppress all output.
+    // 2. User requested not to print errors, and this is not a retry.
+    || (args.no_print_errors && !retry)
+    // 3. Not in verbose mode, not a retry, and the error is a "normal" negative response.
+    || (!args.verbose
+        && !retry
+        && matches!(
+            error,
+            DnsError::NoRecordsFound | DnsError::NonExistentDomain
+        ))
     {
         return;
     }
