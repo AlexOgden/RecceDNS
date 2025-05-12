@@ -10,7 +10,7 @@ edition = "2024"
 anyhow = "1.0.98"
 clap = { version = "4.5.37", features = ["derive", "env"] }
 colored = "3.0.0"
-ctrlc = "3.4.5"
+ctrlc = "3.4.7"
 dashmap = "6.1.0"
 indicatif = "0.17.11"
 num_cpus = "1.16.0"
