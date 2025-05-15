@@ -30,7 +30,7 @@ I originally started working on this project to learn Rust, improve on network p
 	- Retry failed queries. If a query fails for networking/protocol issues, retry at the end of enumeration or disable.
 	- Use an optional delay between queries (Fixed, Random Range, and Adaptive).
 - SRV enumeration, use a wordlist with the query argument set to SRV to find common SRV records.
-- Reverse IP PTR for a single IP address, CIDR notation, or range.
+- Reverse IP PTR for a single IP address, CIDR notation, range, or list.
 - Search for subdomains based Certificate Transparency using crt.sh.
 - Expland TLD enumeration for a given domain on the full IANA TLD list.
 - Coloured output with progress reporting on bruteforce subdomain enumeration.
@@ -110,7 +110,6 @@ See the [releases](https://github.com/AlexOgden/RecceDNS/releases) page for the 
 
 ## Arguments
 
-> **Note:**  
 > All command-line arguments can also be set using environment variables.  
 > **CLI arguments always take precedence over environment variables.**
 
@@ -118,8 +117,8 @@ See the [releases](https://github.com/AlexOgden/RecceDNS/releases) page for the 
 | Argument | Environment Variable | Description |
 |----------|---------------------|-------------|
 | `-m, --mode <MODE>` | `RECCEDNS_MODE` | **Operation mode**. Possible values:<br>• `b`: Basic Enumeration<br>• `s`: Subdomain Enumeration<br>• `r`: Reverse PTR IP<br>• `c`: Certificate Search<br>• `t`: TLD Expansion |
-| `-t, --target <TARGET>` | `RECCEDNS_TARGET` | **Target base domain or IP** (single, CIDR, or range).<br>Examples: `google.com`, `192.168.2.3`, `192.168.2.0/24`, `192.168.2.1-192.168.2.230` |
-| `-d, --dns-resolvers <DNS_RESOLVERS>` | `RECCEDNS_DNS_RESOLVERS` | **DNS resolver(s)** (IPv4, comma-separated).<br>Default: `1.1.1.1`.<br>Multiple resolvers can be selected randomly or sequentially (see `-r`). |
+| `-t, --target <TARGET>` | `RECCEDNS_TARGET` | **Target base domain or IP** (single, CIDR, or range).<br>Examples: `google.com`, `192.168.2.3`, `192.168.2.0/24`, `192.168.2.1-192.168.2.230`, `192.168.0.1,192.168.0.4` |
+| `-d, --dns-resolvers <DNS_RESOLVERS>` | `RECCEDNS_DNS_RESOLVERS` | **DNS resolver(s)** (IPv4, comma-separated, or file path).<br>Default: `1.1.1.1`.<br>You can provide a comma-separated list of IPv4 addresses, or a path to a file containing resolvers (one per line and/or CSV). Multiple resolvers can be selected randomly or sequentially (see `-r`). |
 | `-p, --protocol <TRANSPORT_PROTOCOL>` | `RECCEDNS_PROTOCOL` | *(Optional)* **Transport protocol** for DNS queries.<br>Values: `UDP` (default), `TCP` |
 | `-w, --wordlist <WORDLIST>` | `RECCEDNS_WORDLIST` | **Path to subdomain wordlist**. Required for enumeration mode. |
 | `-v, --verbose` | `RECCEDNS_VERBOSE` | Print extra information. Default: `false` |
@@ -220,6 +219,11 @@ reccedns -m r -d 1.1.1.1 -t 192.168.0.0/24
 **IP Range**
 ```sh
 reccedns -m r -d 1.1.1.1 -t 192.168.0.0-192.168.1.254
+```
+
+**IP List**
+```sh
+reccedns -m r -d 1.1.1.1 -t 192.168.0.1,192.168.0.3,192.168.1.54
 ```
 
 ---

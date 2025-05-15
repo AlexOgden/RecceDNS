@@ -1,15 +1,16 @@
 use anyhow::Result;
 use colored::Colorize;
 use std::fmt::Write as _;
+use std::net::Ipv4Addr;
 use std::{
     cmp::max,
     collections::HashSet,
-    sync::{atomic::Ordering, mpsc},
-    thread,
+    sync::atomic::Ordering,
     time::{Duration, Instant},
 };
+use tokio::sync::mpsc;
 
-use crate::dns::async_resolver_pool::AsyncResolverPool;
+use crate::dns::async_resolver::AsyncResolver;
 use crate::{
     dns::{
         error::DnsError,
@@ -37,20 +38,20 @@ type TldResultSender = mpsc::Sender<TldResult>;
 // Parameters for the worker threads.
 #[derive(Clone)]
 struct WorkerParams {
-    connection_pool: AsyncResolverPool,
+    connection_pool: AsyncResolver,
     tx: TldResultSender,
     tlds: Vec<String>,
     query_types: Vec<QueryType>,
     target_base_domain: String,
     transport: TransportProtocol,
-    dns_resolvers: Vec<String>,
+    dns_resolvers: Vec<Ipv4Addr>,
     use_random: bool,
     delay: Option<delay::Delay>,
     no_recursion: bool,
 }
 
 #[allow(clippy::too_many_lines)]
-pub async fn expand_tlds(cmd_args: &CommandArgs, dns_resolver_list: &[&str]) -> Result<()> {
+pub async fn expand_tlds(cmd_args: &CommandArgs, dns_resolver_list: &[Ipv4Addr]) -> Result<()> {
     let interrupted = interrupt::initialize_interrupt_handler()?;
     let tld_list_vec = get_tld_list(cmd_args).await?;
     let tld_set: HashSet<String> = tld_list_vec.iter().cloned().collect(); // Keep set for strip_tld
@@ -89,8 +90,8 @@ pub async fn expand_tlds(cmd_args: &CommandArgs, dns_resolver_list: &[&str]) -> 
 
     let start_time = Instant::now();
 
-    let (tx, rx) = mpsc::channel();
-    let pool = AsyncResolverPool::new(Some(2 * num_threads)).await?;
+    let (tx, mut rx) = mpsc::channel(1000);
+    let pool = AsyncResolver::new(Some(2 * num_threads)).await?;
 
     let query_types = if cmd_args.query_types.is_empty() {
         DEFAULT_QUERY_TYPES.to_vec()
@@ -107,27 +108,21 @@ pub async fn expand_tlds(cmd_args: &CommandArgs, dns_resolver_list: &[&str]) -> 
             query_types: query_types.clone(),
             target_base_domain: target_base_domain.clone(),
             transport: cmd_args.transport_protocol.clone(),
-            dns_resolvers: dns_resolver_list
-                .iter()
-                .map(std::string::ToString::to_string)
-                .collect(),
+            dns_resolvers: dns_resolver_list.to_vec(),
             use_random: cmd_args.use_random,
             delay: cmd_args.delay.clone(),
             no_recursion: cmd_args.no_recursion,
         };
 
-        thread::spawn(move || {
-            tokio::runtime::Runtime::new()
-                .unwrap()
-                .block_on(process_tld_chunk(worker_params));
-        });
+        tokio::spawn(process_tld_chunk(worker_params));
     }
     drop(tx); // Close original sender.
 
     // Process results from the receiver.
     let mut found_count = 0;
     let mut error_count = 0;
-    for (i, received) in rx.into_iter().enumerate() {
+    let mut i: u64 = 0;
+    while let Some(received) = rx.recv().await {
         if interrupted.load(Ordering::SeqCst) {
             logger::clear_line();
             log_warn!("Interrupted by user".to_string(), true);
@@ -157,11 +152,12 @@ pub async fn expand_tlds(cmd_args: &CommandArgs, dns_resolver_list: &[&str]) -> 
 
         cli::update_progress_bar(
             &progress_bar,
-            ((i as u64) + 1).try_into().unwrap(),
+            (i + 1).try_into().unwrap(),
             tld_list_vec.len() as u64,
-            Some(error_count), // Show error count instead of failed subdomains
+            Some(error_count),
             cmd_args.delay.as_ref(),
         );
+        i += 1;
     }
 
     progress_bar.finish_and_clear();
@@ -194,8 +190,7 @@ async fn process_tld_chunk(params: WorkerParams) {
     for tld in params.tlds {
         let resolver = resolver_selector
             .select()
-            .unwrap_or(resolver_selector::DEFAULT_RESOLVER)
-            .to_string();
+            .unwrap_or(resolver_selector::DEFAULT_RESOLVER);
         let query_fqdn = format!("{}.{}", params.target_base_domain, tld);
         let mut all_query_results = HashSet::<ResourceRecord>::new();
         let mut first_error: Option<DnsError> = None;
@@ -220,7 +215,7 @@ async fn process_tld_chunk(params: WorkerParams) {
                 // If it's a network error, temporarily disable this resolver.
                 if let DnsError::Network(_) = error {
                     let duration = Duration::from_secs(rand::random::<u64>() % 26 + 5); // 5-30 seconds
-                    resolver_selector.disable(&resolver, duration);
+                    resolver_selector.disable(resolver, duration);
                 }
                 // Treat "no records" and "non-existent domain" as successful queries for delay logic.
                 if matches!(
@@ -244,8 +239,12 @@ async fn process_tld_chunk(params: WorkerParams) {
             params
                 .tx
                 .send(Ok((query_fqdn, resolver.to_string(), all_query_results)))
+                .await
         } else if let Some(err) = first_error {
-            params.tx.send(Err((query_fqdn, resolver.to_string(), err)))
+            params
+                .tx
+                .send(Err((query_fqdn, resolver.to_string(), err)))
+                .await
         } else {
             Ok(())
         };
@@ -256,7 +255,7 @@ async fn process_tld_chunk(params: WorkerParams) {
         }
 
         if let Some(delay) = &params.delay {
-            thread::sleep(Duration::from_millis(delay.get_delay()));
+            tokio::time::sleep(Duration::from_millis(delay.get_delay())).await;
         }
     }
 }
@@ -286,7 +285,7 @@ fn strip_tld(domain: &str, tld_list: &HashSet<String>) -> String {
 
 async fn get_tld_list(cmd_args: &CommandArgs) -> Result<Vec<String>> {
     if let Some(wordlist_path) = &cmd_args.wordlist {
-        let tld_list = wordlist::read_from_file(wordlist_path)?;
+        let tld_list = wordlist::read_subdomain_list(wordlist_path)?;
         log_success!(format!("Using wordlist with {} TLDs", tld_list.len()));
         Ok(tld_list)
     } else {

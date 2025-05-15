@@ -2,9 +2,10 @@ use colored::Colorize;
 use rand::Rng;
 use rand::distr::Alphanumeric;
 
-use crate::dns::async_resolver_pool::AsyncResolverPool;
+use crate::dns::async_resolver::AsyncResolver;
 use crate::dns::protocol::QueryType;
 use crate::network::types::TransportProtocol;
+use std::net::Ipv4Addr;
 
 const ROOT_SERVER: &str = "rootservers.net";
 
@@ -18,8 +19,8 @@ fn generate_random_domain() -> String {
 }
 
 async fn check_nxdomain_hijacking(
-    resolver_pool: &AsyncResolverPool,
-    server_address: &str,
+    resolver_pool: &AsyncResolver,
+    server_address: &Ipv4Addr,
     transport_protocol: &TransportProtocol,
 ) -> bool {
     let random_domain = generate_random_domain();
@@ -35,7 +36,7 @@ async fn check_nxdomain_hijacking(
         .is_ok()
 }
 
-fn print_status(server_address: &str, status: &str) {
+fn print_status(server_address: Ipv4Addr, status: &str) {
     let colored_status = match status {
         "OK" => format!("[{}]", status.green()),
         "FAIL" => format!("[{}]", status.red()),
@@ -44,30 +45,30 @@ fn print_status(server_address: &str, status: &str) {
 
     println!(
         "{} {:>width$}",
-        server_address.bright_blue(),
+        server_address.to_string().bright_blue(),
         colored_status,
-        width = 33 - server_address.len()
+        width = 33 - server_address.to_string().len()
     );
 }
 
-pub async fn check_dns_resolvers<'a>(
-    dns_resolvers: &[&'a str],
+pub async fn check_dns_resolvers(
+    dns_resolvers: &[Ipv4Addr],
     transport_protocol: &TransportProtocol,
-) -> Vec<&'a str> {
-    let mut working_servers: Vec<&'a str> = Vec::new();
-    let mut failed_servers: Vec<(&'a str, &str)> = Vec::new();
+) -> Vec<Ipv4Addr> {
+    let mut working_servers: Vec<Ipv4Addr> = Vec::new();
+    let mut failed_servers: Vec<(Ipv4Addr, &str)> = Vec::new();
 
-    let resolver_pool = AsyncResolverPool::new(Some(1)).await.unwrap();
+    let resolver_pool = AsyncResolver::new(Some(1)).await.unwrap();
 
     println!("Checking DNS Resolvers...");
 
     for &server in dns_resolvers {
-        let hijacking = check_nxdomain_hijacking(&resolver_pool, server, transport_protocol).await;
+        let hijacking = check_nxdomain_hijacking(&resolver_pool, &server, transport_protocol).await;
 
         let root_server_letter = rand::rng().random_range(b'a'..b'm') as char;
         let domain = format!("{root_server_letter}.{ROOT_SERVER}");
         let normal_query = resolver_pool
-            .resolve(server, &domain, &QueryType::A, transport_protocol, true)
+            .resolve(&server, &domain, &QueryType::A, transport_protocol, true)
             .await;
 
         if hijacking {
@@ -78,7 +79,7 @@ pub async fn check_dns_resolvers<'a>(
             failed_servers.push((server, "No response"));
         } else {
             print_status(server, "OK");
-            working_servers.push(server); // Push &str directly
+            working_servers.push(server);
         }
     }
 

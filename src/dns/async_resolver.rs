@@ -5,7 +5,6 @@ use std::{
 };
 
 use dashmap::DashMap;
-use rand::prelude::*;
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::{TcpStream, UdpSocket},
@@ -26,24 +25,25 @@ type QueryResultSender = oneshot::Sender<PendingQueryResult>;
 
 // Constants for default settings
 const DEFAULT_POOL_SIZE: usize = 10; // Default number of UDP sockets in the pool
-const DEFAULT_TIMEOUT: Duration = Duration::from_secs(2); // Default request timeout (UDP/TCP)
+const DEFAULT_TIMEOUT: Duration = Duration::from_millis(1500); // Default request timeout (UDP/TCP)
 const UDP_BUFFER_SIZE: usize = 512; // Standard DNS UDP buffer size for receiving
 const TCP_BUFFER_SIZE: usize = 65535; // Max DNS TCP message size
 const DNS_PORT: u16 = 53; // Standard DNS port
 
 #[derive(Clone)]
-pub struct AsyncResolverPool {
+pub struct AsyncResolver {
     sockets: Vec<Arc<UdpSocket>>,
+    next_query_id: Arc<atomic::AtomicU16>,
     pending_queries: Arc<DashMap<u16, QueryResultSender>>,
     next_socket_index: Arc<atomic::AtomicUsize>,
     shutdown_tx: Arc<broadcast::Sender<()>>,
 }
 
-impl AsyncResolverPool {
+impl AsyncResolver {
     pub async fn new(pool_size: Option<usize>) -> Result<Self, DnsError> {
         let pool_size = pool_size.unwrap_or(DEFAULT_POOL_SIZE);
 
-        let mut sockets = Vec::with_capacity(pool_size);
+        let mut sockets: Vec<Arc<UdpSocket>> = Vec::with_capacity(pool_size);
         let pending_queries = Arc::new(DashMap::<u16, QueryResultSender>::new());
         let (shutdown_tx, _) = broadcast::channel(1);
         let shutdown_tx_arc = Arc::new(shutdown_tx);
@@ -87,7 +87,7 @@ impl AsyncResolverPool {
                                         }
                                     } else if len > 0 { /* Packet too small */ }
                                 }
-                                Err(e) => { /* Handle UDP recv error */ log_error!(format!("ERROR: UDP Recv on {:?}: {}", local_addr, e)); tokio::time::sleep(Duration::from_millis(10)).await; }
+                                Err(e) => { /* Handle UDP recv error */ log_error!(format!("ERROR: UDP Recv: {}", e)); }
                             }
                         },
                     }
@@ -97,6 +97,7 @@ impl AsyncResolverPool {
 
         Ok(Self {
             sockets,
+            next_query_id: Arc::new(atomic::AtomicU16::new(0)),
             pending_queries,
             next_socket_index: Arc::new(atomic::AtomicUsize::new(0)),
             shutdown_tx: shutdown_tx_arc,
@@ -105,13 +106,27 @@ impl AsyncResolverPool {
 
     pub async fn resolve(
         &self,
-        dns_resolver: &str,
+        dns_resolver: &Ipv4Addr,
         domain: &str,
         query_type: &QueryType,
         protocol: &TransportProtocol,
         recursion: bool,
     ) -> Result<DnsPacket, DnsError> {
-        let query_packet = Self::build_dns_query(domain, query_type, recursion)?;
+        let mut attempts = 0;
+        let query_id = loop {
+            let id = self
+                .next_query_id
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            let id = id % 65535;
+            if !self.pending_queries.contains_key(&id) {
+                break id;
+            }
+            attempts += 1;
+            if attempts > 65536 {
+                return Err(DnsError::Internal("No available query IDs".to_string()));
+            }
+        };
+        let query_packet = Self::build_dns_query(query_id, domain, query_type, recursion)?;
 
         match protocol {
             TransportProtocol::UDP => self.resolve_udp(dns_resolver, query_packet).await,
@@ -121,7 +136,7 @@ impl AsyncResolverPool {
 
     async fn resolve_udp(
         &self,
-        dns_resolver: &str,
+        dns_resolver: &Ipv4Addr,
         mut query_packet: DnsPacket,
     ) -> Result<DnsPacket, DnsError> {
         if self.sockets.is_empty() {
@@ -154,21 +169,12 @@ impl AsyncResolverPool {
             % self.sockets.len();
         let socket = &self.sockets[socket_index];
 
-        let target_addr_str = format!("{dns_resolver}:{DNS_PORT}");
-        let target_sock_addr: SocketAddr = match target_addr_str.parse() {
-            Ok(addr) => addr,
-            Err(e) => {
-                self.pending_queries.remove(&query_id);
-                return Err(DnsError::Network(format!(
-                    "UDP: Invalid resolver address '{target_addr_str}': {e}"
-                )));
-            }
-        };
+        let target_sock_addr = SocketAddr::new((*dns_resolver).into(), DNS_PORT);
 
         if let Err(e) = socket.send_to(&request_data, target_sock_addr).await {
             self.pending_queries.remove(&query_id);
             return Err(DnsError::Network(format!(
-                "UDP: Failed to send query to {target_addr_str}: {e}"
+                "UDP: Failed to send query to {target_sock_addr}: {e}"
             )));
         }
 
@@ -188,14 +194,25 @@ impl AsyncResolverPool {
                 ))
             }
             Err(_timeout_elapsed) => {
+                // Remove the pending query entry
                 self.pending_queries.remove(&query_id);
-                Err(DnsError::Timeout)
+
+                // Gather UDP pool stats
+                let pool_size = self.sockets.len();
+                let pending_count = self.pending_queries.len();
+
+                log_error!(format!(
+                    "UDP Timeout: pool_size={}, pending_queries={}",
+                    pool_size, pending_count
+                ));
+
+                Err(DnsError::Timeout(dns_resolver.to_string()))
             }
         }
     }
 
     async fn resolve_tcp(
-        dns_resolver: &str,
+        dns_resolver: &Ipv4Addr,
         mut query_packet: DnsPacket,
     ) -> Result<DnsPacket, DnsError> {
         let query_id = query_packet.header.id;
@@ -220,19 +237,19 @@ impl AsyncResolverPool {
         tcp_request_data.extend_from_slice(&query_len.to_be_bytes());
         tcp_request_data.extend_from_slice(query_data);
 
-        let target_addr_str = format!("{dns_resolver}:{DNS_PORT}");
+        let target_sock_addr = SocketAddr::new((*dns_resolver).into(), DNS_PORT);
 
         // Establish TCP connection with timeout
-        let stream = match timeout(DEFAULT_TIMEOUT, TcpStream::connect(&target_addr_str)).await {
+        let stream = match timeout(DEFAULT_TIMEOUT, TcpStream::connect(target_sock_addr)).await {
             Ok(Ok(s)) => s,
             Ok(Err(e)) => {
                 return Err(DnsError::Network(format!(
-                    "Failed to connect to {target_addr_str}: {e}"
+                    "Failed to connect to {target_sock_addr}: {e}"
                 )));
             }
             Err(_) => {
                 return Err(DnsError::Network(format!(
-                    "Timeout connecting to {target_addr_str}"
+                    "Timeout connecting to {target_sock_addr}"
                 )));
             }
         };
@@ -242,11 +259,11 @@ impl AsyncResolverPool {
             Ok(Ok(())) => { /* Write successful */ }
             Ok(Err(e)) => {
                 return Err(DnsError::Network(format!(
-                    "Failed to write request to {target_addr_str}: {e}"
+                    "Failed to write request to {target_sock_addr}: {e}"
                 )));
             }
             Err(_) => {
-                return Err(DnsError::Timeout);
+                return Err(DnsError::Timeout(dns_resolver.to_string()));
             }
         }
 
@@ -256,11 +273,11 @@ impl AsyncResolverPool {
             Ok(Ok(_)) => { /* Read length successful */ }
             Ok(Err(e)) => {
                 return Err(DnsError::Network(format!(
-                    "Failed to read response length from {target_addr_str}: {e}"
+                    "Failed to read response length from {target_sock_addr}: {e}"
                 )));
             }
             Err(_) => {
-                return Err(DnsError::Timeout);
+                return Err(DnsError::Timeout(dns_resolver.to_string()));
             }
         }
         let response_len = u16::from_be_bytes(len_buffer) as usize;
@@ -283,11 +300,11 @@ impl AsyncResolverPool {
             Ok(Ok(_)) => { /* Read body successful */ }
             Ok(Err(e)) => {
                 return Err(DnsError::Network(format!(
-                    "Failed to read response from {target_addr_str}: {e}"
+                    "Failed to read response from {target_sock_addr}: {e}"
                 )));
             }
             Err(_) => {
-                return Err(DnsError::Timeout);
+                return Err(DnsError::Timeout(dns_resolver.to_string()));
             }
         }
 
@@ -331,6 +348,7 @@ impl AsyncResolverPool {
     }
 
     fn build_dns_query(
+        query_id: u16,
         domain: &str,
         query_type: &QueryType,
         recursion: bool,
@@ -362,7 +380,7 @@ impl AsyncResolverPool {
         };
 
         let mut packet = DnsPacket::new();
-        packet.header.id = rand::rng().random();
+        packet.header.id = query_id;
         packet.header.questions = 1;
         packet.header.recursion_desired = recursion;
         packet
@@ -374,5 +392,11 @@ impl AsyncResolverPool {
 
     pub fn shutdown(&self) {
         let _ = self.shutdown_tx.send(());
+    }
+}
+
+impl Drop for AsyncResolver {
+    fn drop(&mut self) {
+        self.shutdown();
     }
 }

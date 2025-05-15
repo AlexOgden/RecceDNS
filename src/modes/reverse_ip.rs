@@ -3,7 +3,6 @@ use colored::Colorize;
 use std::{
     net::{IpAddr, Ipv4Addr, Ipv6Addr},
     sync::atomic::Ordering,
-    thread,
     time::Duration,
     vec,
 };
@@ -11,7 +10,7 @@ use thiserror::Error;
 
 use crate::{
     dns::{
-        async_resolver_pool::AsyncResolverPool,
+        async_resolver::AsyncResolver,
         error::DnsError,
         protocol::{QueryType, RData},
         resolver_selector,
@@ -24,19 +23,14 @@ use crate::{
     timing::stats::QueryTimer,
 };
 
-pub async fn reverse_ip(cmd_args: &CommandArgs, dns_resolver_list: &[&str]) -> Result<()> {
+pub async fn reverse_ip(cmd_args: &CommandArgs, dns_resolver_list: &[Ipv4Addr]) -> Result<()> {
     let interrupted = interrupt::initialize_interrupt_handler()?;
 
     let target_ips = parse_ip(&cmd_args.target)?;
     let total_ips = target_ips.len() as u64;
 
-    let mut resolver_selector = resolver_selector::get_selector(
-        cmd_args.use_random,
-        dns_resolver_list
-            .iter()
-            .map(std::string::ToString::to_string)
-            .collect(),
-    );
+    let mut resolver_selector =
+        resolver_selector::get_selector(cmd_args.use_random, dns_resolver_list.to_vec());
     let mut query_timer = QueryTimer::new(!cmd_args.no_query_stats);
     let mut found_count = 0;
 
@@ -47,12 +41,12 @@ pub async fn reverse_ip(cmd_args: &CommandArgs, dns_resolver_list: &[&str]) -> R
         target_ips.len()
     ));
 
-    let resolver_pool = AsyncResolverPool::new(Some(2)).await?;
+    let resolver_pool = AsyncResolver::new(Some(2)).await?;
 
     for (index, ip) in target_ips.iter().enumerate() {
         if interrupted.load(Ordering::SeqCst) {
             logger::clear_line();
-            log_warn!("Interrupted by user".to_string());
+            log_warn!("Interrupted by user");
             break;
         }
 
@@ -61,7 +55,7 @@ pub async fn reverse_ip(cmd_args: &CommandArgs, dns_resolver_list: &[&str]) -> R
         query_timer.start();
         let query_result = resolver_pool
             .resolve(
-                resolver,
+                &resolver,
                 &ip.to_string(),
                 &QueryType::PTR,
                 &cmd_args.transport_protocol,
@@ -91,16 +85,15 @@ pub async fn reverse_ip(cmd_args: &CommandArgs, dns_resolver_list: &[&str]) -> R
                     ptr_records.join(", ")
                 };
 
-                log_success!(format!("{} [{}]", ip, display_record.to_string().cyan()));
+                log_success!(format!("{} [{}]", ip, display_record.cyan()));
                 found_count += 1;
             }
             Err(error) => {
-                if (cmd_args.verbose
+                if cmd_args.verbose
                     || (!matches!(
                         error,
                         DnsError::NoRecordsFound | DnsError::NonExistentDomain
-                    )))
-                    && cmd_args.no_print_errors
+                    ) && !cmd_args.no_print_errors)
                 {
                     log_error!(format!("{} [{}]", ip, error));
                 }
@@ -108,7 +101,7 @@ pub async fn reverse_ip(cmd_args: &CommandArgs, dns_resolver_list: &[&str]) -> R
         }
 
         if let Some(delay_ms) = &cmd_args.delay {
-            thread::sleep(Duration::from_millis(delay_ms.get_delay()));
+            tokio::time::sleep(Duration::from_millis(delay_ms.get_delay())).await;
         }
     }
 
@@ -153,6 +146,11 @@ fn parse_ip(ip: &str) -> Result<Vec<IpAddr>, ParseIpError> {
         expand_ip_range(start.trim(), end.trim())
     } else if let Some((ip_str, cidr_str)) = ip.split_once('/') {
         expand_cidr(ip_str.trim(), cidr_str.trim())
+    } else if ip.contains(',') {
+        ip.split(',')
+            .map(|ip| ip.trim().parse())
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|_| ParseIpError::InvalidIp)
     } else {
         let ip = ip.parse().map_err(|_| ParseIpError::InvalidIp)?;
         Ok(vec![ip])

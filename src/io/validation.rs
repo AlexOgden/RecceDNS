@@ -1,6 +1,10 @@
 use anyhow::{Context, Result, anyhow, ensure};
 use regex::Regex;
-use std::net::{IpAddr, Ipv4Addr};
+use std::{
+    fs,
+    net::{IpAddr, Ipv4Addr},
+    path::Path,
+};
 
 use crate::network::{check, types::TransportProtocol};
 use std::sync::LazyLock;
@@ -70,20 +74,57 @@ pub fn validate_target(input: &str) -> Result<String> {
         }
     }
 
+    // Check for CSV list of IP addresses
+    if input.contains(',') {
+        let ips: Vec<&str> = input.split(',').collect();
+        if ips.iter().all(|&ip| ip.parse::<IpAddr>().is_ok()) {
+            return Ok(input.to_string());
+        }
+    }
+
     Err(anyhow!("Invalid input: {}", input))
 }
 
 pub fn validate_dns_resolvers(servers: &str) -> Result<String> {
-    let server_list: Vec<&str> = servers.split(',').collect();
+    let mut server_list: Vec<String> = Vec::new();
+
+    if Path::new(servers).exists() {
+        let contents = fs::read_to_string(servers)
+            .map_err(|e| anyhow!("Failed to read DNS resolver file: {e}"))?;
+        for line in contents.lines() {
+            for part in line.split(',') {
+                let trimmed = part.trim();
+                if !trimmed.is_empty() {
+                    server_list.push(trimmed.to_string());
+                }
+            }
+        }
+    } else {
+        for part in servers.split(',') {
+            let trimmed = part.trim();
+            if !trimmed.is_empty() {
+                server_list.push(trimmed.to_string());
+            }
+        }
+    }
+
+    if server_list.is_empty() {
+        return Err(anyhow!("No DNS resolvers provided."));
+    }
+
+    let invalid: Vec<String> = server_list
+        .iter()
+        .filter(|server| validate_ipv4(server).is_err())
+        .cloned()
+        .collect();
 
     ensure!(
-        server_list
-            .iter()
-            .all(|&server| validate_ipv4(server).is_ok()),
-        "DNS Resolver(s) invalid. Comma-separated IPv4 only."
+        invalid.is_empty(),
+        "DNS Resolver(s) invalid. Comma-separated IPv4 only. Invalid: {}",
+        invalid.join(", ")
     );
 
-    Ok(servers.to_string())
+    Ok(server_list.join(","))
 }
 
 pub fn validate_ipv4(ip: &str) -> Result<String> {
@@ -92,11 +133,11 @@ pub fn validate_ipv4(ip: &str) -> Result<String> {
         .map(|_| ip.to_string())
 }
 
-pub async fn filter_working_dns_resolvers<'a>(
+pub async fn filter_working_resolvers(
     no_dns_check: bool,
     transport_protocol: &TransportProtocol,
-    dns_resolvers: &[&'a str],
-) -> Vec<&'a str> {
+    dns_resolvers: &[Ipv4Addr],
+) -> Vec<Ipv4Addr> {
     if no_dns_check {
         return dns_resolvers.to_vec();
     }
