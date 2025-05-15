@@ -112,7 +112,7 @@ pub async fn enumerate_subdomains(
         use rayon::prelude::*;
         subdomain_list
             .par_chunks(chunk_size)
-            .map(<[std::string::String]>::to_vec)
+            .map(<[String]>::to_vec)
             .collect()
     } else {
         subdomain_list

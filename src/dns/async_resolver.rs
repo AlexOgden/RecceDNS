@@ -43,7 +43,7 @@ impl AsyncResolver {
     pub async fn new(pool_size: Option<usize>) -> Result<Self, DnsError> {
         let pool_size = pool_size.unwrap_or(DEFAULT_POOL_SIZE);
 
-        let mut sockets = Vec::with_capacity(pool_size);
+        let mut sockets: Vec<Arc<UdpSocket>> = Vec::with_capacity(pool_size);
         let pending_queries = Arc::new(DashMap::<u16, QueryResultSender>::new());
         let (shutdown_tx, _) = broadcast::channel(1);
         let shutdown_tx_arc = Arc::new(shutdown_tx);
@@ -194,7 +194,18 @@ impl AsyncResolver {
                 ))
             }
             Err(_timeout_elapsed) => {
+                // Remove the pending query entry
                 self.pending_queries.remove(&query_id);
+
+                // Gather UDP pool stats
+                let pool_size = self.sockets.len();
+                let pending_count = self.pending_queries.len();
+
+                log_error!(format!(
+                    "UDP Timeout: pool_size={}, pending_queries={}",
+                    pool_size, pending_count
+                ));
+
                 Err(DnsError::Timeout(dns_resolver.to_string()))
             }
         }
