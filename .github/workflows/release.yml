@@ -254,11 +254,11 @@ jobs:
           echo "major=${MAJOR}" >> $GITHUB_OUTPUT
           echo "major_minor=${MAJOR}.${MINOR}" >> $GITHUB_OUTPUT
 
-      - name: Build and push basic Docker image
+      - name: Build and push Docker image
         uses: docker/build-push-action@v4
         with:
           context: .
-          file: ./Dockerfile.basic
+          file: ./Dockerfile
           push: true
           tags: |
             ghcr.io/alexogden/reccedns:${{ steps.version.outputs.version_no_v }}
@@ -268,24 +268,6 @@ jobs:
           labels: |
             org.opencontainers.image.title=RecceDNS
             org.opencontainers.image.description=DNS Enumeration and Information Gathering Tool
-            org.opencontainers.image.version=${{ steps.version.outputs.version_no_v }}
-            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
-          platforms: linux/amd64,linux/arm64
-
-      - name: Build and push lists Docker image
-        uses: docker/build-push-action@v4
-        with:
-          context: .
-          file: ./Dockerfile.lists
-          push: true
-          tags: |
-            ghcr.io/alexogden/reccedns:${{ steps.version.outputs.version_no_v }}-lists
-            ghcr.io/alexogden/reccedns:${{ steps.version.outputs.major_minor }}-lists
-            ghcr.io/alexogden/reccedns:${{ steps.version.outputs.major }}-lists
-            ghcr.io/alexogden/reccedns:lists
-          labels: |
-            org.opencontainers.image.title=RecceDNS with SecLists
-            org.opencontainers.image.description=DNS Enumeration and Information Gathering Tool with SecLists DNS wordlists included
             org.opencontainers.image.version=${{ steps.version.outputs.version_no_v }}
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
           platforms: linux/amd64,linux/arm64
@@ -300,17 +282,7 @@ jobs:
             ## Docker Images
             
             Docker images are available on GitHub Container Registry:
-            
-            ### Basic Image
-            Container with the RecceDNS tool only. Mount wordlists for subdomain enumeration via a bind or volume mount.
             ```
             docker pull ghcr.io/alexogden/reccedns:${{ steps.version.outputs.version_no_v }}
             docker pull ghcr.io/alexogden/reccedns:latest
-            ```
-            
-            ### Image with SecLists
-            Container with the RecceDNS tool and the SecLists DNS wordlists included. Use the `lists` tag to pull this image.
-            ```
-            docker pull ghcr.io/alexogden/reccedns:${{ steps.version.outputs.version_no_v }}-lists
-            docker pull ghcr.io/alexogden/reccedns:lists
             ```
