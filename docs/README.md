@@ -88,21 +88,11 @@ You can download these binaries directly from the releases page without building
 
 Official Docker images are available:
 
-- **Basic**: Minimal image with only RecceDNS installed.
-- **Lists**: Includes RecceDNS and pre-installed DNS subdomain lists from [SecLists](https://github.com/danielmiessler/SecLists) in `/opt/wordlists`.
-
 **Usage Examples:**
 
-Basic image:
 ```sh
 docker pull ghcr.io/alexogden/reccedns:latest
 docker run --rm -it ghcr.io/alexogden/reccedns:latest -m c -d 1.1.1.1 -t github.com
-```
-
-Lists image:
-```sh
-docker pull ghcr.io/alexogden/reccedns:lists
-docker run --rm -it ghcr.io/alexogden/reccedns:lists -m s -t github.com -w /opt/wordlists/list.txt -D A:10-50 -d 1.1.1.1
 ```
 
 See the [releases](https://github.com/AlexOgden/RecceDNS/releases) page for the latest versions.
