@@ -8,7 +8,7 @@ use dashmap::DashMap;
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::{TcpStream, UdpSocket},
-    sync::{broadcast, oneshot},
+    sync::{Mutex, broadcast, oneshot},
     time::timeout,
 };
 
@@ -32,32 +32,33 @@ const DNS_PORT: u16 = 53; // Standard DNS port
 
 #[derive(Clone)]
 pub struct AsyncResolver {
-    sockets: Vec<Arc<UdpSocket>>,
+    udp_sockets: Vec<Arc<UdpSocket>>,
+    tcp_sockets: Arc<DashMap<SocketAddr, Arc<Mutex<TcpStream>>>>,
     next_query_id: Arc<atomic::AtomicU16>,
     pending_queries: Arc<DashMap<u16, QueryResultSender>>,
-    next_socket_index: Arc<atomic::AtomicUsize>,
+    next_udp_socket_index: Arc<atomic::AtomicUsize>,
     shutdown_tx: Arc<broadcast::Sender<()>>,
 }
 
 impl AsyncResolver {
-    pub async fn new(pool_size: Option<usize>) -> Result<Self, DnsError> {
-        let pool_size = pool_size.unwrap_or(DEFAULT_POOL_SIZE);
+    pub async fn new(udp_pool_size: Option<usize>) -> Result<Self, DnsError> {
+        let udp_pool_size = udp_pool_size.unwrap_or(DEFAULT_POOL_SIZE);
 
-        let mut sockets: Vec<Arc<UdpSocket>> = Vec::with_capacity(pool_size);
+        let mut udp_sockets: Vec<Arc<UdpSocket>> = Vec::with_capacity(udp_pool_size);
         let pending_queries = Arc::new(DashMap::<u16, QueryResultSender>::new());
         let (shutdown_tx, _) = broadcast::channel(1);
         let shutdown_tx_arc = Arc::new(shutdown_tx);
 
-        for i in 0..pool_size {
-            let socket = UdpSocket::bind("0.0.0.0:0")
+        for i in 0..udp_pool_size {
+            let udp_socket = UdpSocket::bind("0.0.0.0:0")
                 .await
                 .map_err(|e| DnsError::Network(format!("Failed to bind UDP socket {i}: {e}")))?;
-            let socket_arc = Arc::new(socket);
-            sockets.push(socket_arc.clone());
+            let udp_socket_arc = Arc::new(udp_socket);
+            udp_sockets.push(udp_socket_arc.clone());
 
             let pq_clone = pending_queries.clone();
             let mut shutdown_rx = shutdown_tx_arc.subscribe();
-            let local_addr = socket_arc.local_addr().ok();
+            let local_addr = udp_socket_arc.local_addr().ok();
 
             tokio::spawn(async move {
                 let mut recv_buffer = [0u8; UDP_BUFFER_SIZE];
@@ -65,7 +66,7 @@ impl AsyncResolver {
                     tokio::select! {
                         biased;
                         _ = shutdown_rx.recv() => { break; },
-                        result = socket_arc.recv_from(&mut recv_buffer) => {
+                        result = udp_socket_arc.recv_from(&mut recv_buffer) => {
                             match result {
                                 Ok((len, _src_addr)) => {
                                     if len >= 2 {
@@ -96,12 +97,40 @@ impl AsyncResolver {
         }
 
         Ok(Self {
-            sockets,
+            udp_sockets,
+            tcp_sockets: Arc::new(DashMap::new()),
             next_query_id: Arc::new(atomic::AtomicU16::new(0)),
             pending_queries,
-            next_socket_index: Arc::new(atomic::AtomicUsize::new(0)),
+            next_udp_socket_index: Arc::new(atomic::AtomicUsize::new(0)),
             shutdown_tx: shutdown_tx_arc,
         })
+    }
+
+    async fn get_or_create_tcp_connection(
+        &self,
+        target_addr: SocketAddr,
+    ) -> Result<Arc<Mutex<TcpStream>>, DnsError> {
+        if let Some(entry) = self.tcp_sockets.get(&target_addr) {
+            return Ok(entry.value().clone());
+        }
+
+        let tcp_stream = match timeout(DEFAULT_TIMEOUT, TcpStream::connect(target_addr)).await {
+            Ok(Ok(s)) => s,
+            Ok(Err(e)) => {
+                return Err(DnsError::Network(format!(
+                    "Failed to connect to {target_addr}: {e}"
+                )));
+            }
+            Err(_) => {
+                return Err(DnsError::Network(format!(
+                    "Timeout connecting to {target_addr}"
+                )));
+            }
+        };
+
+        let connection = Arc::new(Mutex::new(tcp_stream));
+        self.tcp_sockets.insert(target_addr, connection.clone());
+        Ok(connection)
     }
 
     pub async fn resolve(
@@ -130,7 +159,7 @@ impl AsyncResolver {
 
         match protocol {
             TransportProtocol::UDP => self.resolve_udp(dns_resolver, query_packet).await,
-            TransportProtocol::TCP => Self::resolve_tcp(dns_resolver, query_packet).await,
+            TransportProtocol::TCP => self.resolve_tcp(dns_resolver, query_packet).await,
         }
     }
 
@@ -139,7 +168,7 @@ impl AsyncResolver {
         dns_resolver: &Ipv4Addr,
         mut query_packet: DnsPacket,
     ) -> Result<DnsPacket, DnsError> {
-        if self.sockets.is_empty() {
+        if self.udp_sockets.is_empty() {
             return Err(DnsError::Internal(
                 "Cannot resolve UDP, pool size is 0".to_string(),
             ));
@@ -148,11 +177,11 @@ impl AsyncResolver {
         let query_id = query_packet.header.id;
 
         // Serialize packet
-        let mut req_buffer = PacketBuffer::new();
+        let mut udp_req_buffer = PacketBuffer::new();
         query_packet
-            .write(&mut req_buffer)
+            .write(&mut udp_req_buffer)
             .map_err(|e| DnsError::Internal(format!("UDP: Failed to serialize query: {e}")))?;
-        let request_data = req_buffer.get_buffer_to_pos().to_vec();
+        let udp_request_data = udp_req_buffer.get_buffer_to_pos().to_vec();
 
         // Prepare for response via oneshot channel
         let (tx, rx) = oneshot::channel::<PendingQueryResult>();
@@ -163,15 +192,18 @@ impl AsyncResolver {
         }
 
         // Select socket and send
-        let socket_index = self
-            .next_socket_index
+        let udp_socket_index = self
+            .next_udp_socket_index
             .fetch_add(1, std::sync::atomic::Ordering::Relaxed)
-            % self.sockets.len();
-        let socket = &self.sockets[socket_index];
+            % self.udp_sockets.len();
+        let udp_socket = &self.udp_sockets[udp_socket_index];
 
         let target_sock_addr = SocketAddr::new((*dns_resolver).into(), DNS_PORT);
 
-        if let Err(e) = socket.send_to(&request_data, target_sock_addr).await {
+        if let Err(e) = udp_socket
+            .send_to(&udp_request_data, target_sock_addr)
+            .await
+        {
             self.pending_queries.remove(&query_id);
             return Err(DnsError::Network(format!(
                 "UDP: Failed to send query to {target_sock_addr}: {e}"
@@ -202,115 +234,128 @@ impl AsyncResolver {
     }
 
     async fn resolve_tcp(
+        &self,
         dns_resolver: &Ipv4Addr,
         mut query_packet: DnsPacket,
     ) -> Result<DnsPacket, DnsError> {
-        let query_id = query_packet.header.id;
-
-        // Serialize packet
-        let mut req_buffer = PacketBuffer::new();
-        query_packet
-            .write(&mut req_buffer)
-            .map_err(|e| DnsError::Internal(format!("TCP: Failed to serialize query: {e}")))?;
-        let query_data = req_buffer.get_buffer_to_pos();
-
-        // Prepend 2-byte length field (Big Endian)
-        let query_len = u16::try_from(query_data.len()).map_err(|_| {
-            DnsError::InvalidData("TCP: Query data length exceeds 65535 bytes".to_string())
-        })?;
-        if query_len == 0 {
-            return Err(DnsError::InvalidData(
-                "TCP: Serialized query data is empty".to_string(),
-            ));
-        }
-        let mut tcp_request_data = Vec::with_capacity(2 + query_data.len());
-        tcp_request_data.extend_from_slice(&query_len.to_be_bytes());
-        tcp_request_data.extend_from_slice(query_data);
-
         let target_sock_addr = SocketAddr::new((*dns_resolver).into(), DNS_PORT);
 
-        // Establish TCP connection with timeout
-        let stream = match timeout(DEFAULT_TIMEOUT, TcpStream::connect(target_sock_addr)).await {
-            Ok(Ok(s)) => s,
-            Ok(Err(e)) => {
-                return Err(DnsError::Network(format!(
-                    "Failed to connect to {target_sock_addr}: {e}"
+        let tcp_connection_mutex = self.get_or_create_tcp_connection(target_sock_addr).await?;
+        let mut tcp_connection_guard = tcp_connection_mutex.lock().await;
+
+        let query_id = query_packet.header.id;
+
+        let result: Result<DnsPacket, DnsError> = async {
+            // Serialize packet
+            let mut request_buffer = PacketBuffer::new();
+            query_packet
+                .write(&mut request_buffer)
+                .map_err(|e| DnsError::Internal(format!("TCP: Failed to serialize query: {e}")))?;
+            let request_bytes = request_buffer.get_buffer_to_pos();
+
+            // Prepend 2-byte length field (Big Endian)
+            let query_len = u16::try_from(request_bytes.len()).map_err(|_| {
+                DnsError::InvalidData("TCP: Query data length exceeds 65535 bytes".to_string())
+            })?;
+            if query_len == 0 {
+                return Err(DnsError::InvalidData(
+                    "TCP: Serialized query data is empty".to_string(),
+                ));
+            }
+            let mut tcp_request_data = Vec::with_capacity(2 + request_bytes.len());
+            tcp_request_data.extend_from_slice(&query_len.to_be_bytes());
+            tcp_request_data.extend_from_slice(request_bytes);
+
+            // Write request
+            match timeout(
+                DEFAULT_TIMEOUT,
+                tcp_connection_guard.write_all(&tcp_request_data),
+            )
+            .await
+            {
+                Ok(Ok(())) => {}
+                Ok(Err(e)) => {
+                    return Err(DnsError::Network(format!(
+                        "Failed to write request to {target_sock_addr}: {e}"
+                    )));
+                }
+                Err(_) => {
+                    return Err(DnsError::Timeout(dns_resolver.to_string()));
+                }
+            }
+
+            // Read response length (2 bytes) with timeout
+            let mut response_len_buffer = [0u8; 2];
+            match timeout(
+                DEFAULT_TIMEOUT,
+                tcp_connection_guard.read_exact(&mut response_len_buffer),
+            )
+            .await
+            {
+                Ok(Ok(_)) => {}
+                Ok(Err(e)) => {
+                    return Err(DnsError::Network(format!(
+                        "Failed to read response length from {target_sock_addr}: {e}"
+                    )));
+                }
+                Err(_) => {
+                    return Err(DnsError::Timeout(dns_resolver.to_string()));
+                }
+            }
+            let response_len = u16::from_be_bytes(response_len_buffer) as usize;
+
+            if response_len == 0 {
+                return Err(DnsError::InvalidData(
+                    "TCP: Received zero length response".to_owned(),
+                ));
+            }
+            // Basic sanity check for response size
+            if response_len > TCP_BUFFER_SIZE {
+                return Err(DnsError::InvalidData(format!(
+                    "TCP: Response length too large: {response_len} bytes (max: {TCP_BUFFER_SIZE})"
                 )));
             }
-            Err(_) => {
-                return Err(DnsError::Network(format!(
-                    "Timeout connecting to {target_sock_addr}"
+
+            // Read the actual response with timeout
+            let mut response_body_buffer = vec![0u8; response_len];
+            match timeout(
+                DEFAULT_TIMEOUT,
+                tcp_connection_guard.read_exact(&mut response_body_buffer),
+            )
+            .await
+            {
+                Ok(Ok(_)) => {}
+                Ok(Err(e)) => {
+                    return Err(DnsError::Network(format!(
+                        "Failed to read response from {target_sock_addr}: {e}"
+                    )));
+                }
+                Err(_) => {
+                    return Err(DnsError::Timeout(dns_resolver.to_string()));
+                }
+            }
+
+            let mut response_packet_buffer = PacketBuffer::from_slice(&response_body_buffer)
+                .map_err(|e| DnsError::Internal(format!("Failed to create PacketBuffer: {e}")))?;
+            let response_packet = DnsPacket::from_buffer(&mut response_packet_buffer)?;
+
+            // Verify response ID matches query ID
+            if response_packet.header.id != query_id {
+                return Err(DnsError::InvalidData(format!(
+                    "DNS: Response ID {} does not match query ID {}",
+                    response_packet.header.id, query_id
                 )));
             }
-        };
-        let (mut reader, mut writer) = stream.into_split();
 
-        match timeout(DEFAULT_TIMEOUT, writer.write_all(&tcp_request_data)).await {
-            Ok(Ok(())) => { /* Write successful */ }
-            Ok(Err(e)) => {
-                return Err(DnsError::Network(format!(
-                    "Failed to write request to {target_sock_addr}: {e}"
-                )));
-            }
-            Err(_) => {
-                return Err(DnsError::Timeout(dns_resolver.to_string()));
-            }
+            Self::process_dns_result(response_packet)
+        }
+        .await;
+
+        if result.is_err() {
+            self.tcp_sockets.remove(&target_sock_addr);
         }
 
-        // Read response length (2 bytes) with timeout
-        let mut len_buffer = [0u8; 2];
-        match timeout(DEFAULT_TIMEOUT, reader.read_exact(&mut len_buffer)).await {
-            Ok(Ok(_)) => { /* Read length successful */ }
-            Ok(Err(e)) => {
-                return Err(DnsError::Network(format!(
-                    "Failed to read response length from {target_sock_addr}: {e}"
-                )));
-            }
-            Err(_) => {
-                return Err(DnsError::Timeout(dns_resolver.to_string()));
-            }
-        }
-        let response_len = u16::from_be_bytes(len_buffer) as usize;
-
-        if response_len == 0 {
-            return Err(DnsError::InvalidData(
-                "TCP: Received zero length response".to_owned(),
-            ));
-        }
-        // Basic sanity check for response size
-        if response_len > TCP_BUFFER_SIZE {
-            return Err(DnsError::InvalidData(format!(
-                "TCP: Response length too large: {response_len} bytes (max: {TCP_BUFFER_SIZE})"
-            )));
-        }
-
-        // Read the actual response with timeout
-        let mut response_buffer = vec![0u8; response_len];
-        match timeout(DEFAULT_TIMEOUT, reader.read_exact(&mut response_buffer)).await {
-            Ok(Ok(_)) => { /* Read body successful */ }
-            Ok(Err(e)) => {
-                return Err(DnsError::Network(format!(
-                    "Failed to read response from {target_sock_addr}: {e}"
-                )));
-            }
-            Err(_) => {
-                return Err(DnsError::Timeout(dns_resolver.to_string()));
-            }
-        }
-
-        let mut packet_buffer = PacketBuffer::from_slice(&response_buffer)
-            .map_err(|e| DnsError::Internal(format!("Failed to create PacketBuffer: {e}")))?;
-        let response_packet = DnsPacket::from_buffer(&mut packet_buffer)?;
-
-        // Verify response ID matches query ID
-        if response_packet.header.id != query_id {
-            return Err(DnsError::InvalidData(format!(
-                "DNS: Response ID {} does not match query ID {}",
-                response_packet.header.id, query_id
-            )));
-        }
-
-        Self::process_dns_result(response_packet)
+        result
     }
 
     fn process_dns_result(query_result: DnsPacket) -> Result<DnsPacket, DnsError> {
