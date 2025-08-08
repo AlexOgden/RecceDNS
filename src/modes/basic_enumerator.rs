@@ -159,10 +159,10 @@ async fn process_and_format_record(
     data_output: &mut Option<DnsEnumerationOutput>,
     cmd_args: &CommandArgs,
 ) -> Result<()> {
-    if let RData::CNAME(cname) = &record.data {
-        if !seen_cnames.insert(cname.clone()) {
-            return Ok(()); // Skip if CNAME is already seen
-        }
+    if let RData::CNAME(cname) = &record.data
+        && !seen_cnames.insert(cname.clone())
+    {
+        return Ok(()); // Skip if CNAME is already seen
     }
 
     // Add to JSON output

@@ -169,7 +169,9 @@ pub async fn enumerate_subdomains(
                 print_query_result(cmd_args, &subdomain, resolver, &response_str);
 
                 if let Some(output) = &mut results_output {
-                    results.iter().for_each(|r| output.add_result(r.clone()));
+                    for r in &results {
+                        output.add_result(r.clone());
+                    }
                 }
             }
             Err((subdomain, resolver, error)) => {
