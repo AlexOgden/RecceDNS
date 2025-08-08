@@ -136,7 +136,9 @@ pub async fn expand_tlds(cmd_args: &CommandArgs, dns_resolver_list: &[Ipv4Addr])
                 print_query_result(cmd_args, &fqdn, &resolver, &response_str);
 
                 if let Some(output) = &mut results_output {
-                    results.iter().for_each(|r| output.add_result(r.clone()));
+                    for r in &results {
+                        output.add_result(r.clone());
+                    }
                 }
             }
             Err((fqdn, resolver, error)) => {

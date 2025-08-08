@@ -35,13 +35,13 @@ pub fn validate_target(input: &str) -> Result<String> {
             return Err(anyhow!("Invalid CIDR notation: {}", input));
         }
 
-        if let Ok(ip) = ip_part.parse::<IpAddr>() {
-            if let Ok(mask) = mask_part.parse::<u8>() {
-                match ip {
-                    IpAddr::V4(_) if mask <= 32 => return Ok(input.to_string()),
-                    IpAddr::V6(_) if mask <= 128 => return Ok(input.to_string()),
-                    _ => {}
-                }
+        if let Ok(ip) = ip_part.parse::<IpAddr>()
+            && let Ok(mask) = mask_part.parse::<u8>()
+        {
+            match ip {
+                IpAddr::V4(_) if mask <= 32 => return Ok(input.to_string()),
+                IpAddr::V6(_) if mask <= 128 => return Ok(input.to_string()),
+                _ => {}
             }
         }
     }

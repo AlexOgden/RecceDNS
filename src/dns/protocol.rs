@@ -646,7 +646,7 @@ mod tests {
             name: "example.com".to_string(),
             class: 1,
             ttl: 3600,
-            data: RData::A(Ipv4Addr::new(127, 0, 0, 1)),
+            data: RData::A(Ipv4Addr::LOCALHOST),
         };
 
         record.write(&mut buffer).unwrap();
@@ -668,7 +668,7 @@ mod tests {
             name: "example.com".to_string(),
             class: 1,
             ttl: 3600,
-            data: RData::A(Ipv4Addr::new(127, 0, 0, 1)),
+            data: RData::A(Ipv4Addr::LOCALHOST),
         });
 
         packet.write(&mut buffer).unwrap();
