@@ -39,7 +39,11 @@ impl AdaptiveDelayState {
         self.total_queries.fetch_add(1, Ordering::Relaxed);
 
         // Only adjust every 20 queries to avoid overreacting
-        if self.total_queries.load(Ordering::Relaxed) % 20 == 0 {
+        if self
+            .total_queries
+            .load(Ordering::Relaxed)
+            .is_multiple_of(20)
+        {
             let current = self.current_delay.load(Ordering::Relaxed);
             let success_rate = self.get_success_rate();
 
