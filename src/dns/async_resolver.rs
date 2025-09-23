@@ -146,12 +146,13 @@ impl AsyncResolver {
             let id = self
                 .next_query_id
                 .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-            let id = id % 65535;
+            // Check if this id is currently in use. If not, reserve it by breaking with it.
             if !self.pending_queries.contains_key(&id) {
                 break id;
             }
             attempts += 1;
-            if attempts > 65536 {
+            // If we've tried all possible u16 values, give up.
+            if attempts >= 65536 {
                 return Err(DnsError::Internal("No available query IDs".to_string()));
             }
         };
