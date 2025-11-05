@@ -73,7 +73,7 @@ pub async fn reverse_ip(cmd_args: &CommandArgs, dns_resolver_list: &[Ipv4Addr]) 
                     .iter()
                     .filter_map(|answer| {
                         if let RData::PTR(ptr) = &answer.data {
-                            Some(ptr.to_string())
+                            Some(ptr.clone())
                         } else {
                             None
                         }

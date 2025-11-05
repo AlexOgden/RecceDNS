@@ -12,10 +12,10 @@ pub fn create_query_response_string(query_result: &HashSet<ResourceRecord>) -> S
         let (record_type, record_data) = match &response.data {
             RData::A(record) => ("A", record.to_string()),
             RData::AAAA(record) => ("AAAA", record.to_string()),
-            RData::TXT(txt_data) => ("TXT", txt_data.to_string()),
-            RData::CNAME(domain) => ("CNAME", domain.to_string()),
-            RData::NS(domain) => ("NS", domain.to_string()),
-            RData::PTR(domain) => ("PTR", domain.to_string()),
+            RData::TXT(txt_data) => ("TXT", txt_data.clone()),
+            RData::CNAME(domain) => ("CNAME", domain.clone()),
+            RData::NS(domain) => ("NS", domain.clone()),
+            RData::PTR(domain) => ("PTR", domain.clone()),
             RData::MX {
                 preference,
                 exchange,
