@@ -32,7 +32,7 @@ pub fn validate_target(input: &str) -> Result<String> {
         let mask_part = mask_part.trim();
 
         if ip_part.is_empty() || mask_part.is_empty() {
-            return Err(anyhow!("Invalid CIDR notation: {}", input));
+            return Err(anyhow!("Invalid CIDR notation: {input}"));
         }
 
         if let Ok(ip) = ip_part.parse::<IpAddr>()
@@ -52,7 +52,7 @@ pub fn validate_target(input: &str) -> Result<String> {
         let end_ip = end_ip.trim();
 
         if start_ip.is_empty() || end_ip.is_empty() {
-            return Err(anyhow!("Invalid IP range format: {}", input));
+            return Err(anyhow!("Invalid IP range format: {input}"));
         }
 
         let start_parse = start_ip.parse::<IpAddr>();
@@ -64,12 +64,11 @@ pub fn validate_target(input: &str) -> Result<String> {
                     return Ok(input.to_string());
                 }
                 return Err(anyhow!(
-                    "IP range must consist of the same IP version: {}",
-                    input
+                    "IP range must consist of the same IP version: {input}"
                 ));
             }
             _ => {
-                return Err(anyhow!("Invalid IP range: {}", input));
+                return Err(anyhow!("Invalid IP range: {input}"));
             }
         }
     }
@@ -82,7 +81,7 @@ pub fn validate_target(input: &str) -> Result<String> {
         }
     }
 
-    Err(anyhow!("Invalid input: {}", input))
+    Err(anyhow!("Invalid input: {input}"))
 }
 
 pub fn validate_dns_resolvers(servers: &str) -> Result<String> {
