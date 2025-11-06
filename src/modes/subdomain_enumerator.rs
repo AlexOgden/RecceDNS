@@ -6,20 +6,25 @@ use rand::Rng;
 use std::fmt::Write;
 use std::net::Ipv4Addr;
 use std::{
-    cmp::max,
     collections::HashSet,
     io::{self},
-    sync::atomic::{AtomicBool, Ordering},
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
     time::{Duration, Instant},
 };
-use tokio::{sync::mpsc, time};
+use tokio::{
+    sync::{Mutex, Semaphore, mpsc},
+    time,
+};
 
 use crate::{
     dns::{
         async_resolver::AsyncResolver,
         error::DnsError,
         format::create_query_response_string,
-        protocol::{QueryType, ResourceRecord},
+        protocol::{DnsPacket, QueryType, ResourceRecord},
         resolver_selector,
     },
     io::{
@@ -37,21 +42,156 @@ use crate::{
 type SubdomainResult =
     Result<(String, Ipv4Addr, HashSet<ResourceRecord>), (String, Ipv4Addr, DnsError)>;
 
-// A type alias for the sender channel.
-type SubdomainResultSender = mpsc::Sender<SubdomainResult>;
-
-// Parameters for the worker threads.
 #[derive(Clone)]
-struct WorkerParams {
-    connection_pool: AsyncResolver,
-    tx: SubdomainResultSender,
-    subdomains: Vec<String>,
-    query_types: Vec<QueryType>,
-    target: String,
+struct QueryPlan {
+    primary: QueryType,
+    follow_ups: Vec<QueryType>,
+    gate_followups_on_primary_hit: bool,
+}
+
+#[derive(Clone)]
+struct SharedLookupContext {
+    pool: AsyncResolver,
+    resolver_selector: Arc<Mutex<Box<dyn resolver_selector::ResolverSelector>>>,
     transport: TransportProtocol,
-    dns_resolvers: Vec<Ipv4Addr>,
-    use_random: bool,
     delay: Option<delay::Delay>,
+    query_plan: QueryPlan,
+    recursion: bool,
+    target: String,
+}
+
+struct QueryFailure {
+    resolver: Ipv4Addr,
+    error: DnsError,
+}
+
+impl QueryPlan {
+    fn new(query_types: &[QueryType]) -> Self {
+        if query_types.is_empty() {
+            return Self {
+                primary: QueryType::A,
+                follow_ups: Vec::new(),
+                gate_followups_on_primary_hit: false,
+            };
+        }
+
+        query_types
+            .iter()
+            .position(|t| *t == QueryType::A)
+            .map_or_else(
+                || {
+                    let mut iter = query_types.iter();
+                    let primary = iter.next().cloned().unwrap_or(QueryType::A);
+                    let follow_ups = iter.cloned().collect();
+                    Self {
+                        primary,
+                        follow_ups,
+                        gate_followups_on_primary_hit: false,
+                    }
+                },
+                |pos| {
+                    let mut follow_ups = Vec::new();
+                    for (idx, query_type) in query_types.iter().enumerate() {
+                        if idx != pos {
+                            follow_ups.push(query_type.clone());
+                        }
+                    }
+                    Self {
+                        primary: QueryType::A,
+                        follow_ups,
+                        gate_followups_on_primary_hit: true,
+                    }
+                },
+            )
+    }
+}
+
+impl SharedLookupContext {
+    async fn apply_delay(&self) {
+        if let Some(delay) = &self.delay {
+            let millis = delay.get_delay();
+            if millis > 0 {
+                time::sleep(Duration::from_millis(millis)).await;
+            }
+        }
+    }
+
+    async fn perform_query(
+        &self,
+        fqdn: &str,
+        query_type: QueryType,
+    ) -> Result<(Ipv4Addr, DnsPacket), QueryFailure> {
+        let resolver = {
+            let mut selector = self.resolver_selector.lock().await;
+            match selector.select() {
+                Ok(ip) => ip,
+                Err(err) => {
+                    return Err(QueryFailure {
+                        resolver: resolver_selector::DEFAULT_RESOLVER,
+                        error: DnsError::Internal(err.to_string()),
+                    });
+                }
+            }
+        };
+
+        let result = self
+            .pool
+            .resolve(
+                &resolver,
+                fqdn,
+                &query_type,
+                &self.transport,
+                self.recursion,
+            )
+            .await;
+
+        match &result {
+            Ok(packet) => {
+                if let Some(delay) = &self.delay {
+                    let has_answers = !packet.answers.is_empty();
+                    delay.report_query_result(has_answers);
+                }
+            }
+            Err(error) => {
+                if let Some(delay) = &self.delay {
+                    delay.report_query_result(!matches!(
+                        error,
+                        DnsError::Network(_)
+                            | DnsError::Timeout(_)
+                            | DnsError::Nameserver(_)
+                            | DnsError::InvalidData(_)
+                            | DnsError::ProtocolData(_)
+                            | DnsError::Internal(_)
+                    ));
+                }
+                if matches!(error, DnsError::Network(_) | DnsError::Timeout(_)) {
+                    let disable_for = Duration::from_secs(rand::rng().random_range(2..=30));
+                    let mut selector = self.resolver_selector.lock().await;
+                    selector.disable(resolver, disable_for);
+                }
+            }
+        }
+
+        result
+            .map(|packet| (resolver, packet))
+            .map_err(|error| QueryFailure { resolver, error })
+    }
+
+    async fn execute_query(
+        &self,
+        fqdn: &str,
+        query_type: QueryType,
+        first_query: &mut bool,
+    ) -> Result<(Ipv4Addr, DnsPacket), QueryFailure> {
+        let should_wait = !*first_query;
+        if *first_query {
+            *first_query = false;
+        }
+        if should_wait {
+            self.apply_delay().await;
+        }
+        self.perform_query(fqdn, query_type).await
+    }
 }
 
 // Default query types for subdomain enumeration if none provided.
@@ -92,34 +232,14 @@ pub async fn enumerate_subdomains(
 
     let subdomain_list = read_wordlist(cmd_args.wordlist.as_ref())?;
 
-    let num_threads = cmd_args.threads.map_or_else(
-        || {
-            let cpus = num_cpus::get();
-            if cpus > 6 { 6 } else { max(cpus - 1, 1) }
-        },
-        |threads| threads,
-    );
+    let num_threads = cmd_args
+        .threads
+        .unwrap_or_else(|| num_cpus::get().saturating_sub(1).clamp(1, 8));
 
     log_info!(format!(
         "Starting subdomain enumeration with {} threads",
         num_threads.to_string().bold()
     ));
-
-    // Split subdomain list into chunks for each thread.
-    let chunk_size = subdomain_list.len().div_ceil(num_threads);
-    let subdomain_chunks: Vec<Vec<String>> = if subdomain_list.len() > 10_000 {
-        // For large lists, use par_chunks for better cache locality and speed.
-        use rayon::prelude::*;
-        subdomain_list
-            .par_chunks(chunk_size)
-            .map(<[String]>::to_vec)
-            .collect()
-    } else {
-        subdomain_list
-            .chunks(chunk_size)
-            .map(<[String]>::to_vec)
-            .collect()
-    };
 
     // Setup progress bar.
     let total_subdomains = subdomain_list.len() as u64;
@@ -130,30 +250,56 @@ pub async fn enumerate_subdomains(
     let buffer_size = std::cmp::min(1000, subdomain_list.len().max(1));
     let (tx, mut rx) = mpsc::channel(buffer_size);
 
-    // Create connection pool
-    let pool = AsyncResolver::new(Some(10 * num_threads)).await?;
+    let query_plan = QueryPlan::new(query_types);
 
-    // Spawn worker threads.
-    for chunk in subdomain_chunks {
-        let worker_params = WorkerParams {
-            connection_pool: pool.clone(),
-            tx: tx.clone(),
-            subdomains: chunk,
-            query_types: query_types.to_vec(),
-            target: cmd_args.target.clone(),
-            transport: cmd_args.transport_protocol.clone(),
-            dns_resolvers: dns_resolver_list.to_vec(),
-            use_random: cmd_args.use_random,
-            delay: cmd_args.delay.clone(),
-        };
+    let max_slots = 4096.max(num_threads);
+    let slot_limit = num_threads.saturating_mul(32).clamp(num_threads, max_slots);
 
-        tokio::spawn(process_subdomain_chunk(worker_params));
+    log_info!(format!(
+        "Limiting in-flight lookups to {} concurrent requests",
+        slot_limit.to_string().bold()
+    ));
+
+    // Create connection pool sized to the concurrency cap.
+    let resolver_pool_target = slot_limit.max(num_threads.saturating_mul(2));
+    let pool = AsyncResolver::new(Some(resolver_pool_target)).await?;
+
+    let selector = Arc::new(Mutex::new(resolver_selector::get_selector(
+        cmd_args.use_random,
+        dns_resolver_list.to_vec(),
+    )));
+    let shared_context = Arc::new(SharedLookupContext {
+        pool: pool.clone(),
+        resolver_selector: selector,
+        transport: cmd_args.transport_protocol.clone(),
+        delay: cmd_args.delay.clone(),
+        query_plan: query_plan.clone(),
+        recursion: !cmd_args.no_recursion,
+        target: cmd_args.target.clone(),
+    });
+
+    let semaphore = Arc::new(Semaphore::new(slot_limit));
+
+    for subdomain in subdomain_list {
+        let ctx = shared_context.clone();
+        let permit_pool = semaphore.clone();
+        let tx_clone = tx.clone();
+        tokio::spawn(async move {
+            let Ok(permit) = permit_pool.acquire_owned().await else {
+                return;
+            };
+
+            let outcome = resolve_subdomain(ctx.as_ref(), &subdomain).await;
+            let _ = tx_clone.send(outcome).await;
+
+            drop(permit);
+        });
     }
     drop(tx); // Close original sender.
 
     // Process results from the receiver.
     let mut found_count = 0;
-    let mut failed_subdomains = Vec::new();
+    let mut failed_subdomains: Vec<String> = Vec::new();
     let mut i: u64 = 0;
     while let Some(received) = rx.recv().await {
         if interrupted.load(Ordering::SeqCst) {
@@ -208,6 +354,7 @@ pub async fn enumerate_subdomains(
             dns_resolver_list,
             failed_subdomains,
             &interrupted,
+            &query_plan,
         )
         .await;
         found_count += success_retrys;
@@ -231,78 +378,61 @@ pub async fn enumerate_subdomains(
     Ok(())
 }
 
-async fn process_subdomain_chunk(params: WorkerParams) {
-    let pool = params.connection_pool;
-    let mut resolver_selector =
-        resolver_selector::get_selector(params.use_random, params.dns_resolvers.clone());
+async fn resolve_subdomain(ctx: &SharedLookupContext, subdomain: &str) -> SubdomainResult {
+    let fqdn = format!("{}.{}", subdomain, ctx.target);
+    let mut aggregated = HashSet::new();
+    let mut first_failure: Option<QueryFailure> = None;
+    let mut success_resolver: Option<Ipv4Addr> = None;
+    let mut first_query = true;
 
-    for subdomain in params.subdomains {
-        let resolver = resolver_selector
-            .select()
-            .unwrap_or(resolver_selector::DEFAULT_RESOLVER);
-        let fqdn = format!("{}.{}", subdomain, params.target);
-        let mut all_results = HashSet::new();
-        let mut first_error: Option<DnsError> = None;
+    let primary_result = ctx
+        .execute_query(&fqdn, ctx.query_plan.primary.clone(), &mut first_query)
+        .await;
 
-        // Process all query types.
-        for query_type in &params.query_types {
-            match pool
-                .resolve(&resolver, &fqdn, query_type, &params.transport, true)
-                .await
-            {
-                Ok(packet) => {
-                    all_results.extend(packet.answers);
-                    // Report successful query
-                    if let Some(delay) = &params.delay {
-                        delay.report_query_result(true);
-                    }
+    match primary_result {
+        Ok((resolver, packet)) => {
+            aggregated.extend(packet.answers.into_iter());
+            success_resolver = Some(resolver);
+        }
+        Err(failure) => {
+            let terminal = matches!(failure.error, DnsError::NonExistentDomain);
+            if ctx.query_plan.gate_followups_on_primary_hit && terminal {
+                return Err((subdomain.to_string(), failure.resolver, failure.error));
+            }
+            first_failure = Some(failure);
+        }
+    }
+
+    for query_type in &ctx.query_plan.follow_ups {
+        match ctx
+            .execute_query(&fqdn, query_type.clone(), &mut first_query)
+            .await
+        {
+            Ok((resolver, packet)) => {
+                if success_resolver.is_none() {
+                    success_resolver = Some(resolver);
                 }
-                Err(error) => {
-                    if matches!(error, DnsError::Network(_)) {
-                        let duration = rand::rng().random_range(5..=30);
-                        resolver_selector.disable(resolver, Duration::from_secs(duration));
-                    }
-
-                    // Report failed query (unless it's just NXDOMAIN)
-                    if let Some(delay) = &params.delay {
-                        let is_expected_error = matches!(
-                            error,
-                            DnsError::NonExistentDomain | DnsError::NoRecordsFound
-                        );
-                        delay.report_query_result(is_expected_error);
-                    }
-
-                    if first_error.is_none() {
-                        first_error = Some(error);
-                    }
+                aggregated.extend(packet.answers.into_iter());
+            }
+            Err(failure) => {
+                if first_failure.is_none() {
+                    first_failure = Some(failure);
                 }
             }
-            if let Some(delay) = &params.delay {
-                time::sleep(Duration::from_millis(delay.get_delay())).await;
-            }
         }
+    }
 
-        // If any answers were found, send the success result.
-        if !all_results.is_empty() {
-            if params
-                .tx
-                .send(Ok((subdomain, resolver, all_results)))
-                .await
-                .is_err()
-            {
-                return;
-            }
-        } else if let Some(err) = first_error {
-            // Otherwise send the error (if any).
-            if params
-                .tx
-                .send(Err((subdomain, resolver, err)))
-                .await
-                .is_err()
-            {
-                return;
-            }
-        }
+    if !aggregated.is_empty() {
+        let resolver = success_resolver.unwrap_or(resolver_selector::DEFAULT_RESOLVER);
+        Ok((subdomain.to_string(), resolver, aggregated))
+    } else if let Some(failure) = first_failure {
+        Err((subdomain.to_string(), failure.resolver, failure.error))
+    } else {
+        Err((
+            subdomain.to_string(),
+            resolver_selector::DEFAULT_RESOLVER,
+            DnsError::NoRecordsFound,
+        ))
     }
 }
 
@@ -312,6 +442,7 @@ async fn process_failed_subdomains(
     dns_resolvers: &[Ipv4Addr],
     failed_subdomains: Vec<String>,
     interrupt: &AtomicBool,
+    query_plan: &QueryPlan,
 ) -> usize {
     log_info!(
         format!(
@@ -320,63 +451,44 @@ async fn process_failed_subdomains(
         ),
         true
     );
-    let mut resolver_selector =
-        resolver_selector::get_selector(cmd_args.use_random, dns_resolvers.to_vec());
-
-    // Always use a delay for retries, even if the user didn't specify one.
     let adaptive_delay = delay::Delay::adaptive(75, 750);
+    let retry_selector = Arc::new(Mutex::new(resolver_selector::get_selector(
+        cmd_args.use_random,
+        dns_resolvers.to_vec(),
+    )));
+
+    let retry_context = Arc::new(SharedLookupContext {
+        pool: pool.clone(),
+        resolver_selector: retry_selector,
+        transport: cmd_args.transport_protocol.clone(),
+        delay: Some(adaptive_delay),
+        query_plan: query_plan.clone(),
+        recursion: !cmd_args.no_recursion,
+        target: cmd_args.target.clone(),
+    });
 
     let mut found_count = 0;
     for subdomain in failed_subdomains {
         if interrupt.load(Ordering::SeqCst) {
             break;
         }
-        let fqdn = format!("{}.{}", subdomain, cmd_args.target);
-        let resolver = resolver_selector
-            .select()
-            .unwrap_or(resolver_selector::DEFAULT_RESOLVER);
-        let mut results = HashSet::new();
 
-        for query_type in &cmd_args.query_types {
-            time::sleep(Duration::from_millis(adaptive_delay.get_delay())).await;
-
-            match pool
-                .resolve(
-                    &resolver,
-                    &fqdn,
-                    query_type,
-                    &cmd_args.transport_protocol,
-                    true,
-                )
-                .await
-            {
-                Ok(packet) => {
-                    results.extend(packet.answers);
-                    adaptive_delay.report_query_result(true);
-                }
-                Err(error) => {
-                    print_query_error(cmd_args, &subdomain, resolver, &error, true);
-                    if !matches!(
-                        error,
-                        DnsError::NoRecordsFound | DnsError::NonExistentDomain
-                    ) {
-                        adaptive_delay.report_query_result(false);
-                    }
-                    break;
-                }
+        match resolve_subdomain(retry_context.as_ref(), &subdomain).await {
+            Ok((name, resolver, results)) => {
+                print_query_result(
+                    cmd_args,
+                    &name,
+                    resolver,
+                    &create_query_response_string(&results),
+                );
+                found_count += 1;
+            }
+            Err((name, resolver, error)) => {
+                print_query_error(cmd_args, &name, resolver, &error, true);
             }
         }
-
-        if !results.is_empty() {
-            print_query_result(
-                cmd_args,
-                &subdomain,
-                resolver,
-                &create_query_response_string(&results),
-            );
-            found_count += 1;
-        }
     }
+
     found_count
 }
 
