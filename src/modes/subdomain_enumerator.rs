@@ -157,9 +157,8 @@ pub async fn enumerate_subdomains(
         }
         match received {
             Ok((subdomain, resolver, results)) => {
-                let response_str = create_query_response_string(&results);
                 found_count += 1;
-                print_query_result(cmd_args, &subdomain, resolver, &response_str);
+                print_query_result(cmd_args, &subdomain, resolver, Some(&results));
 
                 if let Some(output) = &mut results_output {
                     for r in &results {
@@ -345,12 +344,7 @@ async fn process_failed_subdomains(
 
         match resolve_subdomain(retry_context.as_ref(), &subdomain).await {
             Ok((name, resolver, results)) => {
-                print_query_result(
-                    cmd_args,
-                    &name,
-                    resolver,
-                    &create_query_response_string(&results),
-                );
+                print_query_result(cmd_args, &name, resolver, Some(&results));
                 found_count += 1;
             }
             Err((name, resolver, error)) => {
@@ -443,7 +437,12 @@ async fn check_wildcard_domain(args: &CommandArgs, dns_resolvers: &[Ipv4Addr]) -
     Ok(successful_resolutions >= 2)
 }
 
-fn print_query_result(args: &CommandArgs, subdomain: &str, resolver: Ipv4Addr, response: &str) {
+fn print_query_result(
+    args: &CommandArgs,
+    subdomain: &str,
+    resolver: Ipv4Addr,
+    records: Option<&HashSet<ResourceRecord>>,
+) {
     if args.quiet {
         return;
     }
@@ -459,10 +458,13 @@ fn print_query_result(args: &CommandArgs, subdomain: &str, resolver: Ipv4Addr, r
     if args.verbose || args.show_resolver {
         write!(message, " [resolver: {}]", resolver.to_string().magenta()).unwrap();
     }
-    if !args.no_print_records {
+    if !args.no_print_records
+        && let Some(records) = records
+        && !records.is_empty()
+    {
+        let response = create_query_response_string(records);
         write!(message, " {response}").unwrap();
     }
-
     log_success!(message);
 }
 
