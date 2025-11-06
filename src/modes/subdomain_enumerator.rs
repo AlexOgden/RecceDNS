@@ -105,11 +105,6 @@ pub async fn enumerate_subdomains(
     let max_slots = 4096.max(num_threads);
     let slot_limit = num_threads.saturating_mul(32).clamp(num_threads, max_slots);
 
-    log_info!(format!(
-        "Limiting in-flight lookups to {} concurrent requests",
-        slot_limit.to_string().bold()
-    ));
-
     // Create connection pool sized to the concurrency cap.
     let resolver_pool_target = slot_limit.max(num_threads.saturating_mul(2));
     let pool = AsyncResolver::new(Some(resolver_pool_target)).await?;
