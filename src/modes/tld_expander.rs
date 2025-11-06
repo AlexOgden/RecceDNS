@@ -1,6 +1,5 @@
 use anyhow::Result;
 use colored::Colorize;
-use rand::Rng;
 use std::fmt::Write as _;
 use std::net::Ipv4Addr;
 use std::{
@@ -9,17 +8,14 @@ use std::{
     sync::{Arc, atomic::Ordering},
     time::{Duration, Instant},
 };
-use tokio::{
-    sync::{Mutex, Semaphore, mpsc},
-    time,
-};
+use tokio::sync::{Mutex, Semaphore, mpsc};
 
 use crate::dns::async_resolver::AsyncResolver;
 use crate::{
     dns::{
         error::DnsError,
         format::create_query_response_string,
-        protocol::{DnsPacket, QueryType, ResourceRecord},
+        protocol::{QueryType, ResourceRecord},
         resolver_selector::{self},
     },
     io::{
@@ -29,8 +25,7 @@ use crate::{
         logger, wordlist,
     },
     log_error, log_info, log_success, log_warn,
-    network::types::TransportProtocol,
-    timing::delay,
+    modes::shared_state::{LookupContext, QueryFailure, QueryPlan},
 };
 
 const IANA_TLD_URL: &str = "https://data.iana.org/TLD/tlds-alpha-by-domain.txt";
@@ -39,155 +34,9 @@ const DEFAULT_QUERY_TYPES: &[QueryType] = &[QueryType::A, QueryType::AAAA];
 type TldResult = Result<(String, Ipv4Addr, HashSet<ResourceRecord>), (String, Ipv4Addr, DnsError)>;
 
 #[derive(Clone)]
-struct QueryPlan {
-    primary: QueryType,
-    follow_ups: Vec<QueryType>,
-    gate_followups_on_primary_hit: bool,
-}
-
-#[derive(Clone)]
-struct SharedLookupContext {
-    pool: AsyncResolver,
-    resolver_selector: Arc<Mutex<Box<dyn resolver_selector::ResolverSelector>>>,
-    transport: TransportProtocol,
-    delay: Option<delay::Delay>,
-    query_plan: QueryPlan,
-    recursion: bool,
+struct TldContext {
+    lookup: LookupContext,
     base_domain: String,
-}
-
-struct QueryFailure {
-    resolver: Ipv4Addr,
-    error: DnsError,
-}
-
-impl QueryPlan {
-    fn new(query_types: &[QueryType]) -> Self {
-        if query_types.is_empty() {
-            return Self {
-                primary: QueryType::A,
-                follow_ups: Vec::new(),
-                gate_followups_on_primary_hit: false,
-            };
-        }
-
-        query_types
-            .iter()
-            .position(|t| *t == QueryType::A)
-            .map_or_else(
-                || {
-                    let mut iter = query_types.iter();
-                    let primary = iter.next().cloned().unwrap_or(QueryType::A);
-                    let follow_ups = iter.cloned().collect();
-                    Self {
-                        primary,
-                        follow_ups,
-                        gate_followups_on_primary_hit: false,
-                    }
-                },
-                |pos| {
-                    let mut follow_ups = Vec::new();
-                    for (idx, query_type) in query_types.iter().enumerate() {
-                        if idx != pos {
-                            follow_ups.push(query_type.clone());
-                        }
-                    }
-                    Self {
-                        primary: QueryType::A,
-                        follow_ups,
-                        gate_followups_on_primary_hit: true,
-                    }
-                },
-            )
-    }
-}
-
-impl SharedLookupContext {
-    async fn apply_delay(&self) {
-        if let Some(delay) = &self.delay {
-            let millis = delay.get_delay();
-            if millis > 0 {
-                time::sleep(Duration::from_millis(millis)).await;
-            }
-        }
-    }
-
-    async fn perform_query(
-        &self,
-        fqdn: &str,
-        query_type: QueryType,
-    ) -> Result<(Ipv4Addr, DnsPacket), QueryFailure> {
-        let resolver = {
-            let mut selector = self.resolver_selector.lock().await;
-            match selector.select() {
-                Ok(ip) => ip,
-                Err(err) => {
-                    return Err(QueryFailure {
-                        resolver: resolver_selector::DEFAULT_RESOLVER,
-                        error: DnsError::Internal(err.to_string()),
-                    });
-                }
-            }
-        };
-
-        let result = self
-            .pool
-            .resolve(
-                &resolver,
-                fqdn,
-                &query_type,
-                &self.transport,
-                self.recursion,
-            )
-            .await;
-
-        match &result {
-            Ok(packet) => {
-                if let Some(delay) = &self.delay {
-                    let has_answers = !packet.answers.is_empty();
-                    delay.report_query_result(has_answers);
-                }
-            }
-            Err(error) => {
-                if let Some(delay) = &self.delay {
-                    delay.report_query_result(!matches!(
-                        error,
-                        DnsError::Network(_)
-                            | DnsError::Timeout(_)
-                            | DnsError::Nameserver(_)
-                            | DnsError::InvalidData(_)
-                            | DnsError::ProtocolData(_)
-                            | DnsError::Internal(_)
-                    ));
-                }
-                if matches!(error, DnsError::Network(_) | DnsError::Timeout(_)) {
-                    let disable_for = Duration::from_secs(rand::rng().random_range(2..=30));
-                    let mut selector = self.resolver_selector.lock().await;
-                    selector.disable(resolver, disable_for);
-                }
-            }
-        }
-
-        result
-            .map(|packet| (resolver, packet))
-            .map_err(|error| QueryFailure { resolver, error })
-    }
-
-    async fn execute_query(
-        &self,
-        fqdn: &str,
-        query_type: QueryType,
-        first_query: &mut bool,
-    ) -> Result<(Ipv4Addr, DnsPacket), QueryFailure> {
-        let should_wait = !*first_query;
-        if *first_query {
-            *first_query = false;
-        }
-        if should_wait {
-            self.apply_delay().await;
-        }
-        self.perform_query(fqdn, query_type).await
-    }
 }
 
 #[allow(clippy::too_many_lines)]
@@ -244,13 +93,16 @@ pub async fn expand_tlds(cmd_args: &CommandArgs, dns_resolver_list: &[Ipv4Addr])
         dns_resolver_list.to_vec(),
     )));
 
-    let shared_context = Arc::new(SharedLookupContext {
-        pool: pool.clone(),
-        resolver_selector: selector,
-        transport: cmd_args.transport_protocol.clone(),
-        delay: cmd_args.delay.clone(),
-        query_plan: query_plan.clone(),
-        recursion: !cmd_args.no_recursion,
+    let lookup_context = LookupContext::new(
+        pool.clone(),
+        selector,
+        cmd_args.transport_protocol.clone(),
+        cmd_args.delay.clone(),
+        query_plan.clone(),
+        !cmd_args.no_recursion,
+    );
+    let shared_context = Arc::new(TldContext {
+        lookup: lookup_context,
         base_domain: target_base_domain.clone(),
     });
 
@@ -340,7 +192,7 @@ pub async fn expand_tlds(cmd_args: &CommandArgs, dns_resolver_list: &[Ipv4Addr])
     Ok(())
 }
 
-async fn resolve_tld(ctx: &SharedLookupContext, tld: &str) -> TldResult {
+async fn resolve_tld(ctx: &TldContext, tld: &str) -> TldResult {
     let fqdn = if ctx.base_domain.is_empty() {
         tld.to_string()
     } else {
@@ -353,7 +205,12 @@ async fn resolve_tld(ctx: &SharedLookupContext, tld: &str) -> TldResult {
     let mut first_query = true;
 
     let primary_result = ctx
-        .execute_query(&fqdn, ctx.query_plan.primary.clone(), &mut first_query)
+        .lookup
+        .execute_query(
+            &fqdn,
+            ctx.lookup.query_plan.primary.clone(),
+            &mut first_query,
+        )
         .await;
 
     match primary_result {
@@ -363,15 +220,16 @@ async fn resolve_tld(ctx: &SharedLookupContext, tld: &str) -> TldResult {
         }
         Err(failure) => {
             let terminal = matches!(failure.error, DnsError::NonExistentDomain);
-            if ctx.query_plan.gate_followups_on_primary_hit && terminal {
+            if ctx.lookup.query_plan.gate_followups_on_primary_hit && terminal {
                 return Err((fqdn, failure.resolver, failure.error));
             }
             first_failure = Some(failure);
         }
     }
 
-    for query_type in &ctx.query_plan.follow_ups {
+    for query_type in &ctx.lookup.query_plan.follow_ups {
         match ctx
+            .lookup
             .execute_query(&fqdn, query_type.clone(), &mut first_query)
             .await
         {
