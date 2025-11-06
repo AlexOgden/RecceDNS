@@ -59,7 +59,7 @@ fn parse_resolvers(input: &str) -> Vec<String> {
 
 fn load_resolvers_from_file(path: &str) -> Result<Vec<String>> {
     let content = std::fs::read_to_string(path)
-        .map_err(|e| anyhow!("Failed to read DNS resolvers file '{}': {}", path, e))?;
+        .map_err(|e| anyhow!("Failed to read DNS resolvers file '{path}': {e}"))?;
     Ok(content.lines().flat_map(parse_resolvers).collect())
 }
 
@@ -83,7 +83,7 @@ async fn initialize_dns_resolvers(cmd_args: &cli::CommandArgs) -> Result<Vec<Ipv
         .iter()
         .map(|s| {
             s.parse::<Ipv4Addr>()
-                .map_err(|_| anyhow!("Invalid IPv4 address: '{}'", s))
+                .map_err(|_| anyhow!("Invalid IPv4 address: '{s}'"))
         })
         .collect::<Result<_, _>>()?;
 

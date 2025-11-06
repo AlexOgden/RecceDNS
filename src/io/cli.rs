@@ -42,7 +42,7 @@ pub struct CommandArgs {
     #[arg(short, long, required = true, value_parser = validation::validate_target, env = "RECCEDNS_TARGET")]
     pub target: String,
 
-    /// IPv4 Address of the DNS resolver(s) to use (comma-separated). Multiple resolvers will be selected either randomly or sequentially
+    /// IPv4 Address of the DNS resolver(s) to use (comma-separated), or path to a file containing a list of resolvers
     #[arg(short, long, value_parser = validate_dns_resolvers, required = false, env = "RECCEDNS_DNS_RESOLVERS")]
     pub dns_resolvers: String,
 
@@ -70,7 +70,7 @@ pub struct CommandArgs {
     )]
     pub query_types: Vec<QueryType>,
 
-    /// Delay in milliseconds between DNS requests for subdomain enumeration. Fixed value, range, or adaptive delay.
+    /// Delay in milliseconds between non-primary DNS requests for subdomain enumeration. Fixed value, range, or adaptive delay.
     /// Fixed: '1000', Range: '500-1000', Adaptive: 'A:500-1000', or default adaptive delay: 'A'
     #[arg(short = 'D', long, required = false, value_parser = parse_delay, env = "RECCEDNS_DELAY")]
     pub delay: Option<Delay>,
