@@ -59,6 +59,7 @@ impl AsyncResolver {
             let pq_clone = pending_queries.clone();
             let mut shutdown_rx = shutdown_tx_arc.subscribe();
             let local_addr = udp_socket_arc.local_addr().ok();
+            let addr_str = local_addr.map_or_else(|| "unknown".to_string(), |a| a.to_string());
 
             tokio::spawn(async move {
                 let mut recv_buffer = [0u8; UDP_BUFFER_SIZE];
@@ -77,12 +78,12 @@ impl AsyncResolver {
                                                 match DnsPacket::from_buffer(&mut packet_buffer) {
                                                     Ok(dns_packet) => { let _ = sender.send(Ok(dns_packet)); }
                                                     Err(e) => {
-                                                        log_error!(format!("Failed UDP parse (ID: {}) on {:?}: {}", query_id, local_addr, e));
+                                                        log_error!(format!("Failed UDP parse (ID: {}) on {}: {}", query_id, addr_str, e));
                                                         let _ = sender.send(Err(DnsError::ProtocolData(e.to_string())));
                                                     }
                                                 }
                                             } else {
-                                                 log_error!(format!("Failed UDP set_data (ID: {}) on {:?}", query_id, local_addr));
+                                                 log_error!(format!("Failed UDP set_data (ID: {}) on {}", query_id, addr_str));
                                                  let _ = sender.send(Err(DnsError::Internal("UDP Buffer handling error".to_string())));
                                             }
                                         }
