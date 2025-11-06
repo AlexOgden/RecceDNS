@@ -1,5 +1,12 @@
 use rand::Rng;
-use std::{net::Ipv4Addr, sync::Arc, time::Duration};
+use std::{
+    net::Ipv4Addr,
+    sync::{
+        Arc,
+        atomic::{AtomicU64, Ordering},
+    },
+    time::Duration,
+};
 use tokio::{sync::Mutex, time};
 
 use crate::{
@@ -28,6 +35,7 @@ pub struct LookupContext {
     delay: Option<delay::Delay>,
     pub query_plan: QueryPlan,
     recursion: bool,
+    query_counter: Arc<AtomicU64>,
 }
 
 pub struct QueryFailure {
@@ -95,7 +103,13 @@ impl LookupContext {
             delay,
             query_plan,
             recursion,
+            query_counter: Arc::new(AtomicU64::new(0)),
         }
+    }
+
+    #[must_use]
+    pub fn total_queries(&self) -> u64 {
+        self.query_counter.load(Ordering::Relaxed)
     }
 
     async fn apply_delay(&self) {
@@ -151,6 +165,8 @@ impl LookupContext {
                 self.recursion,
             )
             .await;
+
+        self.query_counter.fetch_add(1, Ordering::Relaxed);
 
         match &result {
             Ok(packet) => {

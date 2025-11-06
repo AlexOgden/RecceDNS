@@ -148,7 +148,7 @@ pub async fn enumerate_subdomains(
     // Process results from the receiver.
     let mut found_count = 0;
     let mut failed_subdomains: Vec<String> = Vec::new();
-    let mut i: u64 = 0;
+    let mut processed_count: u64 = 0;
     while let Some(received) = rx.recv().await {
         if interrupted.load(Ordering::SeqCst) {
             logger::clear_line();
@@ -179,24 +179,24 @@ pub async fn enumerate_subdomains(
 
         cli::update_progress_bar(
             &progress_bar,
-            (i + 1).try_into().unwrap(),
+            (processed_count + 1).try_into().unwrap(),
             total_subdomains,
             Some(failed_subdomains.len()),
             cmd_args.delay.as_ref(),
         );
 
-        i += 1;
+        processed_count += 1;
     }
 
     progress_bar.finish_and_clear();
 
     pool.shutdown();
 
-    if !failed_subdomains.is_empty() && !cmd_args.no_retry {
+    let retry_queries = if !failed_subdomains.is_empty() && !cmd_args.no_retry {
         interrupted.store(false, Ordering::SeqCst);
         // Use a new resolver pool for retries
         let retry_pool = AsyncResolver::new(Some(2 * num_threads)).await?;
-        let success_retrys = process_failed_subdomains(
+        let (success_retries, retry_query_count) = process_failed_subdomains(
             cmd_args,
             &retry_pool,
             dns_resolver_list,
@@ -205,19 +205,33 @@ pub async fn enumerate_subdomains(
             &query_plan,
         )
         .await;
-        found_count += success_retrys;
+        found_count += success_retries;
         retry_pool.shutdown();
-    }
+        retry_query_count
+    } else {
+        0
+    };
 
     let elapsed_time = start_time.elapsed();
-    log_info!(
+    let total_queries = shared_context.lookup.total_queries() + retry_queries;
+
+    let message = if cmd_args.no_query_stats {
         format!(
             "Done! Found {} subdomains in {:.2?}",
             found_count.to_string().bold(),
-            elapsed_time
-        ),
-        true
-    );
+            elapsed_time,
+        )
+    } else {
+        format!(
+            "Done! Found {} subdomains in {:.2?} | Tested {} subdomains | Executed {} queries",
+            found_count.to_string().bold(),
+            elapsed_time,
+            processed_count.to_string().bold(),
+            total_queries.to_string().bold()
+        )
+    };
+
+    log_info!(message, true);
 
     if let (Some(output), Some(file)) = (&results_output, &cmd_args.json) {
         output.write_to_file(file)?;
@@ -297,7 +311,7 @@ async fn process_failed_subdomains(
     failed_subdomains: Vec<String>,
     interrupt: &AtomicBool,
     query_plan: &QueryPlan,
-) -> usize {
+) -> (usize, u64) {
     log_info!(
         format!(
             "Retrying {} failed subdomains",
@@ -346,7 +360,9 @@ async fn process_failed_subdomains(
         }
     }
 
-    found_count
+    let total_queries = retry_context.lookup.total_queries();
+
+    (found_count, total_queries)
 }
 
 fn read_wordlist(wordlist_path: Option<&String>) -> Result<Vec<String>> {
