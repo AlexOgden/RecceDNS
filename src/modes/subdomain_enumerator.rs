@@ -16,6 +16,7 @@ use std::{
 };
 use tokio::sync::{Mutex, Semaphore, mpsc};
 
+use crate::timing::delay::Delay;
 use crate::{
     dns::{
         async_resolver::AsyncResolver,
@@ -32,7 +33,6 @@ use crate::{
     },
     log_error, log_info, log_question, log_success, log_warn,
     modes::shared_state::{LookupContext, QueryFailure, QueryPlan},
-    timing::delay,
 };
 
 // A type alias for the result sent between threads.
@@ -317,7 +317,8 @@ async fn process_failed_subdomains(
         ),
         true
     );
-    let adaptive_delay = delay::Delay::adaptive(75, 750);
+    let adaptive_delay = Delay::adaptive(75, 750);
+    let retry_delay = adaptive_delay.clone();
     let retry_selector = Arc::new(Mutex::new(resolver_selector::get_selector(
         cmd_args.use_random,
         dns_resolvers.to_vec(),
@@ -327,7 +328,7 @@ async fn process_failed_subdomains(
         pool.clone(),
         retry_selector,
         cmd_args.transport_protocol.clone(),
-        Some(adaptive_delay),
+        Some(retry_delay),
         query_plan.clone(),
         !cmd_args.no_recursion,
     );
@@ -344,10 +345,21 @@ async fn process_failed_subdomains(
 
         match resolve_subdomain(retry_context.as_ref(), &subdomain).await {
             Ok((name, resolver, results)) => {
+                adaptive_delay.report_query_result(true);
                 print_query_result(cmd_args, &name, resolver, Some(&results));
                 found_count += 1;
             }
             Err((name, resolver, error)) => {
+                let treat_as_failure = matches!(
+                    error,
+                    DnsError::Network(_)
+                        | DnsError::Timeout(_)
+                        | DnsError::Nameserver(_)
+                        | DnsError::InvalidData(_)
+                        | DnsError::ProtocolData(_)
+                        | DnsError::Internal(_)
+                );
+                adaptive_delay.report_query_result(!treat_as_failure);
                 print_query_error(cmd_args, &name, resolver, &error, true);
             }
         }
