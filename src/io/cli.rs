@@ -196,7 +196,7 @@ pub fn setup_basic_spinner() -> ProgressBar {
     let spinner = ProgressBar::new_spinner();
     spinner.set_style(
         ProgressStyle::default_spinner()
-            .template("[{spinner:.cyan}] Fetching...")
+            .template("[{spinner:.cyan}] {msg}")
             .expect("Invalid template")
             .tick_chars("/|\\- "),
     );
