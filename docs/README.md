@@ -100,6 +100,16 @@ Official Docker images are available:
 ```sh
 docker pull ghcr.io/alexogden/reccedns:latest
 docker run --rm -it ghcr.io/alexogden/reccedns:latest -m c -d 1.1.1.1 -t github.com
+
+```
+
+Bind-mount a local wordlist and run subdomain enumeration:
+
+```sh
+docker run --rm -it \
+	-v "$(pwd)/lists:/wordlists:ro" \
+	ghcr.io/alexogden/reccedns:latest \
+	-m s -d 1.1.1.1,1.0.0.1 -w /wordlists/subdomains-top1million-5000.txt -t github.com -T 20
 ```
 
 See the [releases](https://github.com/AlexOgden/RecceDNS/releases) page for the latest versions.
