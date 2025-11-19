@@ -15,6 +15,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v3
         with:
+          ref: ${{ github.ref }}
           fetch-depth: 0  # Fetch all history for proper release notes generation
           
       - name: Get Version
@@ -83,6 +84,8 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v3
+        with:
+          ref: ${{ github.ref }}
 
       - name: Install Rust
         uses: actions-rs/toolchain@v1
@@ -153,6 +156,8 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v3
+        with:
+          ref: ${{ github.ref }}
 
       - name: Create Docker build script
         run: |
@@ -230,6 +235,8 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v3
+        with:
+          ref: ${{ github.ref }}
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v2
