@@ -55,14 +55,21 @@ To clone the repository and build the software, follow these steps:
 	cd reccedns
 	```
 
-2. **Build the project**:
+2. **Install prerequisites**:
+	
 	Ensure you have Rust installed. If not, you can install it from [rust-lang.org](https://www.rust-lang.org/).
 
+	**Windows users also need:**
+	- **CMake** (required for building cryptographic dependencies)
+	- **NASM** (optional, for optimized assembly routines)
+	- **Visual Studio Build Tools** with "Desktop development with C++" workload
+
+3. **Build the project**:
 	```sh
 	cargo build --release
 	```
 
-3. **Run the tests** (optional):
+4. **Run the tests** (optional):
 	```sh
 	cargo test
 	```

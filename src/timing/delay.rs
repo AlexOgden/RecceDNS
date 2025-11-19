@@ -166,10 +166,10 @@ impl FromStr for Delay {
 impl fmt::Display for Delay {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Fixed(value) => write!(f, "Fixed: {value}ms"),
-            Self::Range(min, max) => write!(f, "Range: {min}-{max}ms"),
+            Self::Fixed(value) => write!(f, "Fixed [{value}ms]"),
+            Self::Range(min, max) => write!(f, "Range [{min}-{max}ms]"),
             Self::Adaptive(state) => {
-                write!(f, "Adaptive: {}-{}ms", state.min_delay, state.max_delay)
+                write!(f, "Adaptive [{}-{}ms]", state.min_delay, state.max_delay)
             }
         }
     }

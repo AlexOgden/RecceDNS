@@ -1,11 +1,16 @@
 use anyhow::Result;
+use bytes::Bytes;
 use colored::Colorize;
+use http_body_util::{BodyExt, Empty};
+use hyper::{Method, Request};
+use hyper_rustls::HttpsConnectorBuilder;
+use hyper_util::{client::legacy::Client, rt::TokioExecutor};
 use std::fmt::Write as _;
 use std::net::Ipv4Addr;
 use std::{
     cmp::max,
     collections::HashSet,
-    sync::{Arc, atomic::Ordering},
+    sync::{Arc, LazyLock, atomic::Ordering},
     time::{Duration, Instant},
 };
 use tokio::sync::{Mutex, Semaphore, mpsc};
@@ -30,6 +35,21 @@ use crate::{
 
 const IANA_TLD_URL: &str = "https://data.iana.org/TLD/tlds-alpha-by-domain.txt";
 const DEFAULT_QUERY_TYPES: &[QueryType] = &[QueryType::A, QueryType::AAAA];
+
+static TLD_HTTP_CLIENT: LazyLock<
+    Client<
+        hyper_rustls::HttpsConnector<hyper_util::client::legacy::connect::HttpConnector>,
+        Empty<Bytes>,
+    >,
+> = LazyLock::new(|| {
+    let https = HttpsConnectorBuilder::new()
+        .with_webpki_roots()
+        .https_or_http()
+        .enable_http1()
+        .build();
+
+    Client::builder(TokioExecutor::new()).build(https)
+});
 
 type TldResult = Result<(String, Ipv4Addr, HashSet<ResourceRecord>), (String, Ipv4Addr, DnsError)>;
 
@@ -329,12 +349,40 @@ async fn retrieve_iana_tld_list(cmd_args: &CommandArgs) -> Result<Vec<String>> {
 }
 
 async fn fetch_and_filter_tld_list() -> Result<Vec<String>> {
-    let response = reqwest::get(IANA_TLD_URL).await?.text().await?;
-    let tld_list = response
+    let request = Request::builder()
+        .method(Method::GET)
+        .uri(IANA_TLD_URL)
+        .body(Empty::<Bytes>::new())
+        .map_err(|e| anyhow::anyhow!("Failed to build TLD request: {e}"))?;
+
+    let response = TLD_HTTP_CLIENT
+        .request(request)
+        .await
+        .map_err(|e| anyhow::anyhow!("Failed to fetch TLD list: {e}"))?;
+
+    if !response.status().is_success() {
+        return Err(anyhow::anyhow!(
+            "HTTP error while fetching TLD list: {}",
+            response.status()
+        ));
+    }
+
+    let body_bytes = response
+        .into_body()
+        .collect()
+        .await
+        .map_err(|e| anyhow::anyhow!("Failed to read TLD response body: {e}"))?
+        .to_bytes();
+
+    let body = String::from_utf8(body_bytes.to_vec())
+        .map_err(|e| anyhow::anyhow!("TLD response was not valid UTF-8: {e}"))?;
+
+    let tld_list = body
         .lines()
         .filter(|line| !line.starts_with('#') && !line.trim().is_empty())
         .map(|s| s.trim().to_lowercase())
         .collect();
+
     Ok(tld_list)
 }
 

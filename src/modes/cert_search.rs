@@ -8,19 +8,36 @@ use crate::{
     log_error, log_success,
 };
 use anyhow::Result;
+use bytes::Bytes;
 use colored::Colorize;
-use reqwest::{Client, StatusCode};
+use http_body_util::{BodyExt, Empty};
+use hyper::{Method, Request, StatusCode};
+use hyper_rustls::HttpsConnectorBuilder;
+use hyper_util::{client::legacy::Client, rt::TokioExecutor};
 use serde_json::Value;
 use thiserror::Error;
 
 const CRTSH_URL: &str = "https://crt.sh/json?q=";
 
-static HTTP_CLIENT: LazyLock<Client> = LazyLock::new(Client::new);
+static HTTP_CLIENT: LazyLock<
+    Client<
+        hyper_rustls::HttpsConnector<hyper_util::client::legacy::connect::HttpConnector>,
+        Empty<Bytes>,
+    >,
+> = LazyLock::new(|| {
+    let https = HttpsConnectorBuilder::new()
+        .with_webpki_roots()
+        .https_or_http()
+        .enable_http1()
+        .build();
+
+    Client::builder(TokioExecutor::new()).build(https)
+});
 
 #[derive(Error, Debug)]
 pub enum SearchError {
     #[error("HTTP request failed: {0}")]
-    HttpRequestError(#[from] reqwest::Error),
+    HttpRequestError(String),
 
     #[error("Received non-success status code: {0}")]
     NonSuccessStatus(StatusCode),
@@ -48,10 +65,10 @@ pub async fn search_certificates(cmd_args: &CommandArgs) -> Result<()> {
 
     for attempt in 1..=max_retries {
         let spinner = cli::setup_basic_spinner();
-
-        match get_results_json(&HTTP_CLIENT, target_domain).await {
+        spinner.set_message("Searching...");
+        match get_results_json(target_domain).await {
             Ok(data) => {
-                spinner.set_message("Searching...");
+                spinner.set_message("Processing...");
                 let subdomains = get_subdomains(&data, target_domain)?;
                 spinner.finish_and_clear();
 
@@ -107,22 +124,32 @@ pub async fn search_certificates(cmd_args: &CommandArgs) -> Result<()> {
     Ok(())
 }
 
-async fn get_results_json(http_client: &Client, target_domain: &str) -> Result<Value, SearchError> {
+async fn get_results_json(target_domain: &str) -> Result<Value, SearchError> {
     let url = format!("{CRTSH_URL}{target_domain}");
-    let response = http_client
-        .get(&url)
-        .send()
-        .await
-        .map_err(SearchError::HttpRequestError)?
-        .error_for_status() // returns error if status is not 2xx
-        .map_err(|err| {
-            SearchError::NonSuccessStatus(err.status().unwrap_or(StatusCode::INTERNAL_SERVER_ERROR))
-        })?;
+    let request = Request::builder()
+        .method(Method::GET)
+        .uri(&url)
+        .body(Empty::<Bytes>::new())
+        .map_err(|e| SearchError::HttpRequestError(e.to_string()))?;
 
-    let json = response
-        .json::<Value>()
+    let response = HTTP_CLIENT
+        .request(request)
         .await
-        .map_err(SearchError::HttpRequestError)?;
+        .map_err(|e| SearchError::HttpRequestError(e.to_string()))?;
+
+    let status = response.status();
+    if !status.is_success() {
+        return Err(SearchError::NonSuccessStatus(status));
+    }
+
+    let body_bytes = response
+        .into_body()
+        .collect()
+        .await
+        .map_err(|e| SearchError::HttpRequestError(e.to_string()))?
+        .to_bytes();
+
+    let json: Value = serde_json::from_slice(&body_bytes).map_err(SearchError::JsonParseError)?;
 
     if json.as_array().is_none_or(std::vec::Vec::is_empty) {
         return Err(SearchError::EmptyJsonData);
