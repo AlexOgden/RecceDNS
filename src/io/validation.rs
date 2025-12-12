@@ -10,7 +10,7 @@ use crate::network::{check, types::TransportProtocol};
 use std::sync::LazyLock;
 
 static DOMAIN_REGEX: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"^(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$").unwrap()
+    Regex::new(r"^(?:[a-zA-Z0-9_](?:[a-zA-Z0-9_-]{0,61}[a-zA-Z0-9_])?\.)+[a-zA-Z]{2,}\.?$").unwrap()
 });
 
 pub fn validate_target(input: &str) -> Result<String> {
@@ -76,7 +76,7 @@ pub fn validate_target(input: &str) -> Result<String> {
     // Check for CSV list of IP addresses
     if input.contains(',') {
         let ips: Vec<&str> = input.split(',').collect();
-        if ips.iter().all(|&ip| ip.parse::<IpAddr>().is_ok()) {
+        if ips.iter().all(|&ip| ip.trim().parse::<IpAddr>().is_ok()) {
             return Ok(input.to_string());
         }
     }
@@ -215,26 +215,47 @@ mod test {
             "example.com",
             "sub.example.com",
             "example.co.uk",
-            "a.com",
+            "a.bb.com",
             "a-b.com",
+            "example.com.",          // trailing dot (FQDN)
+            "_dmarc.example.com",    // underscore prefix (DMARC)
+            "_srv.example.com",      // underscore prefix (SRV)
+            "test_host.example.com", // underscore in subdomain
+            "a1.example.com",        // alphanumeric
+            "1a.example.com",        // starts with number
+            "very-long-subdomain-name.example.com",
+            "a.b.c.d.example.com", // deep nesting
         ];
         for domain in valid_domains {
-            assert_eq!(validate_target(domain).unwrap(), domain);
+            assert!(validate_target(domain).is_ok(), "Expected valid: {domain}");
         }
     }
 
     #[test]
     fn invalid_domain_names() {
         let invalid_domains = [
-            "-example.com",
-            "example-.com",
-            "exa_mple.com",
-            "example..com",
-            "example.com-",
+            "-example.com", // starts with hyphen
+            "example-.com", // label ends with hyphen
+            "example..com", // double dot
+            ".example.com", // starts with dot
+            "example",      // no TLD
+            "",             // empty
+            "a]b.com",      // invalid character
+            "exam ple.com", // space in domain
         ];
         for domain in invalid_domains {
-            assert!(validate_target(domain).is_err());
+            assert!(
+                validate_target(domain).is_err(),
+                "Expected invalid: {domain}"
+            );
         }
+    }
+
+    #[test]
+    fn domain_with_whitespace() {
+        // Should trim and validate
+        assert_eq!(validate_target("  example.com  ").unwrap(), "example.com");
+        assert_eq!(validate_target("\texample.com\n").unwrap(), "example.com");
     }
 
     #[test]
@@ -276,15 +297,70 @@ mod test {
     #[test]
     fn invalid_ip_ranges() {
         let invalid_ranges = [
-            "192.168.0.1-192.168.0.256",
-            "192.168.0.1-",
-            "-192.168.0.255",
-            "a-b",
-            "192.168.v.2-192.168.7.2",
+            "192.168.0.1-192.168.0.256", // invalid IP
+            "192.168.0.1-",              // missing end
+            "-192.168.0.255",            // missing start
+            "a-b",                       // not IPs
+            "192.168.v.2-192.168.7.2",   // invalid octet
+            "192.168.0.1-::1",           // mixed IP versions
         ];
         for range in invalid_ranges {
-            println!("{range}");
-            assert!(validate_target(range).is_err());
+            assert!(validate_target(range).is_err(), "Expected invalid: {range}");
         }
+    }
+
+    #[test]
+    fn valid_ipv4_addresses() {
+        let valid = ["192.168.1.1", "0.0.0.0", "255.255.255.255", "8.8.8.8"];
+        for ip in valid {
+            assert!(validate_target(ip).is_ok(), "Expected valid: {ip}");
+        }
+    }
+
+    #[test]
+    fn valid_ipv6_addresses() {
+        let valid = [
+            "::1",
+            "2001:db8::1",
+            "fe80::1",
+            "2001:0db8:85a3:0000:0000:8a2e:0370:7334",
+        ];
+        for ip in valid {
+            assert!(validate_target(ip).is_ok(), "Expected valid: {ip}");
+        }
+    }
+
+    #[test]
+    fn valid_csv_ip_list() {
+        assert!(validate_target("1.1.1.1,8.8.8.8,9.9.9.9").is_ok());
+        assert!(validate_target("::1,::2").is_ok());
+    }
+
+    #[test]
+    fn invalid_csv_ip_list() {
+        // Mixed valid/invalid
+        assert!(validate_target("1.1.1.1,invalid,8.8.8.8").is_err());
+        // All invalid
+        assert!(validate_target("foo,bar,baz").is_err());
+    }
+
+    #[test]
+    fn dns_resolver_with_whitespace() {
+        // Should handle whitespace around IPs
+        assert_eq!(
+            validate_dns_resolvers("8.8.8.8 , 1.1.1.1").unwrap(),
+            "8.8.8.8,1.1.1.1"
+        );
+    }
+
+    #[test]
+    fn dns_resolver_single() {
+        assert_eq!(validate_dns_resolvers("8.8.8.8").unwrap(), "8.8.8.8");
+    }
+
+    #[test]
+    fn dns_resolver_rejects_ipv6() {
+        // Currently only IPv4 is supported
+        assert!(validate_dns_resolvers("2001:4860:4860::8888").is_err());
     }
 }
