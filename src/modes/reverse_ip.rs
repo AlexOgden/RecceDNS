@@ -13,7 +13,7 @@ use crate::{
         async_resolver::AsyncResolver,
         error::DnsError,
         protocol::{QueryType, RData},
-        resolver_selector,
+        resolver_selector::{self, ResolverPool},
     },
     io::{
         cli::{self, CommandArgs},
@@ -29,8 +29,7 @@ pub async fn reverse_ip(cmd_args: &CommandArgs, dns_resolver_list: &[Ipv4Addr]) 
     let target_ips = parse_ip(&cmd_args.target)?;
     let total_ips = target_ips.len() as u64;
 
-    let mut resolver_selector =
-        resolver_selector::get_selector(cmd_args.use_random, dns_resolver_list.to_vec());
+    let resolver_pool = ResolverPool::new(dns_resolver_list.to_vec(), cmd_args.use_random);
     let mut query_timer = QueryTimer::new(!cmd_args.no_query_stats);
     let mut found_count = 0;
 
@@ -41,7 +40,7 @@ pub async fn reverse_ip(cmd_args: &CommandArgs, dns_resolver_list: &[Ipv4Addr]) 
         target_ips.len()
     ));
 
-    let resolver_pool = AsyncResolver::new(Some(2)).await?;
+    let async_resolver = AsyncResolver::new(Some(2)).await?;
 
     for (index, ip) in target_ips.iter().enumerate() {
         if interrupted.load(Ordering::SeqCst) {
@@ -50,10 +49,12 @@ pub async fn reverse_ip(cmd_args: &CommandArgs, dns_resolver_list: &[Ipv4Addr]) 
             break;
         }
 
-        let resolver = resolver_selector.select()?;
+        let resolver = resolver_pool
+            .select()
+            .unwrap_or(resolver_selector::DEFAULT_RESOLVER);
 
         query_timer.start();
-        let query_result = resolver_pool
+        let query_result = async_resolver
             .resolve(
                 &resolver,
                 &ip.to_string(),

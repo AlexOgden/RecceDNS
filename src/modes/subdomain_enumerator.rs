@@ -14,7 +14,7 @@ use std::{
     },
     time::Instant,
 };
-use tokio::sync::{Mutex, Semaphore, mpsc};
+use tokio::sync::{Semaphore, mpsc};
 
 use crate::timing::delay::Delay;
 use crate::{
@@ -23,7 +23,7 @@ use crate::{
         error::DnsError,
         format::create_query_response_string,
         protocol::{QueryType, ResourceRecord},
-        resolver_selector,
+        resolver_selector::{self, ResolverPool},
     },
     io::{
         cli::{self, CommandArgs},
@@ -109,13 +109,13 @@ pub async fn enumerate_subdomains(
     let resolver_pool_target = slot_limit.max(num_threads.saturating_mul(2));
     let pool = AsyncResolver::new(Some(resolver_pool_target)).await?;
 
-    let selector = Arc::new(Mutex::new(resolver_selector::get_selector(
-        cmd_args.use_random,
+    let resolver_pool = Arc::new(ResolverPool::new(
         dns_resolver_list.to_vec(),
-    )));
+        cmd_args.use_random,
+    ));
     let lookup_context = LookupContext::new(
         pool.clone(),
-        selector,
+        resolver_pool,
         cmd_args.transport_protocol.clone(),
         cmd_args.delay.clone(),
         query_plan.clone(),
@@ -319,14 +319,14 @@ async fn process_failed_subdomains(
     );
     let adaptive_delay = Delay::adaptive(75, 750);
     let retry_delay = adaptive_delay.clone();
-    let retry_selector = Arc::new(Mutex::new(resolver_selector::get_selector(
-        cmd_args.use_random,
+    let retry_resolver_pool = Arc::new(ResolverPool::new(
         dns_resolvers.to_vec(),
-    )));
+        cmd_args.use_random,
+    ));
 
     let retry_lookup = LookupContext::new(
         pool.clone(),
-        retry_selector,
+        retry_resolver_pool,
         cmd_args.transport_protocol.clone(),
         Some(retry_delay),
         query_plan.clone(),
@@ -422,11 +422,7 @@ async fn check_wildcard_domain(args: &CommandArgs, dns_resolvers: &[Ipv4Addr]) -
             .collect();
 
         // Append a unique identifier to avoid DNS caching issues
-        let fqdn = format!(
-            "{}.{}",
-            random_subdomain,
-            args.target
-        );
+        let fqdn = format!("{}.{}", random_subdomain, args.target);
 
         let query_type = &DEFAULT_QUERY_TYPES[rng.random_range(0..DEFAULT_QUERY_TYPES.len())];
 
