@@ -13,6 +13,14 @@ static DOMAIN_REGEX: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"^(?:[a-zA-Z0-9_](?:[a-zA-Z0-9_-]{0,61}[a-zA-Z0-9_])?\.)+[a-zA-Z]{2,}\.?$").unwrap()
 });
 
+fn parse_csv(input: &str) -> Vec<String> {
+    input
+        .split(',')
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect()
+}
+
 pub fn validate_target(input: &str) -> Result<String> {
     let input = input.trim();
 
@@ -59,17 +67,17 @@ pub fn validate_target(input: &str) -> Result<String> {
         let end_parse = end_ip.parse::<IpAddr>();
 
         match (start_parse, end_parse) {
-            (Ok(start_addr), Ok(end_addr)) => {
-                if start_addr.is_ipv4() == end_addr.is_ipv4() {
-                    return Ok(input.to_string());
-                }
+            (Ok(IpAddr::V4(s)), Ok(IpAddr::V4(e))) if s <= e => return Ok(input.to_string()),
+            (Ok(IpAddr::V6(s)), Ok(IpAddr::V6(e))) if s <= e => return Ok(input.to_string()),
+            (Ok(IpAddr::V4(_)), Ok(IpAddr::V4(_))) | (Ok(IpAddr::V6(_)), Ok(IpAddr::V6(_))) => {
+                return Err(anyhow!("Invalid IP range (start must be <= end): {input}"));
+            }
+            (Ok(_), Ok(_)) => {
                 return Err(anyhow!(
                     "IP range must consist of the same IP version: {input}"
                 ));
             }
-            _ => {
-                return Err(anyhow!("Invalid IP range: {input}"));
-            }
+            _ => return Err(anyhow!("Invalid IP range: {input}")),
         }
     }
 
@@ -85,27 +93,13 @@ pub fn validate_target(input: &str) -> Result<String> {
 }
 
 pub fn validate_dns_resolvers(servers: &str) -> Result<String> {
-    let mut server_list: Vec<String> = Vec::new();
-
-    if Path::new(servers).exists() {
+    let server_list: Vec<String> = if Path::new(servers).exists() {
         let contents = fs::read_to_string(servers)
             .map_err(|e| anyhow!("Failed to read DNS resolver file: {e}"))?;
-        for line in contents.lines() {
-            for part in line.split(',') {
-                let trimmed = part.trim();
-                if !trimmed.is_empty() {
-                    server_list.push(trimmed.to_string());
-                }
-            }
-        }
+        contents.lines().flat_map(parse_csv).collect()
     } else {
-        for part in servers.split(',') {
-            let trimmed = part.trim();
-            if !trimmed.is_empty() {
-                server_list.push(trimmed.to_string());
-            }
-        }
-    }
+        parse_csv(servers)
+    };
 
     if server_list.is_empty() {
         return Err(anyhow!("No DNS resolvers provided."));
@@ -288,9 +282,15 @@ mod test {
 
     #[test]
     fn valid_ip_ranges() {
-        let valid_ranges = ["192.168.0.1-192.168.0.255", "10.0.0.1-10.0.0.255"];
+        let valid_ranges = [
+            "192.168.0.1-192.168.0.255",
+            "10.0.0.1-10.0.0.255",
+            "1.1.1.1-1.1.1.1", // same IP (edge case)
+            "::1-::ffff",      // IPv6 range
+            "2001:db8::1-2001:db8::ff",
+        ];
         for range in valid_ranges {
-            assert_eq!(validate_target(range).unwrap(), range);
+            assert!(validate_target(range).is_ok(), "Expected valid: {range}");
         }
     }
 
@@ -302,11 +302,46 @@ mod test {
             "-192.168.0.255",            // missing start
             "a-b",                       // not IPs
             "192.168.v.2-192.168.7.2",   // invalid octet
-            "192.168.0.1-::1",           // mixed IP versions
         ];
         for range in invalid_ranges {
             assert!(validate_target(range).is_err(), "Expected invalid: {range}");
         }
+    }
+
+    #[test]
+    fn ip_range_mixed_versions() {
+        // IPv4 start with IPv6 end
+        let result = validate_target("192.168.0.1-::1");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("same IP version"));
+
+        // IPv6 start with IPv4 end
+        let result = validate_target("::1-192.168.0.1");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("same IP version"));
+    }
+
+    #[test]
+    fn ip_range_start_greater_than_end() {
+        // IPv4: start > end
+        let result = validate_target("192.168.1.100-192.168.1.1");
+        assert!(result.is_err());
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("start must be <= end")
+        );
+
+        // IPv6: start > end
+        let result = validate_target("::ffff-::1");
+        assert!(result.is_err());
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("start must be <= end")
+        );
     }
 
     #[test]
