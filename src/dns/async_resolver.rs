@@ -158,7 +158,7 @@ impl AsyncResolver {
                 return Err(DnsError::Internal("No available query IDs".to_string()));
             }
         };
-        let query_packet = Self::build_dns_query(query_id, domain, query_type, recursion)?;
+        let query_packet = Self::build_dns_query(query_id, domain, *query_type, recursion)?;
 
         match protocol {
             TransportProtocol::UDP => self.resolve_udp(dns_resolver, query_packet).await,
@@ -184,7 +184,7 @@ impl AsyncResolver {
         query_packet
             .write(&mut udp_req_buffer)
             .map_err(|e| DnsError::Internal(format!("UDP: Failed to serialize query: {e}")))?;
-        let udp_request_data = udp_req_buffer.get_buffer_to_pos().to_vec();
+        let udp_request_data = udp_req_buffer.get_buffer_to_pos();
 
         // Prepare for response via oneshot channel
         let (tx, rx) = oneshot::channel::<PendingQueryResult>();
@@ -203,10 +203,7 @@ impl AsyncResolver {
 
         let target_sock_addr = SocketAddr::new((*dns_resolver).into(), DNS_PORT);
 
-        if let Err(e) = udp_socket
-            .send_to(&udp_request_data, target_sock_addr)
-            .await
-        {
+        if let Err(e) = udp_socket.send_to(udp_request_data, target_sock_addr).await {
             self.pending_queries.remove(&query_id);
             return Err(DnsError::Network(format!(
                 "UDP: Failed to send query to {target_sock_addr}: {e}"
@@ -388,7 +385,7 @@ impl AsyncResolver {
     fn build_dns_query(
         query_id: u16,
         domain: &str,
-        query_type: &QueryType,
+        query_type: QueryType,
         recursion: bool,
     ) -> Result<DnsPacket, DnsError> {
         if domain.is_empty() {
@@ -404,7 +401,7 @@ impl AsyncResolver {
         }
 
         // Convert IP address to PTR format if needed
-        let domain = if query_type == &QueryType::PTR {
+        let domain = if query_type == QueryType::PTR {
             #[allow(clippy::option_if_let_else)]
             if let Ok(ipv4) = domain.parse::<Ipv4Addr>() {
                 crate::network::util::ipv4_to_ptr(ipv4)
@@ -421,9 +418,7 @@ impl AsyncResolver {
         packet.header.id = query_id;
         packet.header.questions = 1;
         packet.header.recursion_desired = recursion;
-        packet
-            .questions
-            .push(DnsQuestion::new(domain, query_type.clone()));
+        packet.questions.push(DnsQuestion::new(domain, query_type));
 
         Ok(packet)
     }

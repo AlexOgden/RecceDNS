@@ -64,7 +64,7 @@ impl ResolverPool {
             let idx = self.index.fetch_add(1, Ordering::Relaxed) % len;
             let resolver = self.resolvers[idx];
 
-            if !self.is_disabled(&resolver) {
+            if !self.is_disabled(resolver) {
                 return Some(resolver);
             }
         }
@@ -83,23 +83,21 @@ impl ResolverPool {
             let idx = (start + i) % len;
             let resolver = self.resolvers[idx];
 
-            if !self.is_disabled(&resolver) {
+            if !self.is_disabled(resolver) {
                 return Some(resolver);
             }
         }
 
-        // All disabled - return first as fallback
         self.fallback()
     }
 
     #[inline]
-    fn is_disabled(&self, resolver: &Ipv4Addr) -> bool {
+    fn is_disabled(&self, resolver: Ipv4Addr) -> bool {
         self.disabled
-            .get(resolver)
+            .get(&resolver)
             .is_some_and(|expiry| *expiry > Instant::now())
     }
 
-    /// Fallback when all resolvers are disabled.
     #[inline]
     fn fallback(&self) -> Option<Ipv4Addr> {
         self.resolvers.first().copied()
@@ -113,7 +111,7 @@ impl ResolverPool {
         let other_available = self
             .resolvers
             .iter()
-            .any(|r| *r != resolver && !self.is_disabled(r));
+            .any(|r| *r != resolver && !self.is_disabled(*r));
 
         if other_available {
             self.disabled.insert(resolver, Instant::now() + duration);
@@ -130,7 +128,7 @@ impl ResolverPool {
     pub fn available_count(&self) -> usize {
         self.resolvers
             .iter()
-            .filter(|r| !self.is_disabled(r))
+            .filter(|r| !self.is_disabled(**r))
             .count()
     }
 

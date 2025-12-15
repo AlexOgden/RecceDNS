@@ -223,11 +223,7 @@ async fn resolve_tld(ctx: &TldContext, tld: &str) -> TldResult {
 
     let primary_result = ctx
         .lookup
-        .execute_query(
-            &fqdn,
-            ctx.lookup.query_plan.primary.clone(),
-            &mut first_query,
-        )
+        .execute_query(&fqdn, ctx.lookup.query_plan.primary, &mut first_query)
         .await;
 
     match primary_result {
@@ -247,7 +243,7 @@ async fn resolve_tld(ctx: &TldContext, tld: &str) -> TldResult {
     for query_type in &ctx.lookup.query_plan.follow_ups {
         match ctx
             .lookup
-            .execute_query(&fqdn, query_type.clone(), &mut first_query)
+            .execute_query(&fqdn, *query_type, &mut first_query)
             .await
         {
             Ok((resolver, packet)) => {

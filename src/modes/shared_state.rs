@@ -60,8 +60,8 @@ impl QueryPlan {
             .map_or_else(
                 || {
                     let mut iter = query_types.iter();
-                    let primary = iter.next().cloned().unwrap_or(QueryType::A);
-                    let follow_ups = iter.cloned().collect();
+                    let primary = iter.next().copied().unwrap_or(QueryType::A);
+                    let follow_ups = iter.copied().collect();
                     Self {
                         primary,
                         follow_ups,
@@ -72,7 +72,7 @@ impl QueryPlan {
                     let mut follow_ups = Vec::new();
                     for (idx, query_type) in query_types.iter().enumerate() {
                         if idx != pos {
-                            follow_ups.push(query_type.clone());
+                            follow_ups.push(*query_type);
                         }
                     }
                     Self {
