@@ -1,6 +1,6 @@
 use std::{
     net::{Ipv4Addr, Ipv6Addr, SocketAddr},
-    sync::{Arc, atomic},
+    sync::{Arc, atomic::{self, Ordering}},
     time::Duration,
 };
 
@@ -146,7 +146,7 @@ impl AsyncResolver {
         let query_id = loop {
             let id = self
                 .next_query_id
-                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                .fetch_add(1, Ordering::Relaxed);
             // Check if this id is currently in use. If not, reserve it by breaking with it.
             if !self.pending_queries.contains_key(&id) {
                 break id;
