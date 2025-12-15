@@ -7,14 +7,14 @@ use std::{
     },
     time::Duration,
 };
-use tokio::{sync::Mutex, time};
+use tokio::time;
 
 use crate::{
     dns::{
         async_resolver::AsyncResolver,
         error::DnsError,
         protocol::{DnsPacket, QueryType},
-        resolver_selector::{self},
+        resolver_selector::{self, ResolverPool},
     },
     network::types::TransportProtocol,
     timing::delay,
@@ -30,7 +30,7 @@ pub struct QueryPlan {
 #[derive(Clone)]
 pub struct LookupContext {
     pool: AsyncResolver,
-    resolver_selector: Arc<Mutex<Box<dyn resolver_selector::ResolverSelector>>>,
+    resolver_pool: Arc<ResolverPool>,
     transport: TransportProtocol,
     delay: Option<delay::Delay>,
     pub query_plan: QueryPlan,
@@ -60,8 +60,8 @@ impl QueryPlan {
             .map_or_else(
                 || {
                     let mut iter = query_types.iter();
-                    let primary = iter.next().cloned().unwrap_or(QueryType::A);
-                    let follow_ups = iter.cloned().collect();
+                    let primary = iter.next().copied().unwrap_or(QueryType::A);
+                    let follow_ups = iter.copied().collect();
                     Self {
                         primary,
                         follow_ups,
@@ -72,7 +72,7 @@ impl QueryPlan {
                     let mut follow_ups = Vec::new();
                     for (idx, query_type) in query_types.iter().enumerate() {
                         if idx != pos {
-                            follow_ups.push(query_type.clone());
+                            follow_ups.push(*query_type);
                         }
                     }
                     Self {
@@ -90,7 +90,7 @@ impl LookupContext {
     #[must_use]
     pub fn new(
         pool: AsyncResolver,
-        resolver_selector: Arc<Mutex<Box<dyn resolver_selector::ResolverSelector>>>,
+        resolver_pool: Arc<ResolverPool>,
         transport: TransportProtocol,
         delay: Option<delay::Delay>,
         query_plan: QueryPlan,
@@ -98,7 +98,7 @@ impl LookupContext {
     ) -> Self {
         Self {
             pool,
-            resolver_selector,
+            resolver_pool,
             transport,
             delay,
             query_plan,
@@ -142,18 +142,11 @@ impl LookupContext {
         fqdn: &str,
         query_type: QueryType,
     ) -> Result<(Ipv4Addr, DnsPacket), QueryFailure> {
-        let resolver = {
-            let mut selector = self.resolver_selector.lock().await;
-            match selector.select() {
-                Ok(ip) => ip,
-                Err(err) => {
-                    return Err(QueryFailure {
-                        resolver: resolver_selector::DEFAULT_RESOLVER,
-                        error: DnsError::Internal(err.to_string()),
-                    });
-                }
-            }
-        };
+        // Lock-free resolver selection
+        let resolver = self
+            .resolver_pool
+            .select()
+            .unwrap_or(resolver_selector::DEFAULT_RESOLVER);
 
         let result = self
             .pool
@@ -188,10 +181,10 @@ impl LookupContext {
                     );
                     delay.report_query_result(!treat_as_failure);
                 }
+                // Disable failing resolver (lock-free operation)
                 if matches!(error, DnsError::Network(_) | DnsError::Timeout(_)) {
                     let disable_for = Duration::from_secs(rand::rng().random_range(2..=30));
-                    let mut selector = self.resolver_selector.lock().await;
-                    selector.disable(resolver, disable_for);
+                    self.resolver_pool.disable(resolver, disable_for);
                 }
             }
         }

@@ -18,6 +18,7 @@ use super::error::DnsError;
     PartialEq,
     Eq,
     Clone,
+    Copy,
     ValueEnum,
     Display,
     Hash,
@@ -178,7 +179,7 @@ impl DnsQuestion {
 
     pub fn write(&self, buffer: &mut PacketBuffer) -> Result<()> {
         buffer.write_qname(&self.name)?;
-        buffer.write_u16(self.qtype.clone() as u16)?;
+        buffer.write_u16(self.qtype as u16)?;
         buffer.write_u16(self.qclass)?;
         Ok(())
     }
@@ -446,7 +447,7 @@ pub enum RData {
 }
 
 impl RData {
-    pub fn to_qtype(&self) -> QueryType {
+    pub const fn to_qtype(&self) -> QueryType {
         match self {
             Self::A(_) => QueryType::A,
             Self::AAAA(_) => QueryType::AAAA,
@@ -458,7 +459,7 @@ impl RData {
             Self::SRV { .. } => QueryType::SRV,
             Self::DNSKEY { .. } => QueryType::DNSKEY,
             Self::PTR(_) => QueryType::PTR,
-            Self::Unknown { qtype, .. } => qtype.clone(),
+            Self::Unknown { qtype, .. } => *qtype,
         }
     }
 }

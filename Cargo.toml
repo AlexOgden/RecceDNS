@@ -1,14 +1,14 @@
 [package]
 name = "reccedns"
 authors = ["Alex Ogden"]
-version = "0.16.0"
+version = "0.17.0"
 repository = "https://github.com/alexogden/reccedns"
 license = "GPL-3.0"
 edition = "2024"
 
 [dependencies]
 anyhow = "1.0.100"
-clap = { version = "4.5.52", features = ["derive", "env"] }
+clap = { version = "4.5.53", features = ["derive", "env"] }
 colored = "3.0.0"
 ctrlc = "3.5.1"
 dashmap = "6.1.0"
@@ -23,7 +23,7 @@ strum_macros = "0.27.2"
 thiserror = "2.0.17"
 tokio = { version = "1.48.0", features = ["macros", "rt-multi-thread", "io-util", "net", "sync", "time"] }
 hyper = { version = "1.8.1", default-features = false, features = ["client", "http1"] }
-hyper-util = { version = "0.1.18", default-features = false, features = ["client", "client-legacy", "http1"] }
+hyper-util = { version = "0.1.19", default-features = false, features = ["client", "client-legacy", "http1"] }
 http-body-util = "0.1.3"
 bytes = "1.11.0"
 hyper-rustls = { version = "0.27.7", default-features = false, features = ["http1", "ring", "tls12", "webpki-roots"] }

@@ -1,303 +1,295 @@
-use anyhow::Result;
 use dashmap::DashMap;
-use rand::seq::IndexedRandom;
+use rand::Rng;
 use std::net::Ipv4Addr;
-use std::sync::Arc;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
+/// Default resolver used as fallback when all resolvers are disabled.
 pub const DEFAULT_RESOLVER: Ipv4Addr = Ipv4Addr::new(1, 1, 1, 1);
 
-pub trait ResolverSelector: Send + Sync {
-    fn select(&mut self) -> Result<Ipv4Addr>;
-    fn disable(&mut self, resolver: Ipv4Addr, duration: Duration);
+/// Cleanup disabled resolvers every N selections (must be power of 2 - 1 for fast modulo).
+const CLEANUP_INTERVAL_MASK: u64 = 0x3FF; // Every 1024 selects
+
+#[derive(Debug)]
+pub struct ResolverPool {
+    resolvers: Vec<Ipv4Addr>,
+    disabled: DashMap<Ipv4Addr, Instant>,
+    index: AtomicUsize,
+    select_count: AtomicU64,
+    use_random: bool,
 }
 
-pub enum Selector {
-    Random {
-        dns_resolvers: Vec<Ipv4Addr>,
-        disabled: Arc<DashMap<Ipv4Addr, Instant>>,
-    },
-    Sequential {
-        dns_resolvers: Vec<Ipv4Addr>,
-        current_index: AtomicUsize,
-        disabled: Arc<DashMap<Ipv4Addr, Instant>>,
-    },
-}
+impl ResolverPool {
+    #[must_use]
+    pub fn new(resolvers: Vec<Ipv4Addr>, use_random: bool) -> Self {
+        Self {
+            resolvers,
+            disabled: DashMap::new(),
+            index: AtomicUsize::new(0),
+            select_count: AtomicU64::new(0),
+            use_random,
+        }
+    }
 
-impl Selector {
-    pub fn new(use_random: bool, dns_resolvers: Vec<Ipv4Addr>) -> Self {
-        let disabled = Arc::new(DashMap::new());
+    /// Select a resolver.
+    ///
+    /// Returns `Some(resolver)` if one is available, or `None` if the pool is empty.
+    /// If all resolvers are temporarily disabled, returns the first resolver as fallback.
+    #[inline]
+    pub fn select(&self) -> Option<Ipv4Addr> {
+        if self.resolvers.is_empty() {
+            return None;
+        }
 
-        if use_random {
-            Self::Random {
-                dns_resolvers,
-                disabled,
-            }
+        // Periodic cleanup (every ~1024 selects)
+        let count = self.select_count.fetch_add(1, Ordering::Relaxed);
+        if count & CLEANUP_INTERVAL_MASK == 0 {
+            self.cleanup_expired();
+        }
+
+        let len = self.resolvers.len();
+
+        if self.use_random {
+            self.select_random(len)
         } else {
-            Self::Sequential {
-                dns_resolvers,
-                current_index: AtomicUsize::new(0),
-                disabled,
-            }
+            self.select_sequential(len)
         }
     }
 
-    fn clean_disabled(&self) {
+    #[inline]
+    fn select_sequential(&self, len: usize) -> Option<Ipv4Addr> {
+        // Try each resolver starting from current index
+        for _ in 0..len {
+            // Atomic increment with wrap-around
+            let idx = self.index.fetch_add(1, Ordering::Relaxed) % len;
+            let resolver = self.resolvers[idx];
+
+            if !self.is_disabled(resolver) {
+                return Some(resolver);
+            }
+        }
+
+        // All disabled - return first as fallback
+        self.fallback()
+    }
+
+    #[inline]
+    fn select_random(&self, len: usize) -> Option<Ipv4Addr> {
+        let mut rng = rand::rng();
+        let start = rng.random_range(0..len);
+
+        // Try from random start, then scan linearly if needed
+        for i in 0..len {
+            let idx = (start + i) % len;
+            let resolver = self.resolvers[idx];
+
+            if !self.is_disabled(resolver) {
+                return Some(resolver);
+            }
+        }
+
+        self.fallback()
+    }
+
+    #[inline]
+    fn is_disabled(&self, resolver: Ipv4Addr) -> bool {
+        self.disabled
+            .get(&resolver)
+            .is_some_and(|expiry| *expiry > Instant::now())
+    }
+
+    #[inline]
+    fn fallback(&self) -> Option<Ipv4Addr> {
+        self.resolvers.first().copied()
+    }
+
+    /// Temporarily disable a resolver for the specified duration.
+    ///
+    /// Will not disable if it would leave no resolvers available.
+    pub fn disable(&self, resolver: Ipv4Addr, duration: Duration) {
+        // Don't disable the last available resolver
+        let other_available = self
+            .resolvers
+            .iter()
+            .any(|r| *r != resolver && !self.is_disabled(*r));
+
+        if other_available {
+            self.disabled.insert(resolver, Instant::now() + duration);
+        }
+    }
+
+    fn cleanup_expired(&self) {
         let now = Instant::now();
+        self.disabled.retain(|_, expiry| *expiry > now);
+    }
 
-        match self {
-            Self::Random { disabled, .. } | Self::Sequential { disabled, .. } => {
-                disabled.retain(|_, &mut expiry| expiry > now);
-            }
-        }
+    #[must_use]
+    #[cfg(test)]
+    pub fn available_count(&self) -> usize {
+        self.resolvers
+            .iter()
+            .filter(|r| !self.is_disabled(**r))
+            .count()
+    }
+
+    #[must_use]
+    #[cfg(test)]
+    pub const fn total_count(&self) -> usize {
+        self.resolvers.len()
+    }
+
+    #[must_use]
+    #[cfg(test)]
+    pub const fn is_empty(&self) -> bool {
+        self.resolvers.is_empty()
     }
 }
 
-impl ResolverSelector for Selector {
-    fn select(&mut self) -> Result<Ipv4Addr> {
-        self.clean_disabled();
-
-        match self {
-            Self::Random {
-                dns_resolvers,
-                disabled,
-            } => {
-                let available_resolvers: Vec<&Ipv4Addr> = dns_resolvers
-                    .iter()
-                    .filter(|resolver| !disabled.contains_key(*resolver))
-                    .collect();
-
-                available_resolvers
-                    .choose(&mut rand::rng())
-                    .copied()
-                    .ok_or_else(|| anyhow::anyhow!("No available DNS resolvers"))
-                    .copied()
-            }
-            Self::Sequential {
-                dns_resolvers,
-                current_index,
-                disabled,
-            } => {
-                if dns_resolvers.is_empty() {
-                    return Err(anyhow::anyhow!("DNS Resolvers list is empty"));
-                }
-
-                let start_index = current_index.load(Ordering::SeqCst);
-                loop {
-                    let idx = current_index.load(Ordering::SeqCst);
-                    let resolver = &dns_resolvers[idx];
-                    current_index.fetch_add(1, Ordering::SeqCst);
-                    current_index.store(
-                        current_index.load(Ordering::SeqCst) % dns_resolvers.len(),
-                        Ordering::SeqCst,
-                    );
-
-                    if !disabled.contains_key(resolver) {
-                        return Ok(*resolver);
-                    }
-
-                    if current_index.load(Ordering::SeqCst) == start_index {
-                        return Err(anyhow::anyhow!("All DNS resolvers are disabled"));
-                    }
-                }
-            }
+impl Clone for ResolverPool {
+    fn clone(&self) -> Self {
+        Self {
+            resolvers: self.resolvers.clone(),
+            disabled: self.disabled.clone(),
+            index: AtomicUsize::new(self.index.load(Ordering::Relaxed)),
+            select_count: AtomicU64::new(self.select_count.load(Ordering::Relaxed)),
+            use_random: self.use_random,
         }
     }
-
-    fn disable(&mut self, resolver: Ipv4Addr, duration: Duration) {
-        self.clean_disabled();
-
-        match self {
-            Self::Random {
-                dns_resolvers,
-                disabled,
-            }
-            | Self::Sequential {
-                dns_resolvers,
-                disabled,
-                ..
-            } => {
-                let other_active_resolvers = dns_resolvers
-                    .iter()
-                    .any(|r| *r != resolver && !disabled.contains_key(r));
-
-                if other_active_resolvers {
-                    disabled.insert(resolver, Instant::now() + duration);
-                }
-            }
-        }
-    }
-}
-
-pub fn get_selector(random: bool, dns_resolvers: Vec<Ipv4Addr>) -> Box<dyn ResolverSelector> {
-    Box::new(Selector::new(random, dns_resolvers))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    #[test]
-    fn test_new_random_selector() {
-        let resolvers = vec![
-            "1.1.1.1".parse::<Ipv4Addr>().unwrap(),
-            "8.8.8.8".parse::<Ipv4Addr>().unwrap(),
-        ];
-        let selector = Selector::new(true, resolvers.clone());
-
-        if let Selector::Random {
-            dns_resolvers,
-            disabled,
-        } = selector
-        {
-            assert_eq!(dns_resolvers, resolvers);
-            assert!(disabled.is_empty());
-        } else {
-            panic!("Expected Random selector");
-        }
+    fn test_resolvers() -> Vec<Ipv4Addr> {
+        vec![
+            "1.1.1.1".parse().unwrap(),
+            "8.8.8.8".parse().unwrap(),
+            "9.9.9.9".parse().unwrap(),
+        ]
     }
 
     #[test]
-    fn test_new_sequential_selector() {
-        let resolvers = vec![
-            "1.1.1.1".parse::<Ipv4Addr>().unwrap(),
-            "8.8.8.8".parse::<Ipv4Addr>().unwrap(),
-        ];
-        let selector = Selector::new(false, resolvers.clone());
-
-        if let Selector::Sequential {
-            dns_resolvers,
-            current_index,
-            disabled,
-        } = selector
-        {
-            assert_eq!(dns_resolvers, resolvers);
-            assert_eq!(current_index.load(Ordering::SeqCst), 0);
-            assert!(disabled.is_empty());
-        } else {
-            panic!("Expected Sequential selector");
-        }
+    fn test_new_pool() {
+        let pool = ResolverPool::new(test_resolvers(), false);
+        assert_eq!(pool.total_count(), 3);
+        assert_eq!(pool.available_count(), 3);
+        assert!(!pool.is_empty());
     }
 
     #[test]
-    fn test_sequential_selector_select() {
-        let resolvers = vec![
-            "1.1.1.1".parse::<Ipv4Addr>().unwrap(),
-            "8.8.8.8".parse::<Ipv4Addr>().unwrap(),
-            "9.9.9.9".parse::<Ipv4Addr>().unwrap(),
-        ];
-        let mut selector = Selector::new(false, resolvers);
-
-        assert_eq!(
-            selector.select().unwrap(),
-            "1.1.1.1".parse::<Ipv4Addr>().unwrap()
-        );
-        assert_eq!(
-            selector.select().unwrap(),
-            "8.8.8.8".parse::<Ipv4Addr>().unwrap()
-        );
-        assert_eq!(
-            selector.select().unwrap(),
-            "9.9.9.9".parse::<Ipv4Addr>().unwrap()
-        );
-        assert_eq!(
-            selector.select().unwrap(),
-            "1.1.1.1".parse::<Ipv4Addr>().unwrap()
-        ); // Cycles back
+    fn test_empty_pool() {
+        let pool = ResolverPool::new(vec![], false);
+        assert!(pool.is_empty());
+        assert_eq!(pool.select(), None);
     }
 
     #[test]
-    fn test_disable_and_expiry() {
-        let resolvers = vec![
-            "1.1.1.1".parse::<Ipv4Addr>().unwrap(),
-            "8.8.8.8".parse::<Ipv4Addr>().unwrap(),
-            "9.9.9.9".parse::<Ipv4Addr>().unwrap(),
-        ];
-        let mut selector = Selector::new(false, resolvers);
+    fn test_sequential_selection() {
+        let pool = ResolverPool::new(test_resolvers(), false);
 
-        assert_eq!(
-            selector.select().unwrap(),
-            "1.1.1.1".parse::<Ipv4Addr>().unwrap()
-        );
+        assert_eq!(pool.select(), Some("1.1.1.1".parse().unwrap()));
+        assert_eq!(pool.select(), Some("8.8.8.8".parse().unwrap()));
+        assert_eq!(pool.select(), Some("9.9.9.9".parse().unwrap()));
+        assert_eq!(pool.select(), Some("1.1.1.1".parse().unwrap())); // Cycles back
+    }
 
-        // Disable 8.8.8.8 for a short time
-        selector.disable(
-            "8.8.8.8".parse::<Ipv4Addr>().unwrap(),
-            Duration::from_millis(100),
-        );
+    #[test]
+    fn test_random_selection() {
+        let pool = ResolverPool::new(test_resolvers(), true);
 
-        // Should skip 8.8.8.8 and go to 9.9.9.9
-        assert_eq!(
-            selector.select().unwrap(),
-            "9.9.9.9".parse::<Ipv4Addr>().unwrap()
-        );
+        // Should return one of the resolvers
+        let result = pool.select();
+        assert!(result.is_some());
+        assert!(test_resolvers().contains(&result.unwrap()));
+    }
+
+    #[test]
+    fn test_disable_resolver() {
+        let pool = ResolverPool::new(test_resolvers(), false);
+
+        // Disable first resolver
+        pool.disable("1.1.1.1".parse().unwrap(), Duration::from_secs(10));
+
+        // Should skip to second resolver
+        assert_eq!(pool.select(), Some("8.8.8.8".parse().unwrap()));
+        assert_eq!(pool.available_count(), 2);
+    }
+
+    #[test]
+    fn test_disable_expiry() {
+        let pool = ResolverPool::new(test_resolvers(), false);
+
+        // Disable with very short duration
+        pool.disable("1.1.1.1".parse().unwrap(), Duration::from_millis(10));
 
         // Wait for expiry
-        std::thread::sleep(Duration::from_millis(150));
+        std::thread::sleep(Duration::from_millis(20));
 
-        // Now we're back to 1.1.1.1
-        assert_eq!(
-            selector.select().unwrap(),
-            "1.1.1.1".parse::<Ipv4Addr>().unwrap()
-        );
+        // Trigger cleanup
+        for _ in 0..1025 {
+            let _ = pool.select();
+        }
 
-        // And 8.8.8.8 should be available again
-        assert_eq!(
-            selector.select().unwrap(),
-            "8.8.8.8".parse::<Ipv4Addr>().unwrap()
-        );
+        // Should be available again
+        assert_eq!(pool.available_count(), 3);
     }
 
     #[test]
-    fn test_empty_resolvers_list() {
-        let mut random_selector = Selector::new(true, vec![]);
-        let mut sequential_selector = Selector::new(false, vec![]);
+    fn test_cannot_disable_all() {
+        let resolvers = vec!["1.1.1.1".parse().unwrap(), "8.8.8.8".parse().unwrap()];
+        let pool = ResolverPool::new(resolvers, false);
 
-        assert!(random_selector.select().is_err());
-        assert!(sequential_selector.select().is_err());
+        pool.disable("1.1.1.1".parse().unwrap(), Duration::from_secs(10));
+        pool.disable("8.8.8.8".parse().unwrap(), Duration::from_secs(10));
+
+        // At least one should still be available (second disable should fail)
+        assert!(pool.available_count() >= 1);
+        assert!(pool.select().is_some());
     }
 
     #[test]
-    fn test_cannot_disable_all_resolvers() {
-        let resolvers = vec![
-            "1.1.1.1".parse::<Ipv4Addr>().unwrap(),
-            "8.8.8.8".parse::<Ipv4Addr>().unwrap(),
-        ];
-        let mut selector = Selector::new(false, resolvers);
+    fn test_fallback_when_all_disabled() {
+        let resolvers = vec!["1.1.1.1".parse().unwrap()];
+        let pool = ResolverPool::new(resolvers, false);
 
-        selector.disable(
-            "1.1.1.1".parse::<Ipv4Addr>().unwrap(),
-            Duration::from_secs(10),
-        );
-        selector.disable(
-            "8.8.8.8".parse::<Ipv4Addr>().unwrap(),
-            Duration::from_secs(10),
-        );
+        // Can't disable the only resolver
+        pool.disable("1.1.1.1".parse().unwrap(), Duration::from_secs(10));
 
-        // At least one resolver should always remain available
-        let result = selector.select();
-        assert!(result.is_ok());
+        // Should still return the resolver as fallback
+        assert_eq!(pool.select(), Some("1.1.1.1".parse().unwrap()));
     }
 
     #[test]
-    fn test_get_selector_factory() {
-        let resolvers = vec![
-            "1.1.1.1".parse::<Ipv4Addr>().unwrap(),
-            "8.8.8.8".parse::<Ipv4Addr>().unwrap(),
-        ];
+    fn test_clone() {
+        let pool = ResolverPool::new(test_resolvers(), false);
+        let _ = pool.select(); // Advance index
 
-        let mut sequential_selector = get_selector(false, resolvers.clone());
-        assert_eq!(
-            sequential_selector.select().unwrap(),
-            "1.1.1.1".parse::<Ipv4Addr>().unwrap()
-        );
+        let cloned = pool.clone();
+        assert_eq!(cloned.total_count(), pool.total_count());
+    }
 
-        let mut random_selector = get_selector(true, resolvers);
-        let resolver = random_selector.select().unwrap();
-        assert!(
-            resolver == "1.1.1.1".parse::<Ipv4Addr>().unwrap()
-                || resolver == "8.8.8.8".parse::<Ipv4Addr>().unwrap()
-        );
+    #[test]
+    fn test_concurrent_selection() {
+        use std::sync::Arc;
+        use std::thread;
+
+        let pool = Arc::new(ResolverPool::new(test_resolvers(), false));
+        let mut handles = vec![];
+
+        // Spawn multiple threads selecting concurrently
+        for _ in 0..10 {
+            let pool_clone = Arc::clone(&pool);
+            handles.push(thread::spawn(move || {
+                for _ in 0..1000 {
+                    let result = pool_clone.select();
+                    assert!(result.is_some());
+                }
+            }));
+        }
+
+        for handle in handles {
+            handle.join().unwrap();
+        }
     }
 }
