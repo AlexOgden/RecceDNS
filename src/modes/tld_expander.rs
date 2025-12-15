@@ -13,7 +13,7 @@ use std::{
     sync::{Arc, LazyLock, atomic::Ordering},
     time::{Duration, Instant},
 };
-use tokio::sync::{Mutex, Semaphore, mpsc};
+use tokio::sync::{Semaphore, mpsc};
 
 use crate::dns::async_resolver::AsyncResolver;
 use crate::{
@@ -21,7 +21,7 @@ use crate::{
         error::DnsError,
         format::create_query_response_string,
         protocol::{QueryType, ResourceRecord},
-        resolver_selector::{self},
+        resolver_selector::{self, ResolverPool},
     },
     io::{
         cli::{self, CommandArgs},
@@ -105,14 +105,14 @@ pub async fn expand_tlds(cmd_args: &CommandArgs, dns_resolver_list: &[Ipv4Addr])
     let resolver_pool_target = slot_limit.max(num_threads.saturating_mul(2));
     let pool = AsyncResolver::new(Some(resolver_pool_target)).await?;
 
-    let selector = Arc::new(Mutex::new(resolver_selector::get_selector(
-        cmd_args.use_random,
+    let resolver_pool = Arc::new(ResolverPool::new(
         dns_resolver_list.to_vec(),
-    )));
+        cmd_args.use_random,
+    ));
 
     let lookup_context = LookupContext::new(
         pool.clone(),
-        selector,
+        resolver_pool,
         cmd_args.transport_protocol.clone(),
         cmd_args.delay.clone(),
         query_plan.clone(),
