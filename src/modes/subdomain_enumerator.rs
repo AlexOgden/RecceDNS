@@ -423,15 +423,13 @@ async fn check_wildcard_domain(args: &CommandArgs, dns_resolvers: &[Ipv4Addr]) -
 
         // Append a unique identifier to avoid DNS caching issues
         let fqdn = format!(
-            "{}-{}.{}",
+            "{}.{}",
             random_subdomain,
-            rng.random_range(0..=200),
             args.target
         );
 
         let query_type = &DEFAULT_QUERY_TYPES[rng.random_range(0..DEFAULT_QUERY_TYPES.len())];
 
-        // Check if the subdomain resolves
         if resolver_pool
             .resolve(resolver, &fqdn, query_type, &args.transport_protocol, true)
             .await
