@@ -8,7 +8,7 @@ edition = "2024"
 
 [dependencies]
 anyhow = "1.0.100"
-clap = { version = "4.5.53", features = ["derive", "env"] }
+clap = { version = "4.5.54", features = ["derive", "env"] }
 colored = "3.0.0"
 ctrlc = "3.5.1"
 dashmap = "6.1.0"
