@@ -153,13 +153,17 @@ See the [releases](https://github.com/AlexOgden/RecceDNS/releases) page for the 
 
 ## Example Usage
 
-### Basic Enumeration
+<details>
+<summary>📋 Basic Enumeration</summary>
 
 ```sh
 reccedns -m b -d 1.1.1.1 -t github.com
 ```
 
-### Bruteforce Subdomains
+</details>
+
+<details>
+<summary>🔍 Subdomain Enumeration</summary>
 
 **Any Records**
 ```sh
@@ -216,9 +220,10 @@ reccedns -m s -d 1.1.1.1 -w .\combined_names.txt -t github.com -T 6 -q A,AAAA,MX
 reccedns -m s -d 8.8.8.8 -w .\combined_names -t github.com -T 4 --no-print-errors
 ```
 
----
+</details>
 
-### Reverse PTR IP Search
+<details>
+<summary>🔄 Reverse PTR IP Search</summary>
 
 **Single IP Address**
 ```sh
@@ -240,17 +245,19 @@ reccedns -m r -d 1.1.1.1 -t 192.168.0.0-192.168.1.254
 reccedns -m r -d 1.1.1.1 -t 192.168.0.1,192.168.0.3,192.168.1.54
 ```
 
----
+</details>
 
-### Certificate Search
+<details>
+<summary>🔐 Certificate Search</summary>
 
 ```sh
 reccedns -m c -t github.com
 ```
 
----
+</details>
 
-### TLD Expansion
+<details>
+<summary>🌐 TLD Expansion</summary>
 
 **Check 'github' with the full list of IANA TLDs**
 ```sh
@@ -276,3 +283,5 @@ reccedns -m t -d 8.8.8.8 -t github.com -q a,aaaa
 ```sh
 reccedns -m t -d 8.8.8.8 -t github.com -w tlds.txt
 ```
+
+</details>
