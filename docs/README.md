@@ -2,10 +2,16 @@
 	<h1 align="center" style="font-size:3em;">RecceDNS</h1>
 </p>
 <p align="center">
-	<a title="Build Status" target="_blank" href="https://github.com/AlexOgden/RecceDNS/actions/workflows/cargo_test.yml"><img src="https://img.shields.io/github/actions/workflow/status/tursodatabase/limbo/rust.yml?style=flat-square"></a>
+	<a title="Build Status" target="_blank" href="https://github.com/AlexOgden/RecceDNS/actions/workflows/cargo_test.yml"><img src="https://img.shields.io/github/actions/workflow/status/AlexOgden/RecceDNS/cargo_test.yml?style=flat-square&label=build"></a>
 	<a title="Latest Release" target="_blank" href="https://github.com/AlexOgden/RecceDNS/releases/latest"><img src="https://img.shields.io/github/v/release/AlexOgden/RecceDNS?style=flat-square&color=aqua"></a>
+	<a title="License" target="_blank" href="https://github.com/AlexOgden/RecceDNS/blob/master/LICENSE"><img src="https://img.shields.io/github/license/AlexOgden/RecceDNS?style=flat-square&color=blue"></a>
+	<a title="Rust" target="_blank" href="https://www.rust-lang.org/"><img src="https://img.shields.io/badge/rust-1.92%2B-orange?style=flat-square&logo=rust"></a>
+	<a title="Platform" target="_blank" href="https://github.com/AlexOgden/RecceDNS/releases"><img src="https://img.shields.io/badge/platform-windows%20%7C%20macos%20%7C%20linux-lightgrey?style=flat-square"></a>
+</p>
+<p align="center">
 	<a title="GitHub Commits" target="_blank" href="https://github.com/AlexOgden/RecceDNS/commits/master"><img src="https://img.shields.io/github/commit-activity/m/AlexOgden/RecceDNS.svg?style=flat-square"></a>
 	<a title="Last Commit" target="_blank" href="https://github.com/AlexOgden/RecceDNS/commits/master"><img src="https://img.shields.io/github/last-commit/AlexOgden/RecceDNS.svg?style=flat-square&color=FF9900"></a>
+	<a title="Docker" target="_blank" href="https://ghcr.io/alexogden/reccedns"><img src="https://img.shields.io/badge/docker-ghcr.io-blue?style=flat-square&logo=docker"></a>
 </p>
 
 ---
@@ -13,7 +19,7 @@
 RecceDNS is a DNS enumeration/OSINT tool written in Rust 
 that provides functionality to gather information about domain names. It performs various DNS queries to discover subdomains, IP addresses, and other DNS records associated with a target domain. The tool is designed to be fast, efficient, and easy to use. This tool places emphasis on high-performance subdomain bruteforcing with advanced functionality for rapid enumeration and rate limiting mitigation.
 
-I originally started working on this project to learn Rust, improve on network programming, and gain a deeper understanding of DNS. This software includes its own stub resolver built from scratch, it is not a fully-featured DNS implementation and only supports the functionality required of it. I am still learning/improving my Rust skills, if you're experienced in Rust and think something could be improved, be more idomatic, or any other suggestions, feel free to let me know or submit a pull request!
+I originally started working on this project to learn Rust, improve on network programming, and gain a deeper understanding of DNS. This software includes its own stub resolver built from scratch, it is not a fully-featured DNS implementation and only supports the functionality required of it. I am still learning/improving my Rust skills, if you're experienced in Rust and think something could be improved, be more idiomatic, or any other suggestions, feel free to let me know or submit a pull request!
 
 ### Features
 
@@ -32,7 +38,7 @@ I originally started working on this project to learn Rust, improve on network p
 - SRV enumeration, use a wordlist with the query argument set to SRV to find common SRV records.
 - Reverse IP PTR for a single IP address, CIDR notation, range, or list.
 - Search for subdomains based Certificate Transparency using crt.sh.
-- Expland TLD enumeration for a given domain on the full IANA TLD list.
+- Expand TLD enumeration for a given domain on the full IANA TLD list.
 - Coloured output with progress reporting on bruteforce subdomain enumeration.
 - Output results to a JSON file.
 - High Performance Features:
@@ -40,7 +46,8 @@ I originally started working on this project to learn Rust, improve on network p
 	- Use multiple DNS resolvers.
 	- Dynamically disable resolver for random time if rate limited.
 	- Adaptive delay (increases and decreases dynamically within bounds to reduce rate-limiting).
-	- Asyncronous UDP socket pooling - thousands of queries without locking up file resources.
+	- Asynchronous UDP socket pooling - thousands of queries without locking up file resources.
+	- Graceful interrupt handling - press <kbd>Ctrl</kbd>+<kbd>C</kbd> to stop enumeration and still get results.
 
 ## Getting Started
 
@@ -142,17 +149,21 @@ See the [releases](https://github.com/AlexOgden/RecceDNS/releases) page for the 
 | `-r, --use-random` | `RECCEDNS_USE_RANDOM` | When multiple resolvers are provided, randomly select one for each query. |
 | `--json <path>` | `RECCEDNS_JSON_OUTPUT` | Output results to a JSON file. `.json` will be appended if not provided. |
 | `-Q, --quiet` | `RECCEDNS_QUIET` | Don't print any results to the terminal. Useful for large targets when outputting to JSON. |
-| `-T, --threads <N>` | `RECCEDNS_THREADS` | Number of threads for subdomain enumeration.<br>Defaults to (logical cores - 1), max 6 if more than 6 cores. |
+| `-T, --threads <N>` | `RECCEDNS_THREADS` | Number of threads for subdomain enumeration.<br>Defaults to (logical cores - 1), max 8 if more than 8 cores. |
 
 ## Example Usage
 
-### Basic Enumeration
+<details>
+<summary>📋 Basic Enumeration</summary>
 
 ```sh
 reccedns -m b -d 1.1.1.1 -t github.com
 ```
 
-### Bruteforce Subdomains
+</details>
+
+<details>
+<summary>🔍 Subdomain Enumeration</summary>
 
 **Any Records**
 ```sh
@@ -209,9 +220,10 @@ reccedns -m s -d 1.1.1.1 -w .\combined_names.txt -t github.com -T 6 -q A,AAAA,MX
 reccedns -m s -d 8.8.8.8 -w .\combined_names -t github.com -T 4 --no-print-errors
 ```
 
----
+</details>
 
-### Reverse PTR IP Search
+<details>
+<summary>🔄 Reverse PTR IP Search</summary>
 
 **Single IP Address**
 ```sh
@@ -233,17 +245,19 @@ reccedns -m r -d 1.1.1.1 -t 192.168.0.0-192.168.1.254
 reccedns -m r -d 1.1.1.1 -t 192.168.0.1,192.168.0.3,192.168.1.54
 ```
 
----
+</details>
 
-### Certificate Search
+<details>
+<summary>🔐 Certificate Search</summary>
 
 ```sh
 reccedns -m c -t github.com
 ```
 
----
+</details>
 
-### TLD Expansion
+<details>
+<summary>🌐 TLD Expansion</summary>
 
 **Check 'github' with the full list of IANA TLDs**
 ```sh
@@ -269,3 +283,5 @@ reccedns -m t -d 8.8.8.8 -t github.com -q a,aaaa
 ```sh
 reccedns -m t -d 8.8.8.8 -t github.com -w tlds.txt
 ```
+
+</details>
