@@ -10,8 +10,13 @@ use crate::network::{check, types::TransportProtocol};
 use std::sync::LazyLock;
 
 static DOMAIN_REGEX: LazyLock<Regex> = LazyLock::new(|| {
+    // Label rules: start with alnum/underscore, can contain hyphens in middle, end with alnum/underscore
+    // Each label 1-63 chars, TLD must be 2+ alpha chars
     Regex::new(r"^(?:[a-zA-Z0-9_](?:[a-zA-Z0-9_-]{0,61}[a-zA-Z0-9_])?\.)+[a-zA-Z]{2,}\.?$").unwrap()
 });
+
+const MAX_LABEL_LENGTH: usize = 63;
+const MAX_DOMAIN_LENGTH: usize = 253;
 
 fn parse_csv(input: &str) -> Vec<String> {
     input
@@ -26,7 +31,25 @@ pub fn validate_target(input: &str) -> Result<String> {
 
     // Check for valid domain name
     if DOMAIN_REGEX.is_match(input) {
-        return Ok(input.to_string());
+        // Validate total domain length
+        let domain_without_trailing_dot = input.trim_end_matches('.');
+        if domain_without_trailing_dot.len() > MAX_DOMAIN_LENGTH {
+            return Err(anyhow!(
+                "Domain name exceeds maximum length of {MAX_DOMAIN_LENGTH} characters: {input}"
+            ));
+        }
+
+        // Validate individual label lengths
+        for label in domain_without_trailing_dot.split('.') {
+            if label.len() > MAX_LABEL_LENGTH {
+                return Err(anyhow!(
+                    "Domain label '{label}' exceeds maximum length of {MAX_LABEL_LENGTH} characters"
+                ));
+            }
+        }
+
+        // Normalize to lowercase for DNS case-insensitivity
+        return Ok(input.to_lowercase());
     }
 
     // Check for valid IP address (IPv4 or IPv6)
@@ -81,11 +104,18 @@ pub fn validate_target(input: &str) -> Result<String> {
         }
     }
 
-    // Check for CSV list of IP addresses
+    // Check for CSV list of IP addresses (single-pass with early exit on invalid IP)
     if input.contains(',') {
-        let ips: Vec<&str> = input.split(',').collect();
-        if ips.iter().all(|&ip| ip.trim().parse::<IpAddr>().is_ok()) {
-            return Ok(input.to_string());
+        let result: Result<Vec<_>, _> = input
+            .split(',')
+            .map(|ip| {
+                let trimmed = ip.trim();
+                trimmed.parse::<IpAddr>().map(|_| trimmed)
+            })
+            .collect();
+
+        if let Ok(ips) = result {
+            return Ok(ips.join(","));
         }
     }
 
@@ -247,9 +277,41 @@ mod test {
 
     #[test]
     fn domain_with_whitespace() {
-        // Should trim and validate
+        // Should trim, validate, and lowercase
         assert_eq!(validate_target("  example.com  ").unwrap(), "example.com");
         assert_eq!(validate_target("\texample.com\n").unwrap(), "example.com");
+    }
+
+    #[test]
+    fn domain_normalized_to_lowercase() {
+        assert_eq!(validate_target("EXAMPLE.COM").unwrap(), "example.com");
+        assert_eq!(validate_target("Example.Com").unwrap(), "example.com");
+        assert_eq!(
+            validate_target("SUB.EXAMPLE.COM").unwrap(),
+            "sub.example.com"
+        );
+    }
+
+    #[test]
+    fn domain_label_length_validation() {
+        // Label at exactly 63 chars should be valid
+        let label_63 = "a".repeat(63);
+        let domain_63 = format!("{label_63}.com");
+        assert!(validate_target(&domain_63).is_ok());
+
+        // Label at 64 chars should be invalid
+        let label_64 = "a".repeat(64);
+        let domain_64 = format!("{label_64}.com");
+        assert!(validate_target(&domain_64).is_err());
+    }
+
+    #[test]
+    fn csv_ip_list_normalized() {
+        // Should trim whitespace from individual IPs
+        assert_eq!(
+            validate_target("1.1.1.1 , 8.8.8.8 , 9.9.9.9").unwrap(),
+            "1.1.1.1,8.8.8.8,9.9.9.9"
+        );
     }
 
     #[test]
