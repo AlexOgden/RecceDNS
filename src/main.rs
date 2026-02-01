@@ -4,12 +4,12 @@ mod modes;
 mod network;
 mod timing;
 
-use std::{net::Ipv4Addr, path::Path};
+use std::{net::SocketAddr, path::Path};
 
 use anyhow::{Result, anyhow, ensure};
 use io::{
     cli::{self, OperationMode},
-    validation::filter_working_resolvers,
+    validation::{filter_working_resolvers, parse_ipv4_with_port},
 };
 use network::types::TransportProtocol;
 
@@ -63,7 +63,7 @@ fn load_resolvers_from_file(path: &str) -> Result<Vec<String>> {
     Ok(content.lines().flat_map(parse_resolvers).collect())
 }
 
-async fn initialize_dns_resolvers(cmd_args: &cli::CommandArgs) -> Result<Vec<Ipv4Addr>> {
+async fn initialize_dns_resolvers(cmd_args: &cli::CommandArgs) -> Result<Vec<SocketAddr>> {
     let no_dns_check =
         matches!(cmd_args.operation_mode, OperationMode::CertSearch) || cmd_args.no_dns_check;
 
@@ -79,16 +79,13 @@ async fn initialize_dns_resolvers(cmd_args: &cli::CommandArgs) -> Result<Vec<Ipv
         "No DNS resolvers provided! At least one resolver must be specified."
     );
 
-    let ipv4_resolvers: Vec<Ipv4Addr> = resolver_list
+    let resolvers: Vec<SocketAddr> = resolver_list
         .iter()
-        .map(|s| {
-            s.parse::<Ipv4Addr>()
-                .map_err(|_| anyhow!("Invalid IPv4 address: '{s}'"))
-        })
+        .map(|s| parse_ipv4_with_port(s))
         .collect::<Result<_, _>>()?;
 
     let working_resolvers =
-        filter_working_resolvers(no_dns_check, &cmd_args.transport_protocol, &ipv4_resolvers).await;
+        filter_working_resolvers(no_dns_check, &cmd_args.transport_protocol, &resolvers).await;
 
     ensure!(
         !working_resolvers.is_empty(),

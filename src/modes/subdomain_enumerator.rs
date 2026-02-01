@@ -4,7 +4,7 @@ use anyhow::{Result, anyhow};
 use colored::Colorize;
 use rand::Rng;
 use std::fmt::Write;
-use std::net::Ipv4Addr;
+use std::net::SocketAddr;
 use std::{
     collections::HashSet,
     io::{self},
@@ -37,7 +37,7 @@ use crate::{
 
 // A type alias for the result sent between threads.
 type SubdomainResult =
-    Result<(String, Ipv4Addr, HashSet<ResourceRecord>), (String, Ipv4Addr, DnsError)>;
+    Result<(String, SocketAddr, HashSet<ResourceRecord>), (String, SocketAddr, DnsError)>;
 #[derive(Clone)]
 struct SubdomainContext {
     lookup: LookupContext,
@@ -50,7 +50,7 @@ const DEFAULT_QUERY_TYPES: &[QueryType] = &[QueryType::A, QueryType::AAAA];
 #[allow(clippy::too_many_lines)]
 pub async fn enumerate_subdomains(
     cmd_args: &CommandArgs,
-    dns_resolver_list: &[Ipv4Addr],
+    dns_resolver_list: &[SocketAddr],
 ) -> Result<()> {
     let interrupted = interrupt::initialize_interrupt_handler()?;
 
@@ -242,7 +242,7 @@ async fn resolve_subdomain(ctx: &SubdomainContext, subdomain: &str) -> Subdomain
     let fqdn = format!("{}.{}", subdomain, ctx.target);
     let mut aggregated = HashSet::new();
     let mut first_failure: Option<QueryFailure> = None;
-    let mut success_resolver: Option<Ipv4Addr> = None;
+    let mut success_resolver: Option<SocketAddr> = None;
     let mut first_query = true;
 
     let primary_result = ctx
@@ -301,7 +301,7 @@ async fn resolve_subdomain(ctx: &SubdomainContext, subdomain: &str) -> Subdomain
 async fn process_failed_subdomains(
     cmd_args: &CommandArgs,
     pool: &AsyncResolver,
-    dns_resolvers: &[Ipv4Addr],
+    dns_resolvers: &[SocketAddr],
     failed_subdomains: Vec<String>,
     interrupt: &AtomicBool,
     query_plan: &QueryPlan,
@@ -376,7 +376,7 @@ fn read_wordlist(wordlist_path: Option<&String>) -> Result<Vec<String>> {
     }
 }
 
-async fn handle_wildcard_domain(args: &CommandArgs, dns_resolvers: &[Ipv4Addr]) -> Result<bool> {
+async fn handle_wildcard_domain(args: &CommandArgs, dns_resolvers: &[SocketAddr]) -> Result<bool> {
     if check_wildcard_domain(args, dns_resolvers).await? {
         log_warn!("Warning: Wildcard domain detected. Results may include false positives!");
         log_question!("Do you want to continue? (y/n): ");
@@ -396,7 +396,7 @@ async fn handle_wildcard_domain(args: &CommandArgs, dns_resolvers: &[Ipv4Addr]) 
     Ok(false)
 }
 
-async fn check_wildcard_domain(args: &CommandArgs, dns_resolvers: &[Ipv4Addr]) -> Result<bool> {
+async fn check_wildcard_domain(args: &CommandArgs, dns_resolvers: &[SocketAddr]) -> Result<bool> {
     const ATTEMPTS: u8 = 3;
     const MAX_PREFIX_LENGTH: usize = 63;
 
@@ -423,7 +423,7 @@ async fn check_wildcard_domain(args: &CommandArgs, dns_resolvers: &[Ipv4Addr]) -
         let query_type = &DEFAULT_QUERY_TYPES[rng.random_range(0..DEFAULT_QUERY_TYPES.len())];
 
         if resolver_pool
-            .resolve(resolver, &fqdn, query_type, &args.transport_protocol, true)
+            .resolve(*resolver, &fqdn, query_type, &args.transport_protocol, true)
             .await
             .is_ok()
         {
@@ -442,7 +442,7 @@ async fn check_wildcard_domain(args: &CommandArgs, dns_resolvers: &[Ipv4Addr]) -
 fn print_query_result(
     args: &CommandArgs,
     subdomain: &str,
-    resolver: Ipv4Addr,
+    resolver: SocketAddr,
     records: Option<&HashSet<ResourceRecord>>,
 ) {
     if args.quiet {
@@ -473,7 +473,7 @@ fn print_query_result(
 fn print_query_error(
     args: &CommandArgs,
     subdomain: &str,
-    resolver: Ipv4Addr,
+    resolver: SocketAddr,
     error: &DnsError,
     retry: bool,
 ) {

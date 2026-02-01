@@ -2,16 +2,22 @@ use anyhow::{Context, Result, anyhow, ensure};
 use regex::Regex;
 use std::{
     fs,
-    net::{IpAddr, Ipv4Addr},
+    net::{IpAddr, Ipv4Addr, SocketAddr, SocketAddrV4},
     path::Path,
 };
 
+use crate::dns::DEFAULT_DNS_PORT;
 use crate::network::{check, types::TransportProtocol};
 use std::sync::LazyLock;
 
 static DOMAIN_REGEX: LazyLock<Regex> = LazyLock::new(|| {
+    // Label rules: start with alnum/underscore, can contain hyphens in middle, end with alnum/underscore
+    // Each label 1-63 chars, TLD must be 2+ alpha chars
     Regex::new(r"^(?:[a-zA-Z0-9_](?:[a-zA-Z0-9_-]{0,61}[a-zA-Z0-9_])?\.)+[a-zA-Z]{2,}\.?$").unwrap()
 });
+
+const MAX_LABEL_LENGTH: usize = 63;
+const MAX_DOMAIN_LENGTH: usize = 253;
 
 fn parse_csv(input: &str) -> Vec<String> {
     input
@@ -26,7 +32,25 @@ pub fn validate_target(input: &str) -> Result<String> {
 
     // Check for valid domain name
     if DOMAIN_REGEX.is_match(input) {
-        return Ok(input.to_string());
+        // Validate total domain length
+        let domain_without_trailing_dot = input.trim_end_matches('.');
+        if domain_without_trailing_dot.len() > MAX_DOMAIN_LENGTH {
+            return Err(anyhow!(
+                "Domain name exceeds maximum length of {MAX_DOMAIN_LENGTH} characters: {input}"
+            ));
+        }
+
+        // Validate individual label lengths
+        for label in domain_without_trailing_dot.split('.') {
+            if label.len() > MAX_LABEL_LENGTH {
+                return Err(anyhow!(
+                    "Domain label '{label}' exceeds maximum length of {MAX_LABEL_LENGTH} characters"
+                ));
+            }
+        }
+
+        // Normalize to lowercase for DNS case-insensitivity
+        return Ok(input.to_lowercase());
     }
 
     // Check for valid IP address (IPv4 or IPv6)
@@ -81,11 +105,18 @@ pub fn validate_target(input: &str) -> Result<String> {
         }
     }
 
-    // Check for CSV list of IP addresses
+    // Check for CSV list of IP addresses (single-pass with early exit on invalid IP)
     if input.contains(',') {
-        let ips: Vec<&str> = input.split(',').collect();
-        if ips.iter().all(|&ip| ip.trim().parse::<IpAddr>().is_ok()) {
-            return Ok(input.to_string());
+        let result: Result<Vec<_>, _> = input
+            .split(',')
+            .map(|ip| {
+                let trimmed = ip.trim();
+                trimmed.parse::<IpAddr>().map(|_| trimmed)
+            })
+            .collect();
+
+        if let Ok(ips) = result {
+            return Ok(ips.join(","));
         }
     }
 
@@ -120,17 +151,41 @@ pub fn validate_dns_resolvers(servers: &str) -> Result<String> {
     Ok(server_list.join(","))
 }
 
-pub fn validate_ipv4(ip: &str) -> Result<String> {
-    ip.parse::<Ipv4Addr>()
-        .with_context(|| format!("Invalid IPv4 address: {ip}"))
-        .map(|_| ip.to_string())
+/// Parses an IPv4 address with an optional port.
+///
+/// Accepted formats:
+/// - `192.168.1.1` - IP only (defaults to port 53)
+/// - `192.168.1.1:5353` - IP with custom port
+pub fn parse_ipv4_with_port(input: &str) -> Result<SocketAddr> {
+    let input = input.trim();
+
+    if let Some((ip_part, port_part)) = input.rsplit_once(':') {
+        let ip = ip_part
+            .parse::<Ipv4Addr>()
+            .with_context(|| format!("Invalid IPv4 address: {ip_part}"))?;
+        let port = port_part
+            .parse::<u16>()
+            .with_context(|| format!("Invalid port number: {port_part}"))?;
+        Ok(SocketAddr::V4(SocketAddrV4::new(ip, port)))
+    } else {
+        let ip = input
+            .parse::<Ipv4Addr>()
+            .with_context(|| format!("Invalid IPv4 address: {input}"))?;
+        Ok(SocketAddr::V4(SocketAddrV4::new(ip, DEFAULT_DNS_PORT)))
+    }
+}
+
+/// Validates an IPv4 address with an optional port, returning the original string.
+pub fn validate_ipv4(input: &str) -> Result<String> {
+    parse_ipv4_with_port(input)?;
+    Ok(input.trim().to_string())
 }
 
 pub async fn filter_working_resolvers(
     no_dns_check: bool,
     transport_protocol: &TransportProtocol,
-    dns_resolvers: &[Ipv4Addr],
-) -> Vec<Ipv4Addr> {
+    dns_resolvers: &[SocketAddr],
+) -> Vec<SocketAddr> {
     if no_dns_check {
         return dns_resolvers.to_vec();
     }
@@ -163,9 +218,58 @@ mod test {
     }
 
     #[test]
+    fn valid_ipv4_with_port() {
+        #[allow(clippy::ip_constant)]
+        let valid_ips_with_port = [
+            ("192.168.0.1:53", Ipv4Addr::new(192, 168, 0, 1), 53),
+            ("127.0.0.1:5353", Ipv4Addr::LOCALHOST, 5353),
+            ("8.8.8.8:853", Ipv4Addr::new(8, 8, 8, 8), 853),
+            ("1.1.1.1:1", Ipv4Addr::new(1, 1, 1, 1), 1),
+            ("0.0.0.0:65535", Ipv4Addr::UNSPECIFIED, 65535),
+        ];
+        for (input, expected_ip, expected_port) in valid_ips_with_port {
+            let result = validate_ipv4(input);
+            assert!(result.is_ok(), "Expected valid: {input}");
+            assert_eq!(result.unwrap(), input);
+
+            let parsed = parse_ipv4_with_port(input).unwrap();
+            assert_eq!(
+                parsed,
+                SocketAddr::V4(SocketAddrV4::new(expected_ip, expected_port))
+            );
+        }
+    }
+
+    #[test]
+    fn ipv4_without_port_defaults_to_53() {
+        let parsed = parse_ipv4_with_port("8.8.8.8").unwrap();
+        assert_eq!(
+            parsed,
+            SocketAddr::V4(SocketAddrV4::new(
+                Ipv4Addr::new(8, 8, 8, 8),
+                DEFAULT_DNS_PORT
+            ))
+        );
+    }
+
+    #[test]
     fn invalid_ipv4() {
         assert!(validate_ipv4("256.0.0.1").is_err());
         assert!(validate_ipv4("127.0.0.1234").is_err());
+    }
+
+    #[test]
+    fn invalid_ipv4_with_port() {
+        // Invalid port (out of range)
+        assert!(validate_ipv4("192.168.1.1:65536").is_err());
+        // Invalid port (negative - parsed as invalid)
+        assert!(validate_ipv4("192.168.1.1:-1").is_err());
+        // Invalid port (not a number)
+        assert!(validate_ipv4("192.168.1.1:abc").is_err());
+        // Invalid IP with valid port
+        assert!(validate_ipv4("256.0.0.1:53").is_err());
+        // Empty port
+        assert!(validate_ipv4("192.168.1.1:").is_err());
     }
 
     #[test]
@@ -187,6 +291,19 @@ mod test {
     }
 
     #[test]
+    fn valid_dns_resolver_list_with_ports() {
+        assert_eq!(
+            validate_dns_resolvers("192.0.2.1:5353,8.8.8.8:853").unwrap(),
+            "192.0.2.1:5353,8.8.8.8:853"
+        );
+        // Mixed: some with ports, some without
+        assert_eq!(
+            validate_dns_resolvers("192.0.2.1,8.8.8.8:853").unwrap(),
+            "192.0.2.1,8.8.8.8:853"
+        );
+    }
+
+    #[test]
     fn invalid_dns_resolver_list() {
         // Test with invalid IP address
         assert!(validate_dns_resolvers("192.0.2.1,256.0.0.1").is_err());
@@ -196,6 +313,9 @@ mod test {
 
         // Test with invalid format
         assert!(validate_dns_resolvers("192.0.2.1,8.8.8.8,invalid").is_err());
+
+        // Test with invalid port
+        assert!(validate_dns_resolvers("192.0.2.1:65536").is_err());
     }
 
     #[test]
@@ -247,9 +367,41 @@ mod test {
 
     #[test]
     fn domain_with_whitespace() {
-        // Should trim and validate
+        // Should trim, validate, and lowercase
         assert_eq!(validate_target("  example.com  ").unwrap(), "example.com");
         assert_eq!(validate_target("\texample.com\n").unwrap(), "example.com");
+    }
+
+    #[test]
+    fn domain_normalized_to_lowercase() {
+        assert_eq!(validate_target("EXAMPLE.COM").unwrap(), "example.com");
+        assert_eq!(validate_target("Example.Com").unwrap(), "example.com");
+        assert_eq!(
+            validate_target("SUB.EXAMPLE.COM").unwrap(),
+            "sub.example.com"
+        );
+    }
+
+    #[test]
+    fn domain_label_length_validation() {
+        // Label at exactly 63 chars should be valid
+        let label_63 = "a".repeat(63);
+        let domain_63 = format!("{label_63}.com");
+        assert!(validate_target(&domain_63).is_ok());
+
+        // Label at 64 chars should be invalid
+        let label_64 = "a".repeat(64);
+        let domain_64 = format!("{label_64}.com");
+        assert!(validate_target(&domain_64).is_err());
+    }
+
+    #[test]
+    fn csv_ip_list_normalized() {
+        // Should trim whitespace from individual IPs
+        assert_eq!(
+            validate_target("1.1.1.1 , 8.8.8.8 , 9.9.9.9").unwrap(),
+            "1.1.1.1,8.8.8.8,9.9.9.9"
+        );
     }
 
     #[test]
@@ -386,11 +538,24 @@ mod test {
             validate_dns_resolvers("8.8.8.8 , 1.1.1.1").unwrap(),
             "8.8.8.8,1.1.1.1"
         );
+        // With ports
+        assert_eq!(
+            validate_dns_resolvers("8.8.8.8:53 , 1.1.1.1:5353").unwrap(),
+            "8.8.8.8:53,1.1.1.1:5353"
+        );
     }
 
     #[test]
     fn dns_resolver_single() {
         assert_eq!(validate_dns_resolvers("8.8.8.8").unwrap(), "8.8.8.8");
+    }
+
+    #[test]
+    fn dns_resolver_single_with_port() {
+        assert_eq!(
+            validate_dns_resolvers("8.8.8.8:5353").unwrap(),
+            "8.8.8.8:5353"
+        );
     }
 
     #[test]

@@ -31,7 +31,6 @@ const DEFAULT_POOL_SIZE: usize = 10; // Default number of UDP sockets in the poo
 const DEFAULT_TIMEOUT: Duration = Duration::from_millis(1500); // Default request timeout (UDP/TCP)
 const UDP_BUFFER_SIZE: usize = 512; // Standard DNS UDP buffer size for receiving
 const TCP_BUFFER_SIZE: usize = 65535; // Max DNS TCP message size
-const DNS_PORT: u16 = 53; // Standard DNS port
 
 #[derive(Clone)]
 pub struct AsyncResolver {
@@ -139,7 +138,7 @@ impl AsyncResolver {
 
     pub async fn resolve(
         &self,
-        dns_resolver: &Ipv4Addr,
+        dns_resolver: SocketAddr,
         domain: &str,
         query_type: &QueryType,
         protocol: &TransportProtocol,
@@ -168,7 +167,7 @@ impl AsyncResolver {
 
     async fn resolve_udp(
         &self,
-        dns_resolver: &Ipv4Addr,
+        dns_resolver: SocketAddr,
         mut query_packet: DnsPacket,
     ) -> Result<DnsPacket, DnsError> {
         if self.udp_sockets.is_empty() {
@@ -201,12 +200,10 @@ impl AsyncResolver {
             % self.udp_sockets.len();
         let udp_socket = &self.udp_sockets[udp_socket_index];
 
-        let target_sock_addr = SocketAddr::new((*dns_resolver).into(), DNS_PORT);
-
-        if let Err(e) = udp_socket.send_to(udp_request_data, target_sock_addr).await {
+        if let Err(e) = udp_socket.send_to(udp_request_data, dns_resolver).await {
             self.pending_queries.remove(&query_id);
             return Err(DnsError::Network(format!(
-                "UDP: Failed to send query to {target_sock_addr}: {e}"
+                "UDP: Failed to send query to {dns_resolver}: {e}"
             )));
         }
 
@@ -235,12 +232,10 @@ impl AsyncResolver {
 
     async fn resolve_tcp(
         &self,
-        dns_resolver: &Ipv4Addr,
+        dns_resolver: SocketAddr,
         mut query_packet: DnsPacket,
     ) -> Result<DnsPacket, DnsError> {
-        let target_sock_addr = SocketAddr::new((*dns_resolver).into(), DNS_PORT);
-
-        let tcp_connection_mutex = self.get_or_create_tcp_connection(target_sock_addr).await?;
+        let tcp_connection_mutex = self.get_or_create_tcp_connection(dns_resolver).await?;
         let mut tcp_connection_guard = tcp_connection_mutex.lock().await;
 
         let query_id = query_packet.header.id;
@@ -276,7 +271,7 @@ impl AsyncResolver {
                 Ok(Ok(())) => {}
                 Ok(Err(e)) => {
                     return Err(DnsError::Network(format!(
-                        "Failed to write request to {target_sock_addr}: {e}"
+                        "Failed to write request to {dns_resolver}: {e}"
                     )));
                 }
                 Err(_) => {
@@ -295,7 +290,7 @@ impl AsyncResolver {
                 Ok(Ok(_)) => {}
                 Ok(Err(e)) => {
                     return Err(DnsError::Network(format!(
-                        "Failed to read response length from {target_sock_addr}: {e}"
+                        "Failed to read response length from {dns_resolver}: {e}"
                     )));
                 }
                 Err(_) => {
@@ -327,7 +322,7 @@ impl AsyncResolver {
                 Ok(Ok(_)) => {}
                 Ok(Err(e)) => {
                     return Err(DnsError::Network(format!(
-                        "Failed to read response from {target_sock_addr}: {e}"
+                        "Failed to read response from {dns_resolver}: {e}"
                     )));
                 }
                 Err(_) => {
@@ -352,7 +347,7 @@ impl AsyncResolver {
         .await;
 
         if result.is_err() {
-            self.tcp_sockets.remove(&target_sock_addr);
+            self.tcp_sockets.remove(&dns_resolver);
         }
 
         result

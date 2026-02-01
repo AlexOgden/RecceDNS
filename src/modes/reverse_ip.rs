@@ -1,7 +1,7 @@
 use anyhow::Result;
 use colored::Colorize;
 use std::{
-    net::{IpAddr, Ipv4Addr, Ipv6Addr},
+    net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
     sync::atomic::Ordering,
     time::Duration,
     vec,
@@ -23,7 +23,7 @@ use crate::{
     timing::stats::QueryTimer,
 };
 
-pub async fn reverse_ip(cmd_args: &CommandArgs, dns_resolver_list: &[Ipv4Addr]) -> Result<()> {
+pub async fn reverse_ip(cmd_args: &CommandArgs, dns_resolver_list: &[SocketAddr]) -> Result<()> {
     let interrupted = interrupt::initialize_interrupt_handler()?;
 
     let target_ips = parse_ip(&cmd_args.target)?;
@@ -56,7 +56,7 @@ pub async fn reverse_ip(cmd_args: &CommandArgs, dns_resolver_list: &[Ipv4Addr]) 
         query_timer.start();
         let query_result = async_resolver
             .resolve(
-                &resolver,
+                resolver,
                 &ip.to_string(),
                 &QueryType::PTR,
                 &cmd_args.transport_protocol,
