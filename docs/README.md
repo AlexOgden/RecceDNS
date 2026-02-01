@@ -132,7 +132,7 @@ See the [releases](https://github.com/AlexOgden/RecceDNS/releases) page for the 
 |----------|---------------------|-------------|
 | `-m, --mode <MODE>` | `RECCEDNS_MODE` | **Operation mode**. Possible values:<br>• `b`: Basic Enumeration<br>• `s`: Subdomain Enumeration<br>• `r`: Reverse PTR IP<br>• `c`: Certificate Search<br>• `t`: TLD Expansion |
 | `-t, --target <TARGET>` | `RECCEDNS_TARGET` | **Target base domain or IP** (single, CIDR, or range).<br>Examples: `google.com`, `192.168.2.3`, `192.168.2.0/24`, `192.168.2.1-192.168.2.230`, `192.168.0.1,192.168.0.4` |
-| `-d, --dns-resolvers <DNS_RESOLVERS>` | `RECCEDNS_DNS_RESOLVERS` | **DNS resolver(s)** (IPv4, comma-separated, or file path).<br>Default: `1.1.1.1`.<br>You can provide a comma-separated list of IPv4 addresses, or a path to a file containing resolvers (one per line and/or CSV). Multiple resolvers can be selected randomly or sequentially (see `-r`). |
+| `-d, --dns-resolvers <DNS_RESOLVERS>` | `RECCEDNS_DNS_RESOLVERS` | **DNS resolver(s)** (IPv4, comma-separated, or file path).<br>Default: `1.1.1.1`.<br>You can provide a comma-separated list of IPv4 addresses, or a path to a file containing resolvers (one per line and/or CSV). Multiple resolvers can be selected randomly or sequentially (see `-r`).<br>**Custom port:** Append `:<port>` to specify a non-standard port (e.g., `1.1.1.1:5353`). Default port is `53`. |
 | `-p, --protocol <TRANSPORT_PROTOCOL>` | `RECCEDNS_PROTOCOL` | *(Optional)* **Transport protocol** for DNS queries.<br>Values: `UDP` (default), `TCP` |
 | `-w, --wordlist <WORDLIST>` | `RECCEDNS_WORDLIST` | **Path to subdomain wordlist**. Required for enumeration mode. |
 | `-v, --verbose` | `RECCEDNS_VERBOSE` | Print extra information. Default: `false` |
