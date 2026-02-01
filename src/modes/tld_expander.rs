@@ -51,7 +51,8 @@ static TLD_HTTP_CLIENT: LazyLock<
     Client::builder(TokioExecutor::new()).build(https)
 });
 
-type TldResult = Result<(String, SocketAddr, HashSet<ResourceRecord>), (String, SocketAddr, DnsError)>;
+type TldResult =
+    Result<(String, SocketAddr, HashSet<ResourceRecord>), (String, SocketAddr, DnsError)>;
 
 #[derive(Clone)]
 struct TldContext {

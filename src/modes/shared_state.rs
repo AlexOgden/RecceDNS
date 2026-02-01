@@ -150,13 +150,7 @@ impl LookupContext {
 
         let result = self
             .pool
-            .resolve(
-                resolver,
-                fqdn,
-                &query_type,
-                &self.transport,
-                self.recursion,
-            )
+            .resolve(resolver, fqdn, &query_type, &self.transport, self.recursion)
             .await;
 
         self.query_counter.fetch_add(1, Ordering::Relaxed);

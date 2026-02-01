@@ -7,8 +7,10 @@ use std::time::{Duration, Instant};
 use super::DEFAULT_DNS_PORT;
 
 /// Default resolver used as fallback when all resolvers are disabled.
-pub const DEFAULT_RESOLVER: SocketAddr =
-    SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::new(1, 1, 1, 1), DEFAULT_DNS_PORT));
+pub const DEFAULT_RESOLVER: SocketAddr = SocketAddr::V4(SocketAddrV4::new(
+    Ipv4Addr::new(1, 1, 1, 1),
+    DEFAULT_DNS_PORT,
+));
 
 /// Cleanup disabled resolvers every N selections (must be power of 2 - 1 for fast modulo).
 const CLEANUP_INTERVAL_MASK: u64 = 0x3FF; // Every 1024 selects
@@ -166,9 +168,18 @@ mod tests {
 
     fn test_resolvers() -> Vec<SocketAddr> {
         vec![
-            SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::new(1, 1, 1, 1), DEFAULT_DNS_PORT)),
-            SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::new(8, 8, 8, 8), DEFAULT_DNS_PORT)),
-            SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::new(9, 9, 9, 9), DEFAULT_DNS_PORT)),
+            SocketAddr::V4(SocketAddrV4::new(
+                Ipv4Addr::new(1, 1, 1, 1),
+                DEFAULT_DNS_PORT,
+            )),
+            SocketAddr::V4(SocketAddrV4::new(
+                Ipv4Addr::new(8, 8, 8, 8),
+                DEFAULT_DNS_PORT,
+            )),
+            SocketAddr::V4(SocketAddrV4::new(
+                Ipv4Addr::new(9, 9, 9, 9),
+                DEFAULT_DNS_PORT,
+            )),
         ]
     }
 
