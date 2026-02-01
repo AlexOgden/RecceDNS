@@ -219,12 +219,13 @@ mod test {
 
     #[test]
     fn valid_ipv4_with_port() {
+        #[allow(clippy::ip_constant)]
         let valid_ips_with_port = [
             ("192.168.0.1:53", Ipv4Addr::new(192, 168, 0, 1), 53),
-            ("127.0.0.1:5353", Ipv4Addr::new(127, 0, 0, 1), 5353),
+            ("127.0.0.1:5353", Ipv4Addr::LOCALHOST, 5353),
             ("8.8.8.8:853", Ipv4Addr::new(8, 8, 8, 8), 853),
             ("1.1.1.1:1", Ipv4Addr::new(1, 1, 1, 1), 1),
-            ("0.0.0.0:65535", Ipv4Addr::new(0, 0, 0, 0), 65535),
+            ("0.0.0.0:65535", Ipv4Addr::UNSPECIFIED, 65535),
         ];
         for (input, expected_ip, expected_port) in valid_ips_with_port {
             let result = validate_ipv4(input);
@@ -232,14 +233,23 @@ mod test {
             assert_eq!(result.unwrap(), input);
 
             let parsed = parse_ipv4_with_port(input).unwrap();
-            assert_eq!(parsed, SocketAddr::V4(SocketAddrV4::new(expected_ip, expected_port)));
+            assert_eq!(
+                parsed,
+                SocketAddr::V4(SocketAddrV4::new(expected_ip, expected_port))
+            );
         }
     }
 
     #[test]
     fn ipv4_without_port_defaults_to_53() {
         let parsed = parse_ipv4_with_port("8.8.8.8").unwrap();
-        assert_eq!(parsed, SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::new(8, 8, 8, 8), DEFAULT_DNS_PORT)));
+        assert_eq!(
+            parsed,
+            SocketAddr::V4(SocketAddrV4::new(
+                Ipv4Addr::new(8, 8, 8, 8),
+                DEFAULT_DNS_PORT
+            ))
+        );
     }
 
     #[test]
@@ -542,7 +552,10 @@ mod test {
 
     #[test]
     fn dns_resolver_single_with_port() {
-        assert_eq!(validate_dns_resolvers("8.8.8.8:5353").unwrap(), "8.8.8.8:5353");
+        assert_eq!(
+            validate_dns_resolvers("8.8.8.8:5353").unwrap(),
+            "8.8.8.8:5353"
+        );
     }
 
     #[test]
