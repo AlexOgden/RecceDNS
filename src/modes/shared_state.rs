@@ -1,6 +1,6 @@
 use rand::Rng;
 use std::{
-    net::Ipv4Addr,
+    net::SocketAddr,
     sync::{
         Arc,
         atomic::{AtomicU64, Ordering},
@@ -39,7 +39,7 @@ pub struct LookupContext {
 }
 
 pub struct QueryFailure {
-    pub resolver: Ipv4Addr,
+    pub resolver: SocketAddr,
     pub error: DnsError,
 }
 
@@ -126,7 +126,7 @@ impl LookupContext {
         fqdn: &str,
         query_type: QueryType,
         first_query: &mut bool,
-    ) -> Result<(Ipv4Addr, DnsPacket), QueryFailure> {
+    ) -> Result<(SocketAddr, DnsPacket), QueryFailure> {
         let should_wait = !*first_query;
         if *first_query {
             *first_query = false;
@@ -141,7 +141,7 @@ impl LookupContext {
         &self,
         fqdn: &str,
         query_type: QueryType,
-    ) -> Result<(Ipv4Addr, DnsPacket), QueryFailure> {
+    ) -> Result<(SocketAddr, DnsPacket), QueryFailure> {
         // Lock-free resolver selection
         let resolver = self
             .resolver_pool
@@ -151,7 +151,7 @@ impl LookupContext {
         let result = self
             .pool
             .resolve(
-                &resolver,
+                resolver,
                 fqdn,
                 &query_type,
                 &self.transport,

@@ -2,10 +2,11 @@ use anyhow::{Context, Result, anyhow, ensure};
 use regex::Regex;
 use std::{
     fs,
-    net::{IpAddr, Ipv4Addr},
+    net::{IpAddr, Ipv4Addr, SocketAddr, SocketAddrV4},
     path::Path,
 };
 
+use crate::dns::DEFAULT_DNS_PORT;
 use crate::network::{check, types::TransportProtocol};
 use std::sync::LazyLock;
 
@@ -150,17 +151,41 @@ pub fn validate_dns_resolvers(servers: &str) -> Result<String> {
     Ok(server_list.join(","))
 }
 
-pub fn validate_ipv4(ip: &str) -> Result<String> {
-    ip.parse::<Ipv4Addr>()
-        .with_context(|| format!("Invalid IPv4 address: {ip}"))
-        .map(|_| ip.to_string())
+/// Parses an IPv4 address with an optional port.
+///
+/// Accepted formats:
+/// - `192.168.1.1` - IP only (defaults to port 53)
+/// - `192.168.1.1:5353` - IP with custom port
+pub fn parse_ipv4_with_port(input: &str) -> Result<SocketAddr> {
+    let input = input.trim();
+
+    if let Some((ip_part, port_part)) = input.rsplit_once(':') {
+        let ip = ip_part
+            .parse::<Ipv4Addr>()
+            .with_context(|| format!("Invalid IPv4 address: {ip_part}"))?;
+        let port = port_part
+            .parse::<u16>()
+            .with_context(|| format!("Invalid port number: {port_part}"))?;
+        Ok(SocketAddr::V4(SocketAddrV4::new(ip, port)))
+    } else {
+        let ip = input
+            .parse::<Ipv4Addr>()
+            .with_context(|| format!("Invalid IPv4 address: {input}"))?;
+        Ok(SocketAddr::V4(SocketAddrV4::new(ip, DEFAULT_DNS_PORT)))
+    }
+}
+
+/// Validates an IPv4 address with an optional port, returning the original string.
+pub fn validate_ipv4(input: &str) -> Result<String> {
+    parse_ipv4_with_port(input)?;
+    Ok(input.trim().to_string())
 }
 
 pub async fn filter_working_resolvers(
     no_dns_check: bool,
     transport_protocol: &TransportProtocol,
-    dns_resolvers: &[Ipv4Addr],
-) -> Vec<Ipv4Addr> {
+    dns_resolvers: &[SocketAddr],
+) -> Vec<SocketAddr> {
     if no_dns_check {
         return dns_resolvers.to_vec();
     }
@@ -193,9 +218,48 @@ mod test {
     }
 
     #[test]
+    fn valid_ipv4_with_port() {
+        let valid_ips_with_port = [
+            ("192.168.0.1:53", Ipv4Addr::new(192, 168, 0, 1), 53),
+            ("127.0.0.1:5353", Ipv4Addr::new(127, 0, 0, 1), 5353),
+            ("8.8.8.8:853", Ipv4Addr::new(8, 8, 8, 8), 853),
+            ("1.1.1.1:1", Ipv4Addr::new(1, 1, 1, 1), 1),
+            ("0.0.0.0:65535", Ipv4Addr::new(0, 0, 0, 0), 65535),
+        ];
+        for (input, expected_ip, expected_port) in valid_ips_with_port {
+            let result = validate_ipv4(input);
+            assert!(result.is_ok(), "Expected valid: {input}");
+            assert_eq!(result.unwrap(), input);
+
+            let parsed = parse_ipv4_with_port(input).unwrap();
+            assert_eq!(parsed, SocketAddr::V4(SocketAddrV4::new(expected_ip, expected_port)));
+        }
+    }
+
+    #[test]
+    fn ipv4_without_port_defaults_to_53() {
+        let parsed = parse_ipv4_with_port("8.8.8.8").unwrap();
+        assert_eq!(parsed, SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::new(8, 8, 8, 8), DEFAULT_DNS_PORT)));
+    }
+
+    #[test]
     fn invalid_ipv4() {
         assert!(validate_ipv4("256.0.0.1").is_err());
         assert!(validate_ipv4("127.0.0.1234").is_err());
+    }
+
+    #[test]
+    fn invalid_ipv4_with_port() {
+        // Invalid port (out of range)
+        assert!(validate_ipv4("192.168.1.1:65536").is_err());
+        // Invalid port (negative - parsed as invalid)
+        assert!(validate_ipv4("192.168.1.1:-1").is_err());
+        // Invalid port (not a number)
+        assert!(validate_ipv4("192.168.1.1:abc").is_err());
+        // Invalid IP with valid port
+        assert!(validate_ipv4("256.0.0.1:53").is_err());
+        // Empty port
+        assert!(validate_ipv4("192.168.1.1:").is_err());
     }
 
     #[test]
@@ -217,6 +281,19 @@ mod test {
     }
 
     #[test]
+    fn valid_dns_resolver_list_with_ports() {
+        assert_eq!(
+            validate_dns_resolvers("192.0.2.1:5353,8.8.8.8:853").unwrap(),
+            "192.0.2.1:5353,8.8.8.8:853"
+        );
+        // Mixed: some with ports, some without
+        assert_eq!(
+            validate_dns_resolvers("192.0.2.1,8.8.8.8:853").unwrap(),
+            "192.0.2.1,8.8.8.8:853"
+        );
+    }
+
+    #[test]
     fn invalid_dns_resolver_list() {
         // Test with invalid IP address
         assert!(validate_dns_resolvers("192.0.2.1,256.0.0.1").is_err());
@@ -226,6 +303,9 @@ mod test {
 
         // Test with invalid format
         assert!(validate_dns_resolvers("192.0.2.1,8.8.8.8,invalid").is_err());
+
+        // Test with invalid port
+        assert!(validate_dns_resolvers("192.0.2.1:65536").is_err());
     }
 
     #[test]
@@ -448,11 +528,21 @@ mod test {
             validate_dns_resolvers("8.8.8.8 , 1.1.1.1").unwrap(),
             "8.8.8.8,1.1.1.1"
         );
+        // With ports
+        assert_eq!(
+            validate_dns_resolvers("8.8.8.8:53 , 1.1.1.1:5353").unwrap(),
+            "8.8.8.8:53,1.1.1.1:5353"
+        );
     }
 
     #[test]
     fn dns_resolver_single() {
         assert_eq!(validate_dns_resolvers("8.8.8.8").unwrap(), "8.8.8.8");
+    }
+
+    #[test]
+    fn dns_resolver_single_with_port() {
+        assert_eq!(validate_dns_resolvers("8.8.8.8:5353").unwrap(), "8.8.8.8:5353");
     }
 
     #[test]

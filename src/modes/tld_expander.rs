@@ -6,7 +6,7 @@ use hyper::{Method, Request};
 use hyper_rustls::HttpsConnectorBuilder;
 use hyper_util::{client::legacy::Client, rt::TokioExecutor};
 use std::fmt::Write as _;
-use std::net::Ipv4Addr;
+use std::net::SocketAddr;
 use std::{
     cmp::max,
     collections::HashSet,
@@ -51,7 +51,7 @@ static TLD_HTTP_CLIENT: LazyLock<
     Client::builder(TokioExecutor::new()).build(https)
 });
 
-type TldResult = Result<(String, Ipv4Addr, HashSet<ResourceRecord>), (String, Ipv4Addr, DnsError)>;
+type TldResult = Result<(String, SocketAddr, HashSet<ResourceRecord>), (String, SocketAddr, DnsError)>;
 
 #[derive(Clone)]
 struct TldContext {
@@ -60,7 +60,7 @@ struct TldContext {
 }
 
 #[allow(clippy::too_many_lines)]
-pub async fn expand_tlds(cmd_args: &CommandArgs, dns_resolver_list: &[Ipv4Addr]) -> Result<()> {
+pub async fn expand_tlds(cmd_args: &CommandArgs, dns_resolver_list: &[SocketAddr]) -> Result<()> {
     let interrupted = interrupt::initialize_interrupt_handler()?;
     let tld_list_vec = get_tld_list(cmd_args).await?;
     let tld_set: HashSet<String> = tld_list_vec.iter().cloned().collect(); // Keep set for strip_tld
@@ -218,7 +218,7 @@ async fn resolve_tld(ctx: &TldContext, tld: &str) -> TldResult {
 
     let mut aggregated = HashSet::new();
     let mut first_failure: Option<QueryFailure> = None;
-    let mut success_resolver: Option<Ipv4Addr> = None;
+    let mut success_resolver: Option<SocketAddr> = None;
     let mut first_query = true;
 
     let primary_result = ctx
@@ -379,7 +379,7 @@ async fn fetch_and_filter_tld_list() -> Result<Vec<String>> {
     Ok(tld_list)
 }
 
-fn print_query_result(args: &CommandArgs, domain: &str, resolver: Ipv4Addr, response: &str) {
+fn print_query_result(args: &CommandArgs, domain: &str, resolver: SocketAddr, response: &str) {
     if args.quiet {
         return;
     }
@@ -397,7 +397,7 @@ fn print_query_result(args: &CommandArgs, domain: &str, resolver: Ipv4Addr, resp
     log_success!(message);
 }
 
-fn print_query_error(args: &CommandArgs, domain: &str, resolver: Ipv4Addr, error: &DnsError) {
+fn print_query_error(args: &CommandArgs, domain: &str, resolver: SocketAddr, error: &DnsError) {
     if (!args.verbose
         && matches!(
             error,

@@ -1,19 +1,22 @@
 use dashmap::DashMap;
 use rand::Rng;
-use std::net::Ipv4Addr;
+use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
+use super::DEFAULT_DNS_PORT;
+
 /// Default resolver used as fallback when all resolvers are disabled.
-pub const DEFAULT_RESOLVER: Ipv4Addr = Ipv4Addr::new(1, 1, 1, 1);
+pub const DEFAULT_RESOLVER: SocketAddr =
+    SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::new(1, 1, 1, 1), DEFAULT_DNS_PORT));
 
 /// Cleanup disabled resolvers every N selections (must be power of 2 - 1 for fast modulo).
 const CLEANUP_INTERVAL_MASK: u64 = 0x3FF; // Every 1024 selects
 
 #[derive(Debug)]
 pub struct ResolverPool {
-    resolvers: Vec<Ipv4Addr>,
-    disabled: DashMap<Ipv4Addr, Instant>,
+    resolvers: Vec<SocketAddr>,
+    disabled: DashMap<SocketAddr, Instant>,
     index: AtomicUsize,
     select_count: AtomicU64,
     use_random: bool,
@@ -21,7 +24,7 @@ pub struct ResolverPool {
 
 impl ResolverPool {
     #[must_use]
-    pub fn new(resolvers: Vec<Ipv4Addr>, use_random: bool) -> Self {
+    pub fn new(resolvers: Vec<SocketAddr>, use_random: bool) -> Self {
         Self {
             resolvers,
             disabled: DashMap::new(),
@@ -36,7 +39,7 @@ impl ResolverPool {
     /// Returns `Some(resolver)` if one is available, or `None` if the pool is empty.
     /// If all resolvers are temporarily disabled, returns the first resolver as fallback.
     #[inline]
-    pub fn select(&self) -> Option<Ipv4Addr> {
+    pub fn select(&self) -> Option<SocketAddr> {
         if self.resolvers.is_empty() {
             return None;
         }
@@ -57,7 +60,7 @@ impl ResolverPool {
     }
 
     #[inline]
-    fn select_sequential(&self, len: usize) -> Option<Ipv4Addr> {
+    fn select_sequential(&self, len: usize) -> Option<SocketAddr> {
         // Try each resolver starting from current index
         for _ in 0..len {
             // Atomic increment with wrap-around
@@ -74,7 +77,7 @@ impl ResolverPool {
     }
 
     #[inline]
-    fn select_random(&self, len: usize) -> Option<Ipv4Addr> {
+    fn select_random(&self, len: usize) -> Option<SocketAddr> {
         let mut rng = rand::rng();
         let start = rng.random_range(0..len);
 
@@ -92,21 +95,21 @@ impl ResolverPool {
     }
 
     #[inline]
-    fn is_disabled(&self, resolver: Ipv4Addr) -> bool {
+    fn is_disabled(&self, resolver: SocketAddr) -> bool {
         self.disabled
             .get(&resolver)
             .is_some_and(|expiry| *expiry > Instant::now())
     }
 
     #[inline]
-    fn fallback(&self) -> Option<Ipv4Addr> {
+    fn fallback(&self) -> Option<SocketAddr> {
         self.resolvers.first().copied()
     }
 
     /// Temporarily disable a resolver for the specified duration.
     ///
     /// Will not disable if it would leave no resolvers available.
-    pub fn disable(&self, resolver: Ipv4Addr, duration: Duration) {
+    pub fn disable(&self, resolver: SocketAddr, duration: Duration) {
         // Don't disable the last available resolver
         let other_available = self
             .resolvers
@@ -161,12 +164,16 @@ impl Clone for ResolverPool {
 mod tests {
     use super::*;
 
-    fn test_resolvers() -> Vec<Ipv4Addr> {
+    fn test_resolvers() -> Vec<SocketAddr> {
         vec![
-            "1.1.1.1".parse().unwrap(),
-            "8.8.8.8".parse().unwrap(),
-            "9.9.9.9".parse().unwrap(),
+            SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::new(1, 1, 1, 1), DEFAULT_DNS_PORT)),
+            SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::new(8, 8, 8, 8), DEFAULT_DNS_PORT)),
+            SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::new(9, 9, 9, 9), DEFAULT_DNS_PORT)),
         ]
+    }
+
+    fn resolver(ip: &str) -> SocketAddr {
+        SocketAddr::V4(SocketAddrV4::new(ip.parse().unwrap(), DEFAULT_DNS_PORT))
     }
 
     #[test]
@@ -188,10 +195,10 @@ mod tests {
     fn test_sequential_selection() {
         let pool = ResolverPool::new(test_resolvers(), false);
 
-        assert_eq!(pool.select(), Some("1.1.1.1".parse().unwrap()));
-        assert_eq!(pool.select(), Some("8.8.8.8".parse().unwrap()));
-        assert_eq!(pool.select(), Some("9.9.9.9".parse().unwrap()));
-        assert_eq!(pool.select(), Some("1.1.1.1".parse().unwrap())); // Cycles back
+        assert_eq!(pool.select(), Some(resolver("1.1.1.1")));
+        assert_eq!(pool.select(), Some(resolver("8.8.8.8")));
+        assert_eq!(pool.select(), Some(resolver("9.9.9.9")));
+        assert_eq!(pool.select(), Some(resolver("1.1.1.1"))); // Cycles back
     }
 
     #[test]
@@ -209,10 +216,10 @@ mod tests {
         let pool = ResolverPool::new(test_resolvers(), false);
 
         // Disable first resolver
-        pool.disable("1.1.1.1".parse().unwrap(), Duration::from_secs(10));
+        pool.disable(resolver("1.1.1.1"), Duration::from_secs(10));
 
         // Should skip to second resolver
-        assert_eq!(pool.select(), Some("8.8.8.8".parse().unwrap()));
+        assert_eq!(pool.select(), Some(resolver("8.8.8.8")));
         assert_eq!(pool.available_count(), 2);
     }
 
@@ -221,7 +228,7 @@ mod tests {
         let pool = ResolverPool::new(test_resolvers(), false);
 
         // Disable with very short duration
-        pool.disable("1.1.1.1".parse().unwrap(), Duration::from_millis(10));
+        pool.disable(resolver("1.1.1.1"), Duration::from_millis(10));
 
         // Wait for expiry
         std::thread::sleep(Duration::from_millis(20));
@@ -237,11 +244,11 @@ mod tests {
 
     #[test]
     fn test_cannot_disable_all() {
-        let resolvers = vec!["1.1.1.1".parse().unwrap(), "8.8.8.8".parse().unwrap()];
+        let resolvers = vec![resolver("1.1.1.1"), resolver("8.8.8.8")];
         let pool = ResolverPool::new(resolvers, false);
 
-        pool.disable("1.1.1.1".parse().unwrap(), Duration::from_secs(10));
-        pool.disable("8.8.8.8".parse().unwrap(), Duration::from_secs(10));
+        pool.disable(resolver("1.1.1.1"), Duration::from_secs(10));
+        pool.disable(resolver("8.8.8.8"), Duration::from_secs(10));
 
         // At least one should still be available (second disable should fail)
         assert!(pool.available_count() >= 1);
@@ -250,14 +257,14 @@ mod tests {
 
     #[test]
     fn test_fallback_when_all_disabled() {
-        let resolvers = vec!["1.1.1.1".parse().unwrap()];
+        let resolvers = vec![resolver("1.1.1.1")];
         let pool = ResolverPool::new(resolvers, false);
 
         // Can't disable the only resolver
-        pool.disable("1.1.1.1".parse().unwrap(), Duration::from_secs(10));
+        pool.disable(resolver("1.1.1.1"), Duration::from_secs(10));
 
         // Should still return the resolver as fallback
-        assert_eq!(pool.select(), Some("1.1.1.1".parse().unwrap()));
+        assert_eq!(pool.select(), Some(resolver("1.1.1.1")));
     }
 
     #[test]

@@ -1,11 +1,11 @@
 use colored::Colorize;
 use rand::Rng;
 use rand::distr::Alphanumeric;
+use std::net::SocketAddr;
 
 use crate::dns::async_resolver::AsyncResolver;
 use crate::dns::protocol::QueryType;
 use crate::network::types::TransportProtocol;
-use std::net::Ipv4Addr;
 
 const ROOT_SERVER: &str = "rootservers.net";
 
@@ -20,7 +20,7 @@ fn generate_random_domain() -> String {
 
 async fn check_nxdomain_hijacking(
     resolver_pool: &AsyncResolver,
-    server_address: &Ipv4Addr,
+    server_address: SocketAddr,
     transport_protocol: &TransportProtocol,
 ) -> bool {
     let random_domain = generate_random_domain();
@@ -36,7 +36,7 @@ async fn check_nxdomain_hijacking(
         .is_ok()
 }
 
-fn print_status(server_address: Ipv4Addr, status: &str) {
+fn print_status(server_address: SocketAddr, status: &str) {
     let colored_status = match status {
         "OK" => format!("[{}]", status.green()),
         "FAIL" => format!("[{}]", status.red()),
@@ -52,23 +52,23 @@ fn print_status(server_address: Ipv4Addr, status: &str) {
 }
 
 pub async fn check_dns_resolvers(
-    dns_resolvers: &[Ipv4Addr],
+    dns_resolvers: &[SocketAddr],
     transport_protocol: &TransportProtocol,
-) -> Vec<Ipv4Addr> {
-    let mut working_servers: Vec<Ipv4Addr> = Vec::new();
-    let mut failed_servers: Vec<(Ipv4Addr, &str)> = Vec::new();
+) -> Vec<SocketAddr> {
+    let mut working_servers: Vec<SocketAddr> = Vec::new();
+    let mut failed_servers: Vec<(SocketAddr, &str)> = Vec::new();
 
     let resolver_pool = AsyncResolver::new(Some(1)).await.unwrap();
 
     println!("Checking DNS Resolvers...");
 
     for &server in dns_resolvers {
-        let hijacking = check_nxdomain_hijacking(&resolver_pool, &server, transport_protocol).await;
+        let hijacking = check_nxdomain_hijacking(&resolver_pool, server, transport_protocol).await;
 
         let root_server_letter = rand::rng().random_range(b'a'..b'm') as char;
         let domain = format!("{root_server_letter}.{ROOT_SERVER}");
         let normal_query = resolver_pool
-            .resolve(&server, &domain, &QueryType::A, transport_protocol, true)
+            .resolve(server, &domain, &QueryType::A, transport_protocol, true)
             .await;
 
         if hijacking {
