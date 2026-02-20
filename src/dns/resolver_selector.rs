@@ -1,5 +1,5 @@
 use dashmap::DashMap;
-use rand::Rng;
+use rand::RngExt;
 use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::time::{Duration, Instant};

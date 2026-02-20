@@ -2,7 +2,7 @@
 
 use anyhow::{Result, anyhow};
 use colored::Colorize;
-use rand::Rng;
+use rand::RngExt;
 use std::fmt::Write;
 use std::net::SocketAddr;
 use std::{

@@ -9,7 +9,6 @@ jobs:
   create_release:
     runs-on: ubuntu-latest
     outputs:
-      upload_url: ${{ steps.create_release.outputs.upload_url }}
       version: ${{ steps.get_version.outputs.version }}
     steps:
       - name: Checkout repository
@@ -50,13 +49,11 @@ jobs:
           fi
 
       - name: Create Release
-        id: create_release
-        uses: actions/create-release@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        uses: softprops/action-gh-release@v2
         with:
+          token: ${{ secrets.GITHUB_TOKEN }}
           tag_name: ${{ github.ref }}
-          release_name: ${{ github.ref }}
+          name: ${{ github.ref }}
           body: ${{ env.NOTES }}
           draft: false
           prerelease: false
@@ -88,17 +85,12 @@ jobs:
           ref: ${{ github.ref }}
 
       - name: Install Rust
-        uses: actions-rs/toolchain@v1
+        uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: stable
-          target: ${{ matrix.target }}
-          override: true
+          targets: ${{ matrix.target }}
 
       - name: Build
-        uses: actions-rs/cargo@v1
-        with:
-          command: build
-          args: --release --target ${{ matrix.target }}
+        run: cargo build --release --target ${{ matrix.target }}
           
       - name: Prepare binary for upload
         shell: bash
@@ -130,14 +122,10 @@ jobs:
           fi
 
       - name: Upload Release Asset
-        uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        uses: softprops/action-gh-release@v2
         with:
-          upload_url: ${{ needs.create_release.outputs.upload_url }}
-          asset_path: ./${{ env.ASSET_NAME }}
-          asset_name: ${{ env.ASSET_NAME }}
-          asset_content_type: application/octet-stream
+          token: ${{ secrets.GITHUB_TOKEN }}
+          files: ./${{ env.ASSET_NAME }}
 
   build_and_upload_arm:
     needs: create_release
@@ -216,14 +204,10 @@ jobs:
           ls -la ${ASSET_NAME}
 
       - name: Upload Release Asset
-        uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        uses: softprops/action-gh-release@v2
         with:
-          upload_url: ${{ needs.create_release.outputs.upload_url }}
-          asset_path: ./${{ env.ASSET_NAME }}
-          asset_name: ${{ env.ASSET_NAME }}
-          asset_content_type: application/octet-stream
+          token: ${{ secrets.GITHUB_TOKEN }}
+          files: ./${{ env.ASSET_NAME }}
 
   build_and_publish_docker:
     needs: create_release
