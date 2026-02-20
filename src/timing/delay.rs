@@ -1,4 +1,4 @@
-use rand::Rng;
+use rand::RngExt;
 use std::fmt;
 use std::str::FromStr;
 use std::sync::Arc;
