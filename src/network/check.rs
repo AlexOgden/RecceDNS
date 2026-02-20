@@ -1,6 +1,6 @@
 use colored::Colorize;
-use rand::distr::Alphanumeric;
 use rand::RngExt;
+use rand::distr::Alphanumeric;
 use std::net::SocketAddr;
 
 use crate::dns::async_resolver::AsyncResolver;
