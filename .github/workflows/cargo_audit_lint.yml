@@ -24,16 +24,15 @@ jobs:
     steps:
     - uses: actions/checkout@v4
 
-    - name: Cache Rust Toolchain
+    - name: Cache Cargo Registry
       uses: actions/cache@v3
       with:
         path: |
           ~/.cargo/registry
           ~/.cargo/git
-          ~/.rustup/toolchains
-        key: ${{ runner.os }}-rust-toolchain
+        key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
         restore-keys: |
-          ${{ runner.os }}-rust-toolchain
+          ${{ runner.os }}-cargo-
 
     - name: Set up Rust
       uses: actions-rs/toolchain@v1
