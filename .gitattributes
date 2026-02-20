@@ -1,0 +1,2 @@
+# Ensure hook scripts always use LF so they are executable on Linux
+.githooks/* text eol=lf

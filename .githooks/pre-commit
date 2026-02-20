@@ -1,0 +1,11 @@
+#!/bin/sh
+cargo fmt
+
+if ! git diff --quiet; then
+    echo ""
+    echo "cargo fmt made changes to the following files:"
+    git diff --name-only
+    echo ""
+    echo "Files have been formatted. Please review and re-stage the changes before committing."
+    exit 1
+fi
