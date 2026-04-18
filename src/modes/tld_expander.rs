@@ -229,7 +229,7 @@ async fn resolve_tld(ctx: &TldContext, tld: &str) -> TldResult {
 
     match primary_result {
         Ok((resolver, packet)) => {
-            aggregated.extend(packet.answers.into_iter());
+            aggregated.extend(packet.answers);
             success_resolver = Some(resolver);
         }
         Err(failure) => {
@@ -251,7 +251,7 @@ async fn resolve_tld(ctx: &TldContext, tld: &str) -> TldResult {
                 if success_resolver.is_none() {
                     success_resolver = Some(resolver);
                 }
-                aggregated.extend(packet.answers.into_iter());
+                aggregated.extend(packet.answers);
             }
             Err(failure) => {
                 if first_failure.is_none() {

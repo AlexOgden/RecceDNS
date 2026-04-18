@@ -252,7 +252,7 @@ async fn resolve_subdomain(ctx: &SubdomainContext, subdomain: &str) -> Subdomain
 
     match primary_result {
         Ok((resolver, packet)) => {
-            aggregated.extend(packet.answers.into_iter());
+            aggregated.extend(packet.answers);
             success_resolver = Some(resolver);
         }
         Err(failure) => {
@@ -274,7 +274,7 @@ async fn resolve_subdomain(ctx: &SubdomainContext, subdomain: &str) -> Subdomain
                 if success_resolver.is_none() {
                     success_resolver = Some(resolver);
                 }
-                aggregated.extend(packet.answers.into_iter());
+                aggregated.extend(packet.answers);
             }
             Err(failure) => {
                 if first_failure.is_none() {
