@@ -3,7 +3,7 @@ use std::{collections::HashSet, sync::LazyLock};
 use crate::{
     io::{
         cli::{self, CommandArgs},
-        json::{CertSearchOutput, Output},
+        json::{Output, RecceOutput},
     },
     log_error, log_success,
 };
@@ -58,7 +58,7 @@ pub async fn search_certificates(cmd_args: &CommandArgs) -> Result<()> {
     let mut results_output = cmd_args
         .json
         .as_ref()
-        .map(|_| CertSearchOutput::new(cmd_args.target.clone()));
+        .map(|_| RecceOutput::new(cmd_args.target.clone()));
     let target_domain = cmd_args.target.as_str();
 
     let max_retries = if cmd_args.no_retry { 1 } else { 3 };
@@ -82,7 +82,7 @@ pub async fn search_certificates(cmd_args: &CommandArgs) -> Result<()> {
 
                 if let Some(output) = &mut results_output {
                     for subdomain in &subdomains {
-                        output.add_result(subdomain.clone());
+                        output.add_result(format!("{}.{}", subdomain, target_domain), vec![]);
                     }
                 }
 

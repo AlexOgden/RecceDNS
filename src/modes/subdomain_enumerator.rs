@@ -28,7 +28,7 @@ use crate::{
     io::{
         cli::{self, CommandArgs},
         interrupt,
-        json::{DnsEnumerationOutput, Output},
+        json::{Output, RecceOutput},
         logger, wordlist,
     },
     log_error, log_info, log_question, log_success, log_warn,
@@ -73,7 +73,7 @@ pub async fn enumerate_subdomains(
     ));
 
     let mut results_output = if cmd_args.json.is_some() {
-        Some(DnsEnumerationOutput::new(cmd_args.target.clone()))
+        Some(RecceOutput::new(cmd_args.target.clone()))
     } else {
         None
     };
@@ -189,9 +189,8 @@ pub async fn enumerate_subdomains(
                 print_query_result(cmd_args, &subdomain, resolver, Some(&results));
 
                 if let Some(output) = &mut results_output {
-                    for r in &results {
-                        output.add_result(r.clone());
-                    }
+                    let records: Vec<ResourceRecord> = results.iter().cloned().collect();
+                    output.add_result(format!("{}.{}", subdomain, cmd_args.target), records);
                 }
 
                 // Spawn mutations if enabled

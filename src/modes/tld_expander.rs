@@ -26,7 +26,7 @@ use crate::{
     io::{
         cli::{self, CommandArgs},
         interrupt,
-        json::{DnsEnumerationOutput, Output},
+        json::{Output, RecceOutput},
         logger, wordlist,
     },
     log_error, log_info, log_success, log_warn,
@@ -72,7 +72,7 @@ pub async fn expand_tlds(cmd_args: &CommandArgs, dns_resolver_list: &[SocketAddr
     let mut results_output = cmd_args
         .json
         .as_ref()
-        .map(|_| DnsEnumerationOutput::new(cmd_args.target.clone()));
+        .map(|_| RecceOutput::new(cmd_args.target.clone()));
 
     let num_threads = cmd_args.threads.unwrap_or_else(|| {
         let cpus = num_cpus::get();
@@ -162,9 +162,8 @@ pub async fn expand_tlds(cmd_args: &CommandArgs, dns_resolver_list: &[SocketAddr
                 print_query_result(cmd_args, &fqdn, resolver, &response_str);
 
                 if let Some(output) = &mut results_output {
-                    for r in &results {
-                        output.add_result(r.clone());
-                    }
+                    let records: Vec<ResourceRecord> = results.iter().cloned().collect();
+                    output.add_result(fqdn.clone(), records);
                 }
             }
             Err((fqdn, resolver, error)) => {
