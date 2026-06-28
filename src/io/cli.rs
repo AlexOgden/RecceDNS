@@ -54,6 +54,18 @@ pub struct CommandArgs {
     #[arg(short, long, required = false, env = "RECCEDNS_WORDLIST")]
     pub wordlist: Option<String>,
 
+    /// Path to a mutation rules file (e.g. hashcat-style simple rules)
+    #[arg(long, required = false, env = "RECCEDNS_MUTATE_RULES")]
+    pub mutate_rules: Option<String>,
+
+    /// Path to a mutation wordlist for placeholders
+    #[arg(long, required = false, env = "RECCEDNS_MUTATE_WORDS")]
+    pub mutate_words: Option<String>,
+
+    /// Enable mutation engine with default rules and words
+    #[arg(short = 'M', long, default_value_t = false, env = "RECCEDNS_MUTATE")]
+    pub mutate: bool,
+
     /// Print extra information
     #[arg(short, long, default_value_t = false, env = "RECCEDNS_VERBOSE")]
     pub verbose: bool,
