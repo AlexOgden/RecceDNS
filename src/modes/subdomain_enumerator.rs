@@ -22,7 +22,7 @@ use crate::{
         async_resolver::AsyncResolver,
         error::DnsError,
         format::create_query_response_string,
-        protocol::{QueryType, ResourceRecord, RData},
+        protocol::{QueryType, RData, ResourceRecord},
         resolver_selector::{self, ResolverPool},
     },
     io::{
@@ -425,9 +425,7 @@ async fn check_wildcard_domain(
 
     for _ in 0..ATTEMPTS {
         // Generate a random subdomain prefix
-        let random_subdomain: String = (0..8)
-            .map(|_| rng.random_range('a'..='z'))
-            .collect();
+        let random_subdomain: String = (0..8).map(|_| rng.random_range('a'..='z')).collect();
 
         // Append a unique identifier to avoid DNS caching issues
         let fqdn = format!("{}.{}", random_subdomain, args.target);
