@@ -22,7 +22,7 @@ use crate::{
         async_resolver::AsyncResolver,
         error::DnsError,
         format::create_query_response_string,
-        protocol::{QueryType, ResourceRecord},
+        protocol::{QueryType, RData, ResourceRecord},
         resolver_selector::{self, ResolverPool},
     },
     io::{
@@ -42,6 +42,7 @@ type SubdomainResult =
 struct SubdomainContext {
     lookup: LookupContext,
     target: String,
+    wildcard_records: Option<HashSet<RData>>,
 }
 
 // Default query types for subdomain enumeration if none provided.
@@ -54,9 +55,7 @@ pub async fn enumerate_subdomains(
 ) -> Result<()> {
     let interrupted = interrupt::initialize_interrupt_handler()?;
 
-    if handle_wildcard_domain(cmd_args, dns_resolver_list).await? {
-        return Ok(());
-    }
+    let wildcard_records = handle_wildcard_prompt(cmd_args, dns_resolver_list).await?;
 
     let query_types: &[QueryType] = match cmd_args.query_types.as_slice() {
         [] | [QueryType::ANY] => DEFAULT_QUERY_TYPES,
@@ -73,14 +72,24 @@ pub async fn enumerate_subdomains(
             .bold()
     ));
 
-    // Prepare results output if JSON output is enabled.
     let mut results_output = if cmd_args.json.is_some() {
         Some(DnsEnumerationOutput::new(cmd_args.target.clone()))
     } else {
         None
     };
 
+    let mut mutator = None;
+    if cmd_args.mutate || cmd_args.mutate_rules.is_some() || cmd_args.mutate_words.is_some() {
+        let engine = crate::modes::mutator::MutationEngine::new(
+            cmd_args.mutate_rules.as_ref(),
+            cmd_args.mutate_words.as_ref(),
+        )?;
+        log_info!(format!("Mutation engine {}", "enabled".bold()));
+        mutator = Some(Arc::new(engine));
+    }
+
     let subdomain_list = read_wordlist(cmd_args.wordlist.as_ref())?;
+    let mut active_tasks = subdomain_list.len();
 
     let num_threads = cmd_args
         .threads
@@ -92,13 +101,14 @@ pub async fn enumerate_subdomains(
     ));
 
     // Setup progress bar.
-    let total_subdomains = subdomain_list.len() as u64;
+    let mut total_subdomains = subdomain_list.len() as u64;
     let progress_bar = cli::setup_progress_bar(total_subdomains);
 
     let start_time = Instant::now();
 
     let buffer_size = std::cmp::min(1000, subdomain_list.len().max(1));
     let (tx, mut rx) = mpsc::channel(buffer_size);
+    let mutator_tx = tx.clone(); // Keep a clone alive for the receiver loop
 
     let query_plan = QueryPlan::new(query_types);
 
@@ -124,6 +134,7 @@ pub async fn enumerate_subdomains(
     let shared_context = Arc::new(SubdomainContext {
         lookup: lookup_context,
         target: cmd_args.target.clone(),
+        wildcard_records: wildcard_records.clone(),
     });
 
     let semaphore = Arc::new(Semaphore::new(slot_limit));
@@ -134,6 +145,14 @@ pub async fn enumerate_subdomains(
         let tx_clone = tx.clone();
         tokio::spawn(async move {
             let Ok(permit) = permit_pool.acquire_owned().await else {
+                // If semaphore is closed, we still need to send an error to not break active_tasks count
+                let _ = tx_clone
+                    .send(Err((
+                        subdomain.clone(),
+                        resolver_selector::DEFAULT_RESOLVER,
+                        DnsError::Internal("Semaphore closed".into()),
+                    )))
+                    .await;
                 return;
             };
 
@@ -149,7 +168,16 @@ pub async fn enumerate_subdomains(
     let mut found_count = 0;
     let mut failed_subdomains: Vec<String> = Vec::new();
     let mut processed_count: u64 = 0;
-    while let Some(received) = rx.recv().await {
+    let mut mutations_generated: u64 = 0;
+
+    // We don't use while let Some because if active_tasks == 0 we want to break immediately
+    while active_tasks > 0 {
+        let received = match rx.recv().await {
+            Some(r) => r,
+            None => break,
+        };
+        active_tasks -= 1;
+
         if interrupted.load(Ordering::SeqCst) {
             logger::clear_line();
             log_warn!("Interrupted by user");
@@ -163,6 +191,37 @@ pub async fn enumerate_subdomains(
                 if let Some(output) = &mut results_output {
                     for r in &results {
                         output.add_result(r.clone());
+                    }
+                }
+
+                // Spawn mutations if enabled
+                if let Some(mutator_ref) = &mutator {
+                    let mutations = mutator_ref.mutate(&subdomain);
+                    for mutated in mutations {
+                        active_tasks += 1;
+                        total_subdomains += 1;
+                        mutations_generated += 1;
+
+                        let ctx = shared_context.clone();
+                        let permit_pool = semaphore.clone();
+                        let tx_clone = mutator_tx.clone();
+                        tokio::spawn(async move {
+                            let Ok(permit) = permit_pool.acquire_owned().await else {
+                                let _ = tx_clone
+                                    .send(Err((
+                                        mutated.clone(),
+                                        resolver_selector::DEFAULT_RESOLVER,
+                                        DnsError::Internal("Semaphore closed".into()),
+                                    )))
+                                    .await;
+                                return;
+                            };
+
+                            let outcome = resolve_subdomain(ctx.as_ref(), &mutated).await;
+                            let _ = tx_clone.send(outcome).await;
+
+                            drop(permit);
+                        });
                     }
                 }
             }
@@ -201,6 +260,7 @@ pub async fn enumerate_subdomains(
             failed_subdomains,
             &interrupted,
             &query_plan,
+            shared_context.wildcard_records.clone(),
         )
         .await;
         found_count += success_retries;
@@ -218,6 +278,15 @@ pub async fn enumerate_subdomains(
             "Done! Found {} subdomains in {:.2?}",
             found_count.to_string().bold(),
             elapsed_time,
+        )
+    } else if mutations_generated > 0 {
+        format!(
+            "Done! Found {} subdomains in {:.2?} | Tested {} subdomains ({} mutations) | Executed {} queries",
+            found_count.to_string().bold(),
+            elapsed_time,
+            processed_count.to_string().bold(),
+            mutations_generated.to_string().bold(),
+            total_queries.to_string().bold()
         )
     } else {
         format!(
@@ -284,6 +353,10 @@ async fn resolve_subdomain(ctx: &SubdomainContext, subdomain: &str) -> Subdomain
         }
     }
 
+    if let Some(wildcard_set) = &ctx.wildcard_records {
+        aggregated.retain(|record| !wildcard_set.contains(&record.data));
+    }
+
     if !aggregated.is_empty() {
         let resolver = success_resolver.unwrap_or(resolver_selector::DEFAULT_RESOLVER);
         Ok((subdomain.to_string(), resolver, aggregated))
@@ -305,6 +378,7 @@ async fn process_failed_subdomains(
     failed_subdomains: Vec<String>,
     interrupt: &AtomicBool,
     query_plan: &QueryPlan,
+    wildcard_records: Option<HashSet<RData>>,
 ) -> (usize, u64) {
     log_info!(
         format!(
@@ -331,6 +405,7 @@ async fn process_failed_subdomains(
     let retry_context = Arc::new(SubdomainContext {
         lookup: retry_lookup,
         target: cmd_args.target.clone(),
+        wildcard_records,
     });
 
     let mut found_count = 0;
@@ -376,8 +451,12 @@ fn read_wordlist(wordlist_path: Option<&String>) -> Result<Vec<String>> {
     }
 }
 
-async fn handle_wildcard_domain(args: &CommandArgs, dns_resolvers: &[SocketAddr]) -> Result<bool> {
-    if check_wildcard_domain(args, dns_resolvers).await? {
+async fn handle_wildcard_prompt(
+    args: &CommandArgs,
+    resolvers: &[SocketAddr],
+) -> Result<Option<HashSet<RData>>> {
+    let wildcard = check_wildcard_domain(args, resolvers).await?;
+    if wildcard.is_some() {
         log_warn!("Warning: Wildcard domain detected. Results may include false positives!");
         log_question!("Do you want to continue? (y/n): ");
 
@@ -389,16 +468,17 @@ async fn handle_wildcard_domain(args: &CommandArgs, dns_resolvers: &[SocketAddr]
             .expect("Failed to read input");
 
         if !matches!(input.trim().to_lowercase().as_str(), "y") {
-            log_error!("Aborting due to wildcard domain detection.");
-            return Ok(true);
+            return Err(anyhow!("Aborted by user"));
         }
     }
-    Ok(false)
+    Ok(wildcard)
 }
 
-async fn check_wildcard_domain(args: &CommandArgs, dns_resolvers: &[SocketAddr]) -> Result<bool> {
+async fn check_wildcard_domain(
+    args: &CommandArgs,
+    dns_resolvers: &[SocketAddr],
+) -> Result<Option<HashSet<RData>>> {
     const ATTEMPTS: u8 = 3;
-    const MAX_PREFIX_LENGTH: usize = 63;
 
     let resolver_pool = AsyncResolver::new(Some(1)).await?;
 
@@ -409,25 +489,25 @@ async fn check_wildcard_domain(args: &CommandArgs, dns_resolvers: &[SocketAddr])
     let mut rng = rand::rng();
 
     let mut successful_resolutions = 0;
+    let mut collected_records = HashSet::new();
 
     for _ in 0..ATTEMPTS {
         // Generate a random subdomain prefix
-        let random_length = rng.random_range(10..=MAX_PREFIX_LENGTH);
-        let random_subdomain: String = (5..random_length)
-            .map(|_| rng.random_range('a'..='z'))
-            .collect();
+        let random_subdomain: String = (0..8).map(|_| rng.random_range('a'..='z')).collect();
 
         // Append a unique identifier to avoid DNS caching issues
         let fqdn = format!("{}.{}", random_subdomain, args.target);
 
         let query_type = &DEFAULT_QUERY_TYPES[rng.random_range(0..DEFAULT_QUERY_TYPES.len())];
 
-        if resolver_pool
+        if let Ok(response) = resolver_pool
             .resolve(*resolver, &fqdn, query_type, &args.transport_protocol, true)
             .await
-            .is_ok()
         {
             successful_resolutions += 1;
+            for answer in response.answers {
+                collected_records.insert(answer.data);
+            }
         }
 
         // Break early if we already have enough successful resolutions
@@ -436,7 +516,11 @@ async fn check_wildcard_domain(args: &CommandArgs, dns_resolvers: &[SocketAddr])
         }
     }
 
-    Ok(successful_resolutions >= 2)
+    if successful_resolutions >= 2 {
+        Ok(Some(collected_records))
+    } else {
+        Ok(None)
+    }
 }
 
 fn print_query_result(

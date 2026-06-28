@@ -52,8 +52,8 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
-          tag_name: ${{ github.ref }}
-          name: ${{ github.ref }}
+          tag_name: ${{ github.ref_name }}
+          name: ${{ github.ref_name }}
           body: ${{ env.NOTES }}
           draft: false
           prerelease: false

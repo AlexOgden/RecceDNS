@@ -10,7 +10,7 @@ use crate::{
 use anyhow::Result;
 use bytes::Bytes;
 use colored::Colorize;
-use http_body_util::{BodyExt, Empty};
+use http_body_util::{BodyExt, Empty, Limited};
 use hyper::{Method, Request, StatusCode};
 use hyper_rustls::HttpsConnectorBuilder;
 use hyper_util::{client::legacy::Client, rt::TokioExecutor};
@@ -142,8 +142,7 @@ async fn get_results_json(target_domain: &str) -> Result<Value, SearchError> {
         return Err(SearchError::NonSuccessStatus(status));
     }
 
-    let body_bytes = response
-        .into_body()
+    let body_bytes = Limited::new(response.into_body(), 50 * 1024 * 1024)
         .collect()
         .await
         .map_err(|e| SearchError::HttpRequestError(e.to_string()))?

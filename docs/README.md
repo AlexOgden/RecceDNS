@@ -35,6 +35,7 @@ I originally started working on this project to learn Rust, improve on network p
 	- Show the resource record data for each subdomain or simply just show the domain.
 	- Retry failed queries. If a query fails for networking/protocol issues, retry at the end of enumeration or disable.
 	- Use an optional delay between queries (Fixed, Random Range, and Adaptive).
+	- **Mutation Engine:** Automatically generate and test subdomain variations (e.g., `api-dev`, `test-api`) using built-in or custom rules and wordlists.
 - SRV enumeration, use a wordlist with the query argument set to SRV to find common SRV records.
 - Reverse IP PTR for a single IP address, CIDR notation, range, or list.
 - Search for subdomains based Certificate Transparency using crt.sh.
@@ -178,6 +179,16 @@ reccedns -m s -d 1.1.1.1 -q a -w .\subdomains-top1million-5000.txt -t github.com
 **SRV Enumeration**
 ```sh
 reccedns -m s -d 1.1.1.1 -q srv -w .\srv_names.txt -t github.com
+```
+
+**Subdomain Mutations (Built-in Defaults)**
+```sh
+reccedns -m s -d 1.1.1.1 -w .\subdomains.txt -t github.com --mutate
+```
+
+**Subdomain Mutations (Custom Lists)**
+```sh
+reccedns -m s -d 1.1.1.1 -w .\subdomains.txt -t github.com --mutate-rules wordlists/mutation_rules.txt --mutate-words wordlists/mutation_words.txt
 ```
 
 **Multiple Resolvers - Sequential Selection**

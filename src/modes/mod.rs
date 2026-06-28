@@ -1,5 +1,6 @@
 pub mod basic_enumerator;
 pub mod cert_search;
+pub mod mutator;
 pub mod reverse_ip;
 pub mod shared_state;
 pub mod subdomain_enumerator;

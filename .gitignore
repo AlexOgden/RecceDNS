@@ -7,3 +7,4 @@ lists/
 *.txt
 *.json
 *.csv
+.agents/
