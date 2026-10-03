@@ -1,4 +1,3 @@
-use rand::RngExt;
 use std::{
     net::SocketAddr,
     sync::{
@@ -125,15 +124,8 @@ impl LookupContext {
         &self,
         fqdn: &str,
         query_type: QueryType,
-        first_query: &mut bool,
     ) -> Result<(SocketAddr, DnsPacket), QueryFailure> {
-        let should_wait = !*first_query;
-        if *first_query {
-            *first_query = false;
-        }
-        if should_wait {
-            self.apply_delay().await;
-        }
+        self.apply_delay().await;
         self.perform_query(fqdn, query_type).await
     }
 
@@ -157,6 +149,7 @@ impl LookupContext {
 
         match &result {
             Ok(packet) => {
+                self.resolver_pool.record_success(resolver);
                 if let Some(delay) = &self.delay {
                     let has_answers = !packet.answers.is_empty();
                     delay.report_query_result(has_answers);
@@ -175,10 +168,16 @@ impl LookupContext {
                     );
                     delay.report_query_result(!treat_as_failure);
                 }
-                // Disable failing resolver (lock-free operation)
-                if matches!(error, DnsError::Network(_) | DnsError::Timeout(_)) {
-                    let disable_for = Duration::from_secs(rand::rng().random_range(2..=30));
-                    self.resolver_pool.disable(resolver, disable_for);
+                // Detect resolver failures: Timeout, Network, and SERVFAIL/REFUSED
+                let is_resolver_failure = match error {
+                    DnsError::Network(_) | DnsError::Timeout(_) => true,
+                    DnsError::Nameserver(msg) => {
+                        msg.contains("SERVFAIL") || msg.contains("REFUSED")
+                    }
+                    _ => false,
+                };
+                if is_resolver_failure {
+                    self.resolver_pool.record_failure(resolver);
                 }
             }
         }

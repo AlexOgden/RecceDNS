@@ -82,7 +82,7 @@ pub async fn search_certificates(cmd_args: &CommandArgs) -> Result<()> {
 
                 if let Some(output) = &mut results_output {
                     for subdomain in &subdomains {
-                        output.add_result(format!("{}.{}", subdomain, target_domain), vec![]);
+                        output.add_result(format!("{subdomain}.{target_domain}"), vec![]);
                     }
                 }
 

@@ -103,8 +103,7 @@ pub async fn expand_tlds(cmd_args: &CommandArgs, dns_resolver_list: &[SocketAddr
     let max_slots = 4096.max(num_threads);
     let slot_limit = num_threads.saturating_mul(32).clamp(num_threads, max_slots);
 
-    let resolver_pool_target = slot_limit.max(num_threads.saturating_mul(2));
-    let pool = AsyncResolver::new(Some(resolver_pool_target)).await?;
+    let pool = AsyncResolver::new(None).await?;
 
     let resolver_pool = Arc::new(ResolverPool::new(
         dns_resolver_list.to_vec(),
@@ -163,7 +162,7 @@ pub async fn expand_tlds(cmd_args: &CommandArgs, dns_resolver_list: &[SocketAddr
 
                 if let Some(output) = &mut results_output {
                     let records: Vec<ResourceRecord> = results.iter().cloned().collect();
-                    output.add_result(fqdn.clone(), records);
+                    output.add_result(fqdn, records);
                 }
             }
             Err((fqdn, resolver, error)) => {
@@ -219,11 +218,10 @@ async fn resolve_tld(ctx: &TldContext, tld: &str) -> TldResult {
     let mut aggregated = HashSet::new();
     let mut first_failure: Option<QueryFailure> = None;
     let mut success_resolver: Option<SocketAddr> = None;
-    let mut first_query = true;
 
     let primary_result = ctx
         .lookup
-        .execute_query(&fqdn, ctx.lookup.query_plan.primary, &mut first_query)
+        .execute_query(&fqdn, ctx.lookup.query_plan.primary)
         .await;
 
     match primary_result {
@@ -241,11 +239,7 @@ async fn resolve_tld(ctx: &TldContext, tld: &str) -> TldResult {
     }
 
     for query_type in &ctx.lookup.query_plan.follow_ups {
-        match ctx
-            .lookup
-            .execute_query(&fqdn, *query_type, &mut first_query)
-            .await
-        {
+        match ctx.lookup.execute_query(&fqdn, *query_type).await {
             Ok((resolver, packet)) => {
                 if success_resolver.is_none() {
                     success_resolver = Some(resolver);
