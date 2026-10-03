@@ -7,7 +7,7 @@ use crate::dns::async_resolver::AsyncResolver;
 use crate::dns::protocol::QueryType;
 use crate::network::types::TransportProtocol;
 
-const ROOT_SERVER: &str = "rootservers.net";
+const ROOT_SERVER: &str = "root-servers.net";
 
 fn generate_random_domain() -> String {
     let random_string: String = rand::rng()
@@ -58,14 +58,22 @@ pub async fn check_dns_resolvers(
     let mut working_servers: Vec<SocketAddr> = Vec::new();
     let mut failed_servers: Vec<(SocketAddr, &str)> = Vec::new();
 
-    let resolver_pool = AsyncResolver::new(Some(1)).await.unwrap();
+    let resolver_pool = match AsyncResolver::new(Some(1)).await {
+        Ok(pool) => pool,
+        Err(e) => {
+            crate::log_error!(format!(
+                "Failed to create DNS resolver for health check: {e}"
+            ));
+            return working_servers;
+        }
+    };
 
     println!("Checking DNS Resolvers...");
 
     for &server in dns_resolvers {
         let hijacking = check_nxdomain_hijacking(&resolver_pool, server, transport_protocol).await;
 
-        let root_server_letter = rand::rng().random_range(b'a'..b'm') as char;
+        let root_server_letter = rand::rng().random_range(b'a'..=b'm') as char;
         let domain = format!("{root_server_letter}.{ROOT_SERVER}");
         let normal_query = resolver_pool
             .resolve(server, &domain, &QueryType::A, transport_protocol, true)
