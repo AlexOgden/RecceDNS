@@ -75,7 +75,7 @@ pub async fn expand_tlds(cmd_args: &CommandArgs, dns_resolver_list: &[SocketAddr
         .map(|_| RecceOutput::new(cmd_args.target.clone()));
 
     let num_threads = cmd_args.threads.unwrap_or_else(|| {
-        let cpus = num_cpus::get();
+        let cpus = crate::cpu::count();
         if cpus > 6 { 6 } else { max(cpus - 1, 1) }
     });
 

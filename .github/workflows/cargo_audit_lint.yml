@@ -7,15 +7,24 @@ on:
       - '**/*.rs'
       - 'Cargo.toml'
       - 'Cargo.lock'
+      - '.github/workflows/**'
   pull_request:
     branches: [ "master" ]
     paths:
       - '**/*.rs'
       - 'Cargo.toml'
       - 'Cargo.lock'
+      - '.github/workflows/**'
 
 env:
   CARGO_TERM_COLOR: always
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
 
 jobs:
   lint:
@@ -24,40 +33,23 @@ jobs:
     steps:
     - uses: actions/checkout@v4
 
-    - name: Cache Cargo Registry
-      uses: actions/cache@v3
-      with:
-        path: |
-          ~/.cargo/registry
-          ~/.cargo/git
-        key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-        restore-keys: |
-          ${{ runner.os }}-cargo-
-
     - name: Set up Rust
-      uses: actions-rs/toolchain@v1
+      uses: dtolnay/rust-toolchain@stable
       with:
-        toolchain: stable
-        override: true
+        components: clippy, rustfmt
 
-    - name: Cache Cargo Binaries
-      uses: actions/cache@v3
-      with:
-        path: ~/.cargo/bin
-        key: cargo-binaries-${{ runner.os }}-v1
-        restore-keys: |
-          cargo-binaries-${{ runner.os }}-v1
+    - name: Cache Cargo
+      uses: Swatinem/rust-cache@v2
 
-    - name: Install Clippy and Audit
-      run: |
-        rustup component add clippy
-        cargo install cargo-audit || echo "Cargo Audit is already installed"
+    - name: Install cargo-audit
+      uses: taiki-e/install-action@cargo-audit
 
     - name: Check Formatting
-      run: cargo fmt -- --check
+      run: cargo fmt --all -- --check
 
     - name: Run Clippy
-      run: cargo clippy --verbose -- -D warnings
+      run: cargo clippy --all-targets --locked -- -D warnings
 
     - name: Run Audit
       run: cargo audit
+

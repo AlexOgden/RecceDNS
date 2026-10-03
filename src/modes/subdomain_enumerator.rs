@@ -98,7 +98,7 @@ pub async fn enumerate_subdomains(
     // Unclamped concurrency
     let num_threads = cmd_args
         .threads
-        .unwrap_or_else(|| num_cpus::get().saturating_sub(1).max(1));
+        .unwrap_or_else(|| crate::cpu::count().saturating_sub(1).max(1));
 
     log_info!(format!(
         "Starting subdomain enumeration with {} threads",
@@ -498,7 +498,7 @@ async fn process_failed_subdomains(
 
     let num_threads = cmd_args
         .threads
-        .unwrap_or_else(|| num_cpus::get().saturating_sub(1).max(1));
+        .unwrap_or_else(|| crate::cpu::count().saturating_sub(1).max(1));
     let retry_concurrency = (num_threads * 4).clamp(4, 64);
     let retry_semaphore = Arc::new(Semaphore::new(retry_concurrency));
     let (retry_tx, mut retry_rx) = mpsc::channel(retry_concurrency * 2);

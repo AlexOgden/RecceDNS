@@ -81,7 +81,7 @@ pub struct AsyncResolver {
 
 impl AsyncResolver {
     pub async fn new(udp_pool_size: Option<usize>) -> Result<Self, DnsError> {
-        let default_pool_size = num_cpus::get().clamp(4, 16);
+        let default_pool_size = crate::cpu::count().clamp(4, 16);
         let udp_pool_size = udp_pool_size.map_or(default_pool_size, |s| s.clamp(1, 16));
 
         let mut udp_entries = Vec::with_capacity(udp_pool_size);
