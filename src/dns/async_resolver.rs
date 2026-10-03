@@ -27,39 +27,76 @@ type PendingQueryResult = Result<DnsPacket, DnsError>;
 type QueryResultSender = oneshot::Sender<PendingQueryResult>;
 
 // Constants for default settings
-const DEFAULT_POOL_SIZE: usize = 10; // Default number of UDP sockets in the pool
 const DEFAULT_TIMEOUT: Duration = Duration::from_millis(1500); // Default request timeout (UDP/TCP)
 const UDP_BUFFER_SIZE: usize = 512; // Standard DNS UDP buffer size for receiving
 const TCP_BUFFER_SIZE: usize = 65535; // Max DNS TCP message size
 
+struct UdpSocketEntry {
+    socket: Arc<UdpSocket>,
+    pending_queries: Arc<DashMap<u16, QueryResultSender>>,
+    next_query_id: atomic::AtomicU16,
+}
+
+impl UdpSocketEntry {
+    fn allocate_query_id(&self, tx: QueryResultSender) -> Result<u16, DnsError> {
+        let mut attempts = 0;
+        loop {
+            let id = self.next_query_id.fetch_add(1, Ordering::Relaxed);
+            match self.pending_queries.entry(id) {
+                dashmap::Entry::Vacant(vacant) => {
+                    vacant.insert(tx);
+                    return Ok(id);
+                }
+                dashmap::Entry::Occupied(_) => {
+                    attempts += 1;
+                    if attempts >= 65536 {
+                        return Err(DnsError::Internal(
+                            "All query IDs in use for socket".to_string(),
+                        ));
+                    }
+                }
+            }
+        }
+    }
+}
+
+struct ResolverInner {
+    udp_entries: Box<[UdpSocketEntry]>,
+    tcp_sockets: DashMap<SocketAddr, Arc<Mutex<TcpStream>>>,
+    next_udp_socket_index: atomic::AtomicUsize,
+    next_tcp_query_id: atomic::AtomicU16,
+    shutdown_tx: broadcast::Sender<()>,
+}
+
+impl Drop for ResolverInner {
+    fn drop(&mut self) {
+        let _ = self.shutdown_tx.send(());
+    }
+}
+
 #[derive(Clone)]
 pub struct AsyncResolver {
-    udp_sockets: Vec<Arc<UdpSocket>>,
-    tcp_sockets: Arc<DashMap<SocketAddr, Arc<Mutex<TcpStream>>>>,
-    next_query_id: Arc<atomic::AtomicU16>,
-    pending_queries: Arc<DashMap<u16, QueryResultSender>>,
-    next_udp_socket_index: Arc<atomic::AtomicUsize>,
-    shutdown_tx: Arc<broadcast::Sender<()>>,
+    inner: Arc<ResolverInner>,
 }
 
 impl AsyncResolver {
     pub async fn new(udp_pool_size: Option<usize>) -> Result<Self, DnsError> {
-        let udp_pool_size = udp_pool_size.unwrap_or(DEFAULT_POOL_SIZE);
+        let default_pool_size = num_cpus::get().clamp(4, 16);
+        let udp_pool_size = udp_pool_size.map_or(default_pool_size, |s| s.clamp(1, 16));
 
-        let mut udp_sockets: Vec<Arc<UdpSocket>> = Vec::with_capacity(udp_pool_size);
-        let pending_queries = Arc::new(DashMap::<u16, QueryResultSender>::new());
+        let mut udp_entries = Vec::with_capacity(udp_pool_size);
         let (shutdown_tx, _) = broadcast::channel(1);
-        let shutdown_tx_arc = Arc::new(shutdown_tx);
 
         for i in 0..udp_pool_size {
             let udp_socket = UdpSocket::bind("0.0.0.0:0")
                 .await
                 .map_err(|e| DnsError::Network(format!("Failed to bind UDP socket {i}: {e}")))?;
             let udp_socket_arc = Arc::new(udp_socket);
-            udp_sockets.push(udp_socket_arc.clone());
+            let pending_queries = Arc::new(DashMap::<u16, QueryResultSender>::new());
 
             let pq_clone = pending_queries.clone();
-            let mut shutdown_rx = shutdown_tx_arc.subscribe();
+            let udp_socket_clone = udp_socket_arc.clone();
+            let mut shutdown_rx = shutdown_tx.subscribe();
             let local_addr = udp_socket_arc.local_addr().ok();
             let addr_str = local_addr.map_or_else(|| "unknown".to_string(), |a| a.to_string());
 
@@ -68,44 +105,53 @@ impl AsyncResolver {
                 loop {
                     tokio::select! {
                         biased;
-                        _ = shutdown_rx.recv() => { break; },
-                        result = udp_socket_arc.recv_from(&mut recv_buffer) => {
+                        _ = shutdown_rx.recv() => { break; }
+                        result = udp_socket_clone.recv_from(&mut recv_buffer) => {
                             match result {
                                 Ok((len, _src_addr)) => {
                                     if len >= 2 {
-                                        let query_id = u16::from_be_bytes(recv_buffer[0..2].try_into().unwrap());
+                                        let query_id = u16::from_be_bytes([recv_buffer[0], recv_buffer[1]]);
                                         if let Some((_id, sender)) = pq_clone.remove(&query_id) {
                                             let mut packet_buffer = PacketBuffer::new();
                                             if packet_buffer.set_data(&recv_buffer[..len]).is_ok() {
                                                 match DnsPacket::from_buffer(&mut packet_buffer) {
                                                     Ok(dns_packet) => { let _ = sender.send(Ok(dns_packet)); }
                                                     Err(e) => {
-                                                        log_error!(format!("Failed UDP parse (ID: {}) on {}: {}", query_id, addr_str, e));
+                                                        log_error!(format!("Failed UDP parse (ID: {query_id}) on {addr_str}: {e}"));
                                                         let _ = sender.send(Err(DnsError::ProtocolData(e.to_string())));
                                                     }
                                                 }
                                             } else {
-                                                 log_error!(format!("Failed UDP set_data (ID: {}) on {}", query_id, addr_str));
+                                                 log_error!(format!("Failed UDP set_data (ID: {query_id}) on {addr_str}"));
                                                  let _ = sender.send(Err(DnsError::Internal("UDP Buffer handling error".to_string())));
                                             }
                                         }
-                                    } else if len > 0 { /* Packet too small */ }
+                                    }
                                 }
-                                Err(e) => { /* Handle UDP recv error */ log_error!(format!("ERROR: UDP Recv: {}", e)); }
+                                Err(e) => {
+                                    log_error!(format!("ERROR: UDP Recv: {e}"));
+                                }
                             }
-                        },
+                        }
                     }
                 }
+            });
+
+            udp_entries.push(UdpSocketEntry {
+                socket: udp_socket_arc,
+                pending_queries,
+                next_query_id: atomic::AtomicU16::new(0),
             });
         }
 
         Ok(Self {
-            udp_sockets,
-            tcp_sockets: Arc::new(DashMap::new()),
-            next_query_id: Arc::new(atomic::AtomicU16::new(0)),
-            pending_queries,
-            next_udp_socket_index: Arc::new(atomic::AtomicUsize::new(0)),
-            shutdown_tx: shutdown_tx_arc,
+            inner: Arc::new(ResolverInner {
+                udp_entries: udp_entries.into_boxed_slice(),
+                tcp_sockets: DashMap::new(),
+                next_udp_socket_index: atomic::AtomicUsize::new(0),
+                next_tcp_query_id: atomic::AtomicU16::new(0),
+                shutdown_tx,
+            }),
         })
     }
 
@@ -113,7 +159,7 @@ impl AsyncResolver {
         &self,
         target_addr: SocketAddr,
     ) -> Result<Arc<Mutex<TcpStream>>, DnsError> {
-        if let Some(entry) = self.tcp_sockets.get(&target_addr) {
+        if let Some(entry) = self.inner.tcp_sockets.get(&target_addr) {
             return Ok(entry.value().clone());
         }
 
@@ -132,7 +178,9 @@ impl AsyncResolver {
         };
 
         let connection = Arc::new(Mutex::new(tcp_stream));
-        self.tcp_sockets.insert(target_addr, connection.clone());
+        self.inner
+            .tcp_sockets
+            .insert(target_addr, connection.clone());
         Ok(connection)
     }
 
@@ -144,64 +192,63 @@ impl AsyncResolver {
         protocol: &TransportProtocol,
         recursion: bool,
     ) -> Result<DnsPacket, DnsError> {
-        let mut attempts = 0;
-        let query_id = loop {
-            let id = self.next_query_id.fetch_add(1, Ordering::Relaxed);
-            // Check if this id is currently in use. If not, reserve it by breaking with it.
-            if !self.pending_queries.contains_key(&id) {
-                break id;
-            }
-            attempts += 1;
-            // If we've tried all possible u16 values, give up.
-            if attempts >= 65536 {
-                return Err(DnsError::Internal("No available query IDs".to_string()));
-            }
-        };
-        let query_packet = Self::build_dns_query(query_id, domain, *query_type, recursion)?;
-
         match protocol {
-            TransportProtocol::UDP => self.resolve_udp(dns_resolver, query_packet).await,
-            TransportProtocol::TCP => self.resolve_tcp(dns_resolver, query_packet).await,
+            TransportProtocol::UDP => {
+                self.resolve_udp(dns_resolver, domain, query_type, recursion)
+                    .await
+            }
+            TransportProtocol::TCP => {
+                let query_id = self.inner.next_tcp_query_id.fetch_add(1, Ordering::Relaxed);
+                let query_packet = Self::build_dns_query(query_id, domain, *query_type, recursion)?;
+                self.resolve_tcp(dns_resolver, query_packet).await
+            }
         }
     }
 
     async fn resolve_udp(
         &self,
         dns_resolver: SocketAddr,
-        mut query_packet: DnsPacket,
+        domain: &str,
+        query_type: &QueryType,
+        recursion: bool,
     ) -> Result<DnsPacket, DnsError> {
-        if self.udp_sockets.is_empty() {
+        if self.inner.udp_entries.is_empty() {
             return Err(DnsError::Internal(
                 "Cannot resolve UDP, pool size is 0".to_string(),
             ));
         }
 
-        let query_id = query_packet.header.id;
+        let socket_index = self
+            .inner
+            .next_udp_socket_index
+            .fetch_add(1, Ordering::Relaxed)
+            % self.inner.udp_entries.len();
+        let entry = &self.inner.udp_entries[socket_index];
+
+        let (tx, rx) = oneshot::channel::<PendingQueryResult>();
+        let query_id = entry.allocate_query_id(tx)?;
+
+        let mut query_packet = match Self::build_dns_query(query_id, domain, *query_type, recursion)
+        {
+            Ok(p) => p,
+            Err(e) => {
+                entry.pending_queries.remove(&query_id);
+                return Err(e);
+            }
+        };
 
         // Serialize packet
         let mut udp_req_buffer = PacketBuffer::new();
-        query_packet
-            .write(&mut udp_req_buffer)
-            .map_err(|e| DnsError::Internal(format!("UDP: Failed to serialize query: {e}")))?;
-        let udp_request_data = udp_req_buffer.get_buffer_to_pos();
-
-        // Prepare for response via oneshot channel
-        let (tx, rx) = oneshot::channel::<PendingQueryResult>();
-        if self.pending_queries.insert(query_id, tx).is_some() {
+        if let Err(e) = query_packet.write(&mut udp_req_buffer) {
+            entry.pending_queries.remove(&query_id);
             return Err(DnsError::Internal(format!(
-                "UDP: Query ID collision: {query_id}"
+                "UDP: Failed to serialize query: {e}"
             )));
         }
+        let udp_request_data = udp_req_buffer.get_buffer_to_pos();
 
-        // Select socket and send
-        let udp_socket_index = self
-            .next_udp_socket_index
-            .fetch_add(1, std::sync::atomic::Ordering::Relaxed)
-            % self.udp_sockets.len();
-        let udp_socket = &self.udp_sockets[udp_socket_index];
-
-        if let Err(e) = udp_socket.send_to(udp_request_data, dns_resolver).await {
-            self.pending_queries.remove(&query_id);
+        if let Err(e) = entry.socket.send_to(udp_request_data, dns_resolver).await {
+            entry.pending_queries.remove(&query_id);
             return Err(DnsError::Network(format!(
                 "UDP: Failed to send query to {dns_resolver}: {e}"
             )));
@@ -209,22 +256,18 @@ impl AsyncResolver {
 
         // Wait for response with timeout
         match timeout(DEFAULT_TIMEOUT, rx).await {
-            Ok(Ok(result_from_channel)) => {
-                // Received result from receiver task
-                match result_from_channel {
-                    Ok(packet) => Self::process_dns_result(packet),
-                    Err(e) => Err(e),
-                }
-            }
+            Ok(Ok(result_from_channel)) => match result_from_channel {
+                Ok(packet) => Self::process_dns_result(packet),
+                Err(e) => Err(e),
+            },
             Ok(Err(_recv_error)) => {
-                self.pending_queries.remove(&query_id);
+                entry.pending_queries.remove(&query_id);
                 Err(DnsError::Internal(
                     "UDP: Resolver receiver task channel closed unexpectedly".to_string(),
                 ))
             }
             Err(_timeout_elapsed) => {
-                // Remove the pending query entry
-                self.pending_queries.remove(&query_id);
+                entry.pending_queries.remove(&query_id);
                 Err(DnsError::Timeout(dns_resolver.to_string()))
             }
         }
@@ -347,7 +390,7 @@ impl AsyncResolver {
         .await;
 
         if result.is_err() {
-            self.tcp_sockets.remove(&dns_resolver);
+            self.inner.tcp_sockets.remove(&dns_resolver);
         }
 
         result
@@ -419,12 +462,202 @@ impl AsyncResolver {
     }
 
     pub fn shutdown(&self) {
-        let _ = self.shutdown_tx.send(());
+        let _ = self.inner.shutdown_tx.send(());
     }
 }
 
-impl Drop for AsyncResolver {
-    fn drop(&mut self) {
-        self.shutdown();
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::dns::protocol::{RData, ResourceRecord};
+
+    #[tokio::test]
+    async fn test_pool_size_clamping() {
+        // Requested 4096 sockets must be clamped to 16
+        let resolver = AsyncResolver::new(Some(4096)).await.unwrap();
+        assert_eq!(resolver.inner.udp_entries.len(), 16);
+
+        // Requested 0 sockets must be clamped to 1
+        let resolver_zero = AsyncResolver::new(Some(0)).await.unwrap();
+        assert_eq!(resolver_zero.inner.udp_entries.len(), 1);
+
+        // Default pool size (None) must be between 4 and 16
+        let resolver_default = AsyncResolver::new(None).await.unwrap();
+        assert!(
+            resolver_default.inner.udp_entries.len() >= 4
+                && resolver_default.inner.udp_entries.len() <= 16
+        );
+    }
+
+    #[tokio::test]
+    async fn test_atomic_query_id_allocation() {
+        let entry = UdpSocketEntry {
+            socket: Arc::new(UdpSocket::bind("0.0.0.0:0").await.unwrap()),
+            pending_queries: Arc::new(DashMap::new()),
+            next_query_id: atomic::AtomicU16::new(0),
+        };
+
+        // Allocate 100 query IDs concurrently
+        let mut handles = Vec::new();
+        let entry_arc = Arc::new(entry);
+
+        for _ in 0..100 {
+            let entry_clone = entry_arc.clone();
+            handles.push(tokio::spawn(async move {
+                let (tx, _rx) = oneshot::channel();
+                entry_clone.allocate_query_id(tx).unwrap()
+            }));
+        }
+
+        let mut allocated_ids = std::collections::HashSet::new();
+        for handle in handles {
+            let id = handle.await.unwrap();
+            assert!(
+                allocated_ids.insert(id),
+                "Duplicate query ID allocated: {id}"
+            );
+        }
+        assert_eq!(allocated_ids.len(), 100);
+    }
+
+    #[tokio::test]
+    async fn test_cloned_resolver_not_killed_on_drop() {
+        // Set up a mock UDP DNS server that responds to any query with a valid NOERROR A record
+        let mock_socket = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let mock_addr = mock_socket.local_addr().unwrap();
+
+        let server_task = tokio::spawn(async move {
+            let mut buf = [0u8; 512];
+            loop {
+                let Ok((len, src)) = mock_socket.recv_from(&mut buf).await else {
+                    break;
+                };
+                if len >= 12 {
+                    let id = u16::from_be_bytes([buf[0], buf[1]]);
+                    let mut response = DnsPacket::new();
+                    response.header.id = id;
+                    response.header.response = true;
+                    response.header.rescode = ResultCode::NOERROR;
+                    response
+                        .questions
+                        .push(DnsQuestion::new("example.com".to_string(), QueryType::A));
+                    response.answers.push(ResourceRecord {
+                        name: "example.com".to_string(),
+                        class: 1,
+                        ttl: 300,
+                        data: RData::A(Ipv4Addr::new(93, 184, 216, 34)),
+                    });
+                    let mut pb = PacketBuffer::new();
+                    if response.write(&mut pb).is_ok() {
+                        let _ = mock_socket.send_to(pb.get_buffer_to_pos(), src).await;
+                    }
+                }
+            }
+        });
+
+        let resolver = AsyncResolver::new(Some(1)).await.unwrap();
+
+        // Clone the resolver and immediately drop the clone
+        let clone = resolver.clone();
+        drop(clone);
+
+        // Resolving on the original resolver MUST succeed and not hang or fail
+        let res = resolver
+            .resolve(
+                mock_addr,
+                "example.com",
+                &QueryType::A,
+                &TransportProtocol::UDP,
+                true,
+            )
+            .await;
+
+        server_task.abort();
+
+        assert!(
+            res.is_ok(),
+            "Resolving after clone drop failed: {:?}",
+            res.err()
+        );
+        let packet = res.unwrap();
+        assert_eq!(packet.answers.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn test_cloned_resolver_multi_task_concurrent_drop() {
+        let mock_socket = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let mock_addr = mock_socket.local_addr().unwrap();
+
+        let server_task = tokio::spawn(async move {
+            let mut buf = [0u8; 512];
+            loop {
+                let Ok((len, src)) = mock_socket.recv_from(&mut buf).await else {
+                    break;
+                };
+                if len >= 12 {
+                    let id = u16::from_be_bytes([buf[0], buf[1]]);
+                    let mut response = DnsPacket::new();
+                    response.header.id = id;
+                    response.header.response = true;
+                    response.header.rescode = ResultCode::NOERROR;
+                    response.questions.push(DnsQuestion::new(
+                        "concurrent.test".to_string(),
+                        QueryType::A,
+                    ));
+                    response.answers.push(ResourceRecord {
+                        name: "concurrent.test".to_string(),
+                        class: 1,
+                        ttl: 300,
+                        data: RData::A(Ipv4Addr::new(1, 2, 3, 4)),
+                    });
+                    let mut pb = PacketBuffer::new();
+                    if response.write(&mut pb).is_ok() {
+                        let _ = mock_socket.send_to(pb.get_buffer_to_pos(), src).await;
+                    }
+                }
+            }
+        });
+
+        let resolver = AsyncResolver::new(Some(2)).await.unwrap();
+
+        let mut handles = Vec::new();
+        for _ in 0..20 {
+            let clone = resolver.clone();
+            handles.push(tokio::spawn(async move {
+                tokio::task::yield_now().await;
+                drop(clone);
+            }));
+        }
+
+        for h in handles {
+            h.await.unwrap();
+        }
+
+        // Resolving on the original resolver MUST still succeed
+        let res = resolver
+            .resolve(
+                mock_addr,
+                "concurrent.test",
+                &QueryType::A,
+                &TransportProtocol::UDP,
+                true,
+            )
+            .await;
+
+        server_task.abort();
+
+        assert!(
+            res.is_ok(),
+            "Resolving after multi-task clone drop failed: {:?}",
+            res.err()
+        );
+    }
+
+    #[tokio::test]
+    async fn test_resolver_shutdown_idempotent() {
+        let resolver = AsyncResolver::new(Some(1)).await.unwrap();
+        resolver.shutdown();
+        resolver.shutdown();
+        drop(resolver);
     }
 }
