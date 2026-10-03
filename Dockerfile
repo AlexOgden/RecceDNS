@@ -31,5 +31,3 @@ VOLUME ["/wordlists", "/data"]
 WORKDIR /data
 
 ENTRYPOINT ["reccedns"]
-CMD ["--help"]
-CMD ["--help"]
