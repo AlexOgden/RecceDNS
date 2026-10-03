@@ -158,12 +158,13 @@ impl AsyncResolver {
     async fn get_or_create_tcp_connection(
         &self,
         target_addr: SocketAddr,
+        timeout_duration: Duration,
     ) -> Result<Arc<Mutex<TcpStream>>, DnsError> {
         if let Some(entry) = self.inner.tcp_sockets.get(&target_addr) {
             return Ok(entry.value().clone());
         }
 
-        let tcp_stream = match timeout(DEFAULT_TIMEOUT, TcpStream::connect(target_addr)).await {
+        let tcp_stream = match timeout(timeout_duration, TcpStream::connect(target_addr)).await {
             Ok(Ok(s)) => s,
             Ok(Err(e)) => {
                 return Err(DnsError::Network(format!(
@@ -192,15 +193,42 @@ impl AsyncResolver {
         protocol: &TransportProtocol,
         recursion: bool,
     ) -> Result<DnsPacket, DnsError> {
+        self.resolve_with_timeout(
+            dns_resolver,
+            domain,
+            query_type,
+            protocol,
+            recursion,
+            DEFAULT_TIMEOUT,
+        )
+        .await
+    }
+
+    pub async fn resolve_with_timeout(
+        &self,
+        dns_resolver: SocketAddr,
+        domain: &str,
+        query_type: &QueryType,
+        protocol: &TransportProtocol,
+        recursion: bool,
+        timeout_duration: Duration,
+    ) -> Result<DnsPacket, DnsError> {
         match protocol {
             TransportProtocol::UDP => {
-                self.resolve_udp(dns_resolver, domain, query_type, recursion)
-                    .await
+                self.resolve_udp(
+                    dns_resolver,
+                    domain,
+                    query_type,
+                    recursion,
+                    timeout_duration,
+                )
+                .await
             }
             TransportProtocol::TCP => {
                 let query_id = self.inner.next_tcp_query_id.fetch_add(1, Ordering::Relaxed);
                 let query_packet = Self::build_dns_query(query_id, domain, *query_type, recursion)?;
-                self.resolve_tcp(dns_resolver, query_packet).await
+                self.resolve_tcp(dns_resolver, query_packet, timeout_duration)
+                    .await
             }
         }
     }
@@ -211,6 +239,7 @@ impl AsyncResolver {
         domain: &str,
         query_type: &QueryType,
         recursion: bool,
+        timeout_duration: Duration,
     ) -> Result<DnsPacket, DnsError> {
         if self.inner.udp_entries.is_empty() {
             return Err(DnsError::Internal(
@@ -255,7 +284,7 @@ impl AsyncResolver {
         }
 
         // Wait for response with timeout
-        match timeout(DEFAULT_TIMEOUT, rx).await {
+        match timeout(timeout_duration, rx).await {
             Ok(Ok(result_from_channel)) => match result_from_channel {
                 Ok(packet) => Self::process_dns_result(packet),
                 Err(e) => Err(e),
@@ -273,12 +302,17 @@ impl AsyncResolver {
         }
     }
 
+    // Handshake, serialization, length framing, send, and length-prefixed read steps are kept cohesive in one async routine.
+    #[allow(clippy::too_many_lines)]
     async fn resolve_tcp(
         &self,
         dns_resolver: SocketAddr,
         mut query_packet: DnsPacket,
+        timeout_duration: Duration,
     ) -> Result<DnsPacket, DnsError> {
-        let tcp_connection_mutex = self.get_or_create_tcp_connection(dns_resolver).await?;
+        let tcp_connection_mutex = self
+            .get_or_create_tcp_connection(dns_resolver, timeout_duration)
+            .await?;
         let mut tcp_connection_guard = tcp_connection_mutex.lock().await;
 
         let query_id = query_packet.header.id;
@@ -306,7 +340,7 @@ impl AsyncResolver {
 
             // Write request
             match timeout(
-                DEFAULT_TIMEOUT,
+                timeout_duration,
                 tcp_connection_guard.write_all(&tcp_request_data),
             )
             .await
@@ -325,7 +359,7 @@ impl AsyncResolver {
             // Read response length (2 bytes) with timeout
             let mut response_len_buffer = [0u8; 2];
             match timeout(
-                DEFAULT_TIMEOUT,
+                timeout_duration,
                 tcp_connection_guard.read_exact(&mut response_len_buffer),
             )
             .await
@@ -357,7 +391,7 @@ impl AsyncResolver {
             // Read the actual response with timeout
             let mut response_body_buffer = vec![0u8; response_len];
             match timeout(
-                DEFAULT_TIMEOUT,
+                timeout_duration,
                 tcp_connection_guard.read_exact(&mut response_body_buffer),
             )
             .await
@@ -659,5 +693,74 @@ mod tests {
         resolver.shutdown();
         resolver.shutdown();
         drop(resolver);
+    }
+
+    #[tokio::test]
+    async fn test_resolve_with_timeout_times_out() {
+        let non_responding_socket = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let non_responding_addr = non_responding_socket.local_addr().unwrap();
+
+        let resolver = AsyncResolver::new(Some(1)).await.unwrap();
+        let start = std::time::Instant::now();
+        let short_timeout = Duration::from_millis(40);
+
+        let res = resolver
+            .resolve_with_timeout(
+                non_responding_addr,
+                "timeout.test",
+                &QueryType::A,
+                &TransportProtocol::UDP,
+                true,
+                short_timeout,
+            )
+            .await;
+
+        let elapsed = start.elapsed();
+        assert!(matches!(res, Err(DnsError::Timeout(_))));
+        assert!(elapsed < Duration::from_millis(500));
+    }
+
+    #[tokio::test]
+    async fn test_resolve_with_timeout_succeeds() {
+        let mock_socket = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let mock_addr = mock_socket.local_addr().unwrap();
+
+        let server_task = tokio::spawn(async move {
+            let mut buf = [0u8; 512];
+            if let Ok((len, src)) = mock_socket.recv_from(&mut buf).await
+                && len >= 12
+            {
+                let id = u16::from_be_bytes([buf[0], buf[1]]);
+                let mut response = DnsPacket::new();
+                response.header.id = id;
+                response.header.response = true;
+                response.header.rescode = ResultCode::NOERROR;
+                response.answers.push(ResourceRecord {
+                    name: "fast.test".to_string(),
+                    class: 1,
+                    ttl: 300,
+                    data: RData::A(Ipv4Addr::new(1, 2, 3, 4)),
+                });
+                let mut pb = PacketBuffer::new();
+                if response.write(&mut pb).is_ok() {
+                    let _ = mock_socket.send_to(pb.get_buffer_to_pos(), src).await;
+                }
+            }
+        });
+
+        let resolver = AsyncResolver::new(Some(1)).await.unwrap();
+        let res = resolver
+            .resolve_with_timeout(
+                mock_addr,
+                "fast.test",
+                &QueryType::A,
+                &TransportProtocol::UDP,
+                true,
+                Duration::from_millis(500),
+            )
+            .await;
+
+        server_task.abort();
+        assert!(res.is_ok());
     }
 }

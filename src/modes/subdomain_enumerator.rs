@@ -131,7 +131,8 @@ pub async fn enumerate_subdomains(
         cmd_args.delay.clone(),
         query_plan.clone(),
         !cmd_args.no_recursion,
-    );
+    )
+    .with_retries(usize::from(!cmd_args.no_retry));
     let shared_context = Arc::new(SubdomainContext {
         lookup: lookup_context,
         target: cmd_args.target.clone(),
@@ -489,7 +490,8 @@ async fn process_failed_subdomains(
         Some(retry_delay),
         query_plan.clone(),
         !cmd_args.no_recursion,
-    );
+    )
+    .with_retries(0);
     let retry_context = Arc::new(SubdomainContext {
         lookup: retry_lookup,
         target: cmd_args.target.clone(),
