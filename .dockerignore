@@ -1,0 +1,23 @@
+# Build artifacts
+target/
+
+# VCS and CI
+.git
+.gitattributes
+.gitignore
+.githooks
+.github
+
+# Editor / agent config
+.vscode
+.agents
+
+# Not needed for build (wordlists are mounted at runtime)
+docs
+lists
+wordlists
+
+# Docker files
+Dockerfile
+.dockerignore
+
