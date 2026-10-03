@@ -8,7 +8,7 @@ use crate::{
     },
     io::{
         cli::CommandArgs,
-        json::{DnsEnumerationOutput, Output},
+        json::{Output, RecceOutput},
     },
     log_info,
     timing::stats::QueryTimer,
@@ -35,7 +35,7 @@ pub async fn enumerate_records(cmd_args: &CommandArgs, dns_resolvers: &[SocketAd
     let mut data_output = cmd_args
         .json
         .as_ref()
-        .map(|_| DnsEnumerationOutput::new(cmd_args.target.clone()));
+        .map(|_| RecceOutput::new(cmd_args.target.clone()));
 
     let query_types: &[QueryType] = match cmd_args.query_types.as_slice() {
         [] | [QueryType::ANY] => DEFAULT_QUERY_TYPES,
@@ -134,7 +134,7 @@ async fn process_response(
     seen_cnames: &mut HashSet<String>,
     response: &[ResourceRecord],
     resolver: SocketAddr,
-    data_output: &mut Option<DnsEnumerationOutput>,
+    data_output: &mut Option<RecceOutput>,
     cmd_args: &CommandArgs,
 ) -> Result<()> {
     for record in response {
@@ -156,7 +156,7 @@ async fn process_and_format_record(
     seen_cnames: &mut HashSet<String>,
     record: &ResourceRecord,
     resolver: SocketAddr,
-    data_output: &mut Option<DnsEnumerationOutput>,
+    data_output: &mut Option<RecceOutput>,
     cmd_args: &CommandArgs,
 ) -> Result<()> {
     if let RData::CNAME(cname) = &record.data
@@ -167,7 +167,7 @@ async fn process_and_format_record(
 
     // Add to JSON output
     if let Some(output) = data_output {
-        output.add_result(record.clone());
+        output.add_result(record.name.clone(), vec![record.clone()]);
     }
 
     let query_type_formatted = record.data.to_qtype().to_string().bold().bright_cyan();

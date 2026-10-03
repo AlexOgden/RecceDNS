@@ -148,8 +148,8 @@ impl PacketBuffer {
                     self.set_pos(pos + 2)?;
                 }
 
-                let b2 = self.get_byte(pos + 1)? as u16;
-                let offset = (((len as u16) & 0x3F) << 8) | b2;
+                let b2 = u16::from(self.get_byte(pos + 1)?);
+                let offset = ((u16::from(len) & 0x3F) << 8) | b2;
                 pos = offset as usize;
 
                 jumped = true;

@@ -150,7 +150,7 @@ See the [releases](https://github.com/AlexOgden/RecceDNS/releases) page for the 
 | `-r, --use-random` | `RECCEDNS_USE_RANDOM` | When multiple resolvers are provided, randomly select one for each query. |
 | `--json <path>` | `RECCEDNS_JSON_OUTPUT` | Output results to a JSON file. `.json` will be appended if not provided. |
 | `-Q, --quiet` | `RECCEDNS_QUIET` | Don't print any results to the terminal. Useful for large targets when outputting to JSON. |
-| `-T, --threads <N>` | `RECCEDNS_THREADS` | Number of threads for subdomain enumeration.<br>Defaults to (logical cores - 1), max 8 if more than 8 cores. |
+| `-T, --threads <N>` | `RECCEDNS_THREADS` | Number of threads for subdomain enumeration.<br>Defaults to (logical cores - 1). |
 
 ## Example Usage
 

@@ -194,7 +194,7 @@ pub fn setup_progress_bar(total: u64) -> ProgressBar {
     let pb = ProgressBar::new(total);
     let style = ProgressStyle::default_bar()
         .template("[{spinner:.cyan}] {prefix:.bold} {wide_msg:.white} [{bar:50.cyan/blue}] ETA {eta:.bold}")
-        .unwrap()
+        .unwrap_or_else(|_| ProgressStyle::default_bar())
         .progress_chars("##-")
         .tick_chars(PROGRESS_TICK_CHARS);
     pb.set_style(style);
@@ -209,7 +209,7 @@ pub fn setup_basic_spinner() -> ProgressBar {
     spinner.set_style(
         ProgressStyle::default_spinner()
             .template("[{spinner:.cyan}] {msg}")
-            .expect("Invalid template")
+            .unwrap_or_else(|_| ProgressStyle::default_spinner())
             .tick_chars("/|\\- "),
     );
     spinner.enable_steady_tick(Duration::from_millis(100));
@@ -220,6 +220,17 @@ pub fn update_progress_bar(
     pb: &ProgressBar,
     index: usize,
     total: u64,
+    failed_count: Option<usize>,
+    delay: Option<&Delay>,
+) {
+    update_progress_bar_batch(pb, (index + 1) as u64, total, 1, failed_count, delay);
+}
+
+pub fn update_progress_bar_batch(
+    pb: &ProgressBar,
+    current: u64,
+    total: u64,
+    inc_count: u64,
     failed_count: Option<usize>,
     delay: Option<&Delay>,
 ) {
@@ -238,6 +249,8 @@ pub fn update_progress_bar(
     } else {
         String::new()
     };
-    pb.set_prefix(format!("[{}/{}] {}", index + 1, total, failed_str));
-    pb.inc(1);
+    pb.set_prefix(format!("[{current}/{total}] {failed_str}"));
+    if inc_count > 0 {
+        pb.inc(inc_count);
+    }
 }

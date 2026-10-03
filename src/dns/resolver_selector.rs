@@ -19,17 +19,22 @@ const CLEANUP_INTERVAL_MASK: u64 = 0x3FF; // Every 1024 selects
 pub struct ResolverPool {
     resolvers: Vec<SocketAddr>,
     disabled: DashMap<SocketAddr, Instant>,
+    consecutive_failures: DashMap<SocketAddr, usize>,
     index: AtomicUsize,
     select_count: AtomicU64,
     use_random: bool,
 }
 
 impl ResolverPool {
+    pub const FAILURE_THRESHOLD: usize = 3;
+    pub const DISABLE_COOLDOWN: Duration = Duration::from_secs(3);
+
     #[must_use]
     pub fn new(resolvers: Vec<SocketAddr>, use_random: bool) -> Self {
         Self {
             resolvers,
             disabled: DashMap::new(),
+            consecutive_failures: DashMap::new(),
             index: AtomicUsize::new(0),
             select_count: AtomicU64::new(0),
             use_random,
@@ -123,6 +128,22 @@ impl ResolverPool {
         }
     }
 
+    /// Record a successful resolution for a resolver, resetting its consecutive failure counter.
+    pub fn record_success(&self, resolver: SocketAddr) {
+        self.consecutive_failures.remove(&resolver);
+    }
+
+    /// Record a failure for a resolver. If consecutive failures reach the threshold,
+    /// the resolver is temporarily disabled for a cooldown period.
+    pub fn record_failure(&self, resolver: SocketAddr) {
+        let mut entry = self.consecutive_failures.entry(resolver).or_insert(0);
+        *entry += 1;
+        if *entry >= Self::FAILURE_THRESHOLD {
+            self.disable(resolver, Self::DISABLE_COOLDOWN);
+            *entry = 0;
+        }
+    }
+
     fn cleanup_expired(&self) {
         let now = Instant::now();
         self.disabled.retain(|_, expiry| *expiry > now);
@@ -155,6 +176,7 @@ impl Clone for ResolverPool {
         Self {
             resolvers: self.resolvers.clone(),
             disabled: self.disabled.clone(),
+            consecutive_failures: self.consecutive_failures.clone(),
             index: AtomicUsize::new(self.index.load(Ordering::Relaxed)),
             select_count: AtomicU64::new(self.select_count.load(Ordering::Relaxed)),
             use_random: self.use_random,
@@ -309,5 +331,28 @@ mod tests {
         for handle in handles {
             handle.join().unwrap();
         }
+    }
+
+    #[test]
+    fn test_record_failure_threshold() {
+        let pool = ResolverPool::new(test_resolvers(), false);
+        let res = resolver("1.1.1.1");
+
+        // First 2 failures should not disable the resolver
+        pool.record_failure(res);
+        assert!(!pool.is_disabled(res));
+        pool.record_failure(res);
+        assert!(!pool.is_disabled(res));
+
+        // Success resets the counter
+        pool.record_success(res);
+        pool.record_failure(res);
+        assert!(!pool.is_disabled(res));
+        pool.record_failure(res);
+        assert!(!pool.is_disabled(res));
+
+        // 3rd consecutive failure disables the resolver
+        pool.record_failure(res);
+        assert!(pool.is_disabled(res));
     }
 }

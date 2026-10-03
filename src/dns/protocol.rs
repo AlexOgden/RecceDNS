@@ -130,19 +130,19 @@ impl DnsHeader {
         buffer.write_u16(self.id)?;
 
         buffer.write_u8(
-            (self.recursion_desired as u8)
-                | ((self.truncated_message as u8) << 1)
-                | ((self.authoritative_answer as u8) << 2)
+            u8::from(self.recursion_desired)
+                | (u8::from(self.truncated_message) << 1)
+                | (u8::from(self.authoritative_answer) << 2)
                 | (self.opcode << 3)
-                | ((self.response as u8) << 7),
+                | (u8::from(self.response) << 7),
         )?;
 
         buffer.write_u8(
             (self.rescode as u8)
-                | ((self.checking_disabled as u8) << 4)
-                | ((self.authed_data as u8) << 5)
-                | ((self.z as u8) << 6)
-                | ((self.recursion_available as u8) << 7),
+                | (u8::from(self.checking_disabled) << 4)
+                | (u8::from(self.authed_data) << 5)
+                | (u8::from(self.z) << 6)
+                | (u8::from(self.recursion_available) << 7),
         )?;
 
         buffer.write_u16(self.questions)?;
@@ -491,6 +491,12 @@ impl DnsPacket {
             .read(buffer)
             .map_err(|_| DnsError::ProtocolData("Failed to read DNS header".to_owned()))?;
 
+        // Fast-path: On NXDOMAIN (and other non-NOERROR responses), skip parsing questions,
+        // answers, authorities (e.g. SOA records), and resources that are immediately dropped.
+        if result.header.rescode != ResultCode::NOERROR {
+            return Ok(result);
+        }
+
         for _ in 0..result.header.questions {
             let mut question = DnsQuestion::new(String::new(), QueryType::ANY);
             question
@@ -677,6 +683,43 @@ mod tests {
         let read_packet = DnsPacket::from_buffer(&mut buffer).unwrap();
 
         assert_eq!(packet, read_packet);
+    }
+
+    #[test]
+    #[allow(clippy::assert_is_empty)]
+    fn test_dns_packet_fast_path_nxdomain() {
+        let mut buffer = PacketBuffer::new();
+        let mut packet = DnsPacket::new();
+        packet.header.id = 5678;
+        packet.header.rescode = ResultCode::NXDOMAIN;
+        packet.questions.push(DnsQuestion::new(
+            "nxdomain.example.com".to_string(),
+            QueryType::A,
+        ));
+        packet.authorities.push(ResourceRecord {
+            name: "example.com".to_string(),
+            class: 1,
+            ttl: 3600,
+            data: RData::SOA {
+                mname: "ns1.example.com".to_string(),
+                rname: "hostmaster.example.com".to_string(),
+                serial: 2_026_100_301,
+                refresh: 7200,
+                retry: 3600,
+                expire: 1_209_600,
+                minimum: 3600,
+            },
+        });
+
+        packet.write(&mut buffer).unwrap();
+        buffer.set_pos(0).unwrap();
+        let read_packet = DnsPacket::from_buffer(&mut buffer).unwrap();
+
+        assert_eq!(read_packet.header.id, 5678);
+        assert_eq!(read_packet.header.rescode, ResultCode::NXDOMAIN);
+        // Fast path should have skipped parsing questions and authorities
+        assert!(read_packet.questions.is_empty());
+        assert!(read_packet.authorities.is_empty());
     }
 
     #[test]

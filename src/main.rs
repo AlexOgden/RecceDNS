@@ -1,3 +1,4 @@
+mod cpu;
 mod dns;
 mod io;
 mod modes;
