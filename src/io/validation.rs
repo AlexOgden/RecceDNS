@@ -1,6 +1,7 @@
 use anyhow::{Context, Result, anyhow, ensure};
 use regex::Regex;
 use std::{
+    collections::HashSet,
     fs,
     net::{IpAddr, Ipv4Addr, SocketAddr, SocketAddrV4},
     path::Path,
@@ -179,6 +180,17 @@ pub fn parse_ipv4_with_port(input: &str) -> Result<SocketAddr> {
 pub fn validate_ipv4(input: &str) -> Result<String> {
     parse_ipv4_with_port(input)?;
     Ok(input.trim().to_string())
+}
+
+/// Removes duplicate resolvers in place, keeping the first occurrence of each.
+///
+/// Comparison is on the parsed socket address, so `8.8.8.8` and `8.8.8.8:53` are duplicates.
+/// Returns the number of duplicates removed.
+pub fn dedup_resolvers(resolvers: &mut Vec<SocketAddr>) -> usize {
+    let original_len = resolvers.len();
+    let mut seen = HashSet::with_capacity(original_len);
+    resolvers.retain(|addr| seen.insert(*addr));
+    original_len - resolvers.len()
 }
 
 pub async fn filter_working_resolvers(
@@ -562,5 +574,36 @@ mod test {
     fn dns_resolver_rejects_ipv6() {
         // Currently only IPv4 is supported
         assert!(validate_dns_resolvers("2001:4860:4860::8888").is_err());
+    }
+
+    #[test]
+    fn dedup_resolvers_keeps_first_occurrence_order() {
+        let mut resolvers: Vec<SocketAddr> =
+            ["1.1.1.1", "8.8.8.8", "1.1.1.1", "9.9.9.9", "8.8.8.8"]
+                .iter()
+                .map(|s| parse_ipv4_with_port(s).unwrap())
+                .collect();
+        assert_eq!(dedup_resolvers(&mut resolvers), 2);
+        let expected: Vec<SocketAddr> = ["1.1.1.1", "8.8.8.8", "9.9.9.9"]
+            .iter()
+            .map(|s| parse_ipv4_with_port(s).unwrap())
+            .collect();
+        assert_eq!(resolvers, expected);
+    }
+
+    #[test]
+    fn dedup_resolvers_treats_default_port_as_equal() {
+        let mut resolvers: Vec<SocketAddr> = ["8.8.8.8", "8.8.8.8:53", "8.8.8.8:5353"]
+            .iter()
+            .map(|s| parse_ipv4_with_port(s).unwrap())
+            .collect();
+        assert_eq!(dedup_resolvers(&mut resolvers), 1);
+        assert_eq!(resolvers.len(), 2);
+    }
+
+    #[test]
+    fn dedup_resolvers_empty() {
+        let mut resolvers: Vec<SocketAddr> = Vec::new();
+        assert_eq!(dedup_resolvers(&mut resolvers), 0);
     }
 }

@@ -10,7 +10,7 @@ use std::{net::SocketAddr, path::Path};
 use anyhow::{Result, anyhow, ensure};
 use io::{
     cli::{self, OperationMode},
-    validation::{filter_working_resolvers, parse_ipv4_with_port},
+    validation::{dedup_resolvers, filter_working_resolvers, parse_ipv4_with_port},
 };
 use network::types::TransportProtocol;
 
@@ -80,10 +80,18 @@ async fn initialize_dns_resolvers(cmd_args: &cli::CommandArgs) -> Result<Vec<Soc
         "No DNS resolvers provided! At least one resolver must be specified."
     );
 
-    let resolvers: Vec<SocketAddr> = resolver_list
+    let mut resolvers: Vec<SocketAddr> = resolver_list
         .iter()
         .map(|s| parse_ipv4_with_port(s))
         .collect::<Result<_, _>>()?;
+
+    let duplicates = dedup_resolvers(&mut resolvers);
+    if duplicates > 0 {
+        log_info!(format!(
+            "Removed {duplicates} duplicate DNS resolver(s), {} remaining",
+            resolvers.len()
+        ));
+    }
 
     let working_resolvers =
         filter_working_resolvers(no_dns_check, &cmd_args.transport_protocol, &resolvers).await;
