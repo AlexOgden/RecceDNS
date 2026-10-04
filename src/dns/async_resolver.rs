@@ -1,4 +1,6 @@
 use std::{
+    borrow::Cow,
+    future::Future,
     net::{Ipv4Addr, Ipv6Addr, SocketAddr},
     sync::{
         Arc,
@@ -19,11 +21,11 @@ use crate::{io::packet_buffer::PacketBuffer, log_error, network::types::Transpor
 
 use super::{
     error::DnsError,
-    protocol::{DnsPacket, DnsQuestion, QueryType, ResultCode},
+    protocol::{DnsPacket, QueryType, ResultCode},
 };
 
 // Type aliases for clarity (UDP specific)
-type PendingQueryResult = Result<DnsPacket, DnsError>;
+type PendingQueryResult = Result<PacketBuffer, DnsError>;
 type QueryResultSender = oneshot::Sender<PendingQueryResult>;
 
 // Constants for default settings
@@ -31,6 +33,36 @@ const DEFAULT_TIMEOUT: Duration = Duration::from_millis(1500); // Default reques
 const UDP_BUFFER_SIZE: usize = 512; // Standard DNS UDP buffer size for receiving
 const TCP_BUFFER_SIZE: usize = 65535; // Max DNS TCP message size
 
+/// RAII guard that automatically cleans up pending UDP queries if dropped before completion.
+struct PendingQueryGuard<'a> {
+    query_id: u16,
+    pending_queries: &'a DashMap<u16, QueryResultSender>,
+    active: bool,
+}
+
+impl<'a> PendingQueryGuard<'a> {
+    const fn new(query_id: u16, pending_queries: &'a DashMap<u16, QueryResultSender>) -> Self {
+        Self {
+            query_id,
+            pending_queries,
+            active: true,
+        }
+    }
+
+    const fn defuse(&mut self) {
+        self.active = false;
+    }
+}
+
+impl Drop for PendingQueryGuard<'_> {
+    fn drop(&mut self) {
+        if self.active {
+            self.pending_queries.remove(&self.query_id);
+        }
+    }
+}
+
+#[repr(align(64))]
 struct UdpSocketEntry {
     socket: Arc<UdpSocket>,
     pending_queries: Arc<DashMap<u16, QueryResultSender>>,
@@ -38,6 +70,26 @@ struct UdpSocketEntry {
 }
 
 impl UdpSocketEntry {
+    async fn bind(index: usize, shutdown_tx: &broadcast::Sender<()>) -> Result<Self, DnsError> {
+        let socket = UdpSocket::bind("0.0.0.0:0")
+            .await
+            .map_err(|e| DnsError::Network(format!("Failed to bind UDP socket {index}: {e}")))?;
+        let socket = Arc::new(socket);
+        let pending_queries = Arc::new(DashMap::<u16, QueryResultSender>::new());
+
+        spawn_udp_receiver(
+            Arc::clone(&socket),
+            Arc::clone(&pending_queries),
+            shutdown_tx.subscribe(),
+        );
+
+        Ok(Self {
+            socket,
+            pending_queries,
+            next_query_id: atomic::AtomicU16::new(0),
+        })
+    }
+
     fn allocate_query_id(&self, tx: QueryResultSender) -> Result<u16, DnsError> {
         let mut attempts = 0;
         loop {
@@ -57,6 +109,160 @@ impl UdpSocketEntry {
                 }
             }
         }
+    }
+}
+
+fn spawn_udp_receiver(
+    socket: Arc<UdpSocket>,
+    pending_queries: Arc<DashMap<u16, QueryResultSender>>,
+    mut shutdown_rx: broadcast::Receiver<()>,
+) {
+    let addr_str = socket
+        .local_addr()
+        .map_or_else(|_| "unknown".to_string(), |a| a.to_string());
+
+    tokio::spawn(async move {
+        let mut recv_buffer = [0u8; UDP_BUFFER_SIZE];
+        loop {
+            tokio::select! {
+                biased;
+                _ = shutdown_rx.recv() => { break; }
+                result = socket.recv_from(&mut recv_buffer) => {
+                    match result {
+                        Ok((len, _)) => dispatch_udp_response(&recv_buffer[..len], &pending_queries, &addr_str),
+                        Err(e) => {
+                            log_error!(format!("ERROR: UDP Recv: {e}"));
+                        }
+                    }
+                }
+            }
+        }
+    });
+}
+
+fn dispatch_udp_response(
+    raw_data: &[u8],
+    pending_queries: &DashMap<u16, QueryResultSender>,
+    addr_str: &str,
+) {
+    if raw_data.len() < 2 {
+        return;
+    }
+
+    let query_id = u16::from_be_bytes([raw_data[0], raw_data[1]]);
+    let Some((_, sender)) = pending_queries.remove(&query_id) else {
+        return;
+    };
+
+    let mut packet_buffer = PacketBuffer::new();
+    if packet_buffer.set_data(raw_data).is_err() {
+        log_error!(format!(
+            "Failed UDP set_data (ID: {query_id}) on {addr_str}"
+        ));
+        let _ = sender.send(Err(DnsError::Internal(
+            "UDP Buffer handling error".to_string(),
+        )));
+        return;
+    }
+
+    let _ = sender.send(Ok(packet_buffer));
+}
+
+fn parse_dns_packet(data: &[u8]) -> Result<DnsPacket, DnsError> {
+    let mut packet_buffer = PacketBuffer::from_slice(data)
+        .map_err(|e| DnsError::Internal(format!("Failed to create PacketBuffer: {e}")))?;
+    DnsPacket::from_buffer(&mut packet_buffer)
+}
+
+fn format_query_domain(domain: &str, query_type: QueryType) -> Cow<'_, str> {
+    if query_type == QueryType::PTR {
+        if let Ok(ipv4) = domain.parse::<Ipv4Addr>() {
+            return Cow::Owned(crate::network::util::ipv4_to_ptr(ipv4));
+        }
+        if let Ok(ipv6) = domain.parse::<Ipv6Addr>() {
+            return Cow::Owned(crate::network::util::ipv6_to_ptr(&ipv6));
+        }
+    }
+    Cow::Borrowed(domain)
+}
+
+fn serialize_query(
+    query_id: u16,
+    domain: &str,
+    query_type: QueryType,
+    recursion: bool,
+) -> Result<PacketBuffer, DnsError> {
+    if domain.is_empty() {
+        return Err(DnsError::InvalidData(
+            "Domain name cannot be empty".to_owned(),
+        ));
+    }
+
+    if domain.len() > 253 {
+        return Err(DnsError::InvalidData(format!(
+            "Domain name exceeds maximum length of 253 characters: {domain}"
+        )));
+    }
+
+    let clean_domain = domain.strip_suffix('.').unwrap_or(domain);
+    let formatted_domain = format_query_domain(clean_domain, query_type);
+
+    let mut buffer = PacketBuffer::new();
+    buffer
+        .write_u16(query_id)
+        .map_err(|e| DnsError::Internal(format!("Failed to write query ID: {e}")))?;
+
+    let flags_byte0 = u8::from(recursion);
+    buffer
+        .write_u8(flags_byte0)
+        .map_err(|e| DnsError::Internal(format!("Failed to write header flags: {e}")))?;
+    buffer
+        .write_u8(0u8)
+        .map_err(|e| DnsError::Internal(format!("Failed to write header flags: {e}")))?;
+
+    buffer
+        .write_u16(1)
+        .map_err(|e| DnsError::Internal(format!("Failed to write question count: {e}")))?;
+    buffer
+        .write_u16(0)
+        .map_err(|e| DnsError::Internal(format!("Failed to write answer count: {e}")))?;
+    buffer
+        .write_u16(0)
+        .map_err(|e| DnsError::Internal(format!("Failed to write auth count: {e}")))?;
+    buffer
+        .write_u16(0)
+        .map_err(|e| DnsError::Internal(format!("Failed to write additional count: {e}")))?;
+
+    buffer
+        .write_qname(&formatted_domain)
+        .map_err(|e| DnsError::InvalidData(format!("Failed to encode QNAME: {e}")))?;
+
+    buffer
+        .write_u16(query_type as u16)
+        .map_err(|e| DnsError::Internal(format!("Failed to write QTYPE: {e}")))?;
+
+    buffer
+        .write_u16(1)
+        .map_err(|e| DnsError::Internal(format!("Failed to write QCLASS: {e}")))?;
+
+    Ok(buffer)
+}
+
+async fn io_timeout<F, T>(
+    duration: Duration,
+    target: SocketAddr,
+    action_name: &str,
+    future: F,
+) -> Result<T, DnsError>
+where
+    F: Future<Output = std::io::Result<T>>,
+{
+    match timeout(duration, future).await {
+        Ok(Ok(val)) => Ok(val),
+        Ok(Err(e)) => Err(DnsError::Network(format!(
+            "Failed to {action_name} {target}: {e}"
+        ))),
+        Err(_) => Err(DnsError::Timeout(target.to_string())),
     }
 }
 
@@ -82,66 +288,13 @@ pub struct AsyncResolver {
 impl AsyncResolver {
     pub async fn new(udp_pool_size: Option<usize>) -> Result<Self, DnsError> {
         let default_pool_size = crate::cpu::count().clamp(4, 16);
-        let udp_pool_size = udp_pool_size.map_or(default_pool_size, |s| s.clamp(1, 16));
+        let pool_size = udp_pool_size.map_or(default_pool_size, |s| s.clamp(1, 16));
 
-        let mut udp_entries = Vec::with_capacity(udp_pool_size);
         let (shutdown_tx, _) = broadcast::channel(1);
+        let mut udp_entries = Vec::with_capacity(pool_size);
 
-        for i in 0..udp_pool_size {
-            let udp_socket = UdpSocket::bind("0.0.0.0:0")
-                .await
-                .map_err(|e| DnsError::Network(format!("Failed to bind UDP socket {i}: {e}")))?;
-            let udp_socket_arc = Arc::new(udp_socket);
-            let pending_queries = Arc::new(DashMap::<u16, QueryResultSender>::new());
-
-            let pq_clone = pending_queries.clone();
-            let udp_socket_clone = udp_socket_arc.clone();
-            let mut shutdown_rx = shutdown_tx.subscribe();
-            let local_addr = udp_socket_arc.local_addr().ok();
-            let addr_str = local_addr.map_or_else(|| "unknown".to_string(), |a| a.to_string());
-
-            tokio::spawn(async move {
-                let mut recv_buffer = [0u8; UDP_BUFFER_SIZE];
-                loop {
-                    tokio::select! {
-                        biased;
-                        _ = shutdown_rx.recv() => { break; }
-                        result = udp_socket_clone.recv_from(&mut recv_buffer) => {
-                            match result {
-                                Ok((len, _src_addr)) => {
-                                    if len >= 2 {
-                                        let query_id = u16::from_be_bytes([recv_buffer[0], recv_buffer[1]]);
-                                        if let Some((_id, sender)) = pq_clone.remove(&query_id) {
-                                            let mut packet_buffer = PacketBuffer::new();
-                                            if packet_buffer.set_data(&recv_buffer[..len]).is_ok() {
-                                                match DnsPacket::from_buffer(&mut packet_buffer) {
-                                                    Ok(dns_packet) => { let _ = sender.send(Ok(dns_packet)); }
-                                                    Err(e) => {
-                                                        log_error!(format!("Failed UDP parse (ID: {query_id}) on {addr_str}: {e}"));
-                                                        let _ = sender.send(Err(DnsError::ProtocolData(e.to_string())));
-                                                    }
-                                                }
-                                            } else {
-                                                 log_error!(format!("Failed UDP set_data (ID: {query_id}) on {addr_str}"));
-                                                 let _ = sender.send(Err(DnsError::Internal("UDP Buffer handling error".to_string())));
-                                            }
-                                        }
-                                    }
-                                }
-                                Err(e) => {
-                                    log_error!(format!("ERROR: UDP Recv: {e}"));
-                                }
-                            }
-                        }
-                    }
-                }
-            });
-
-            udp_entries.push(UdpSocketEntry {
-                socket: udp_socket_arc,
-                pending_queries,
-                next_query_id: atomic::AtomicU16::new(0),
-            });
+        for i in 0..pool_size {
+            udp_entries.push(UdpSocketEntry::bind(i, &shutdown_tx).await?);
         }
 
         Ok(Self {
@@ -164,19 +317,13 @@ impl AsyncResolver {
             return Ok(entry.value().clone());
         }
 
-        let tcp_stream = match timeout(timeout_duration, TcpStream::connect(target_addr)).await {
-            Ok(Ok(s)) => s,
-            Ok(Err(e)) => {
-                return Err(DnsError::Network(format!(
-                    "Failed to connect to {target_addr}: {e}"
-                )));
-            }
-            Err(_) => {
-                return Err(DnsError::Network(format!(
-                    "Timeout connecting to {target_addr}"
-                )));
-            }
-        };
+        let tcp_stream = io_timeout(
+            timeout_duration,
+            target_addr,
+            "connect to",
+            TcpStream::connect(target_addr),
+        )
+        .await?;
 
         let connection = Arc::new(Mutex::new(tcp_stream));
         self.inner
@@ -226,8 +373,8 @@ impl AsyncResolver {
             }
             TransportProtocol::TCP => {
                 let query_id = self.inner.next_tcp_query_id.fetch_add(1, Ordering::Relaxed);
-                let query_packet = Self::build_dns_query(query_id, domain, *query_type, recursion)?;
-                self.resolve_tcp(dns_resolver, query_packet, timeout_duration)
+                let request_buffer = serialize_query(query_id, domain, *query_type, recursion)?;
+                self.resolve_tcp(dns_resolver, query_id, &request_buffer, timeout_duration)
                     .await
             }
         }
@@ -256,178 +403,141 @@ impl AsyncResolver {
 
         let (tx, rx) = oneshot::channel::<PendingQueryResult>();
         let query_id = entry.allocate_query_id(tx)?;
+        let mut guard = PendingQueryGuard::new(query_id, &entry.pending_queries);
 
-        let mut query_packet = match Self::build_dns_query(query_id, domain, *query_type, recursion)
-        {
-            Ok(p) => p,
-            Err(e) => {
-                entry.pending_queries.remove(&query_id);
-                return Err(e);
+        let request_buffer = serialize_query(query_id, domain, *query_type, recursion)?;
+
+        entry
+            .socket
+            .send_to(request_buffer.get_buffer_to_pos(), dns_resolver)
+            .await
+            .map_err(|e| {
+                DnsError::Network(format!("UDP: Failed to send query to {dns_resolver}: {e}"))
+            })?;
+
+        let mut response_buffer = match timeout(timeout_duration, rx).await {
+            Ok(Ok(result)) => {
+                guard.defuse();
+                result?
             }
+            Ok(Err(_)) => {
+                return Err(DnsError::Internal(
+                    "UDP: Resolver receiver task channel closed unexpectedly".to_string(),
+                ));
+            }
+            Err(_) => return Err(DnsError::Timeout(dns_resolver.to_string())),
         };
 
-        // Serialize packet
-        let mut udp_req_buffer = PacketBuffer::new();
-        if let Err(e) = query_packet.write(&mut udp_req_buffer) {
-            entry.pending_queries.remove(&query_id);
-            return Err(DnsError::Internal(format!(
-                "UDP: Failed to serialize query: {e}"
-            )));
-        }
-        let udp_request_data = udp_req_buffer.get_buffer_to_pos();
+        let response = DnsPacket::from_buffer(&mut response_buffer)
+            .map_err(|e| DnsError::ProtocolData(e.to_string()))?;
 
-        if let Err(e) = entry.socket.send_to(udp_request_data, dns_resolver).await {
-            entry.pending_queries.remove(&query_id);
-            return Err(DnsError::Network(format!(
-                "UDP: Failed to send query to {dns_resolver}: {e}"
-            )));
-        }
-
-        // Wait for response with timeout
-        match timeout(timeout_duration, rx).await {
-            Ok(Ok(result_from_channel)) => match result_from_channel {
-                Ok(packet) => Self::process_dns_result(packet),
-                Err(e) => Err(e),
-            },
-            Ok(Err(_recv_error)) => {
-                entry.pending_queries.remove(&query_id);
-                Err(DnsError::Internal(
-                    "UDP: Resolver receiver task channel closed unexpectedly".to_string(),
-                ))
-            }
-            Err(_timeout_elapsed) => {
-                entry.pending_queries.remove(&query_id);
-                Err(DnsError::Timeout(dns_resolver.to_string()))
-            }
-        }
+        Self::process_dns_result(response)
     }
 
-    // Handshake, serialization, length framing, send, and length-prefixed read steps are kept cohesive in one async routine.
-    #[allow(clippy::too_many_lines)]
     async fn resolve_tcp(
         &self,
         dns_resolver: SocketAddr,
-        mut query_packet: DnsPacket,
+        query_id: u16,
+        request_buffer: &PacketBuffer,
         timeout_duration: Duration,
     ) -> Result<DnsPacket, DnsError> {
         let tcp_connection_mutex = self
             .get_or_create_tcp_connection(dns_resolver, timeout_duration)
             .await?;
-        let mut tcp_connection_guard = tcp_connection_mutex.lock().await;
+        let mut tcp_stream = tcp_connection_mutex.lock().await;
 
-        let query_id = query_packet.header.id;
-
-        let result: Result<DnsPacket, DnsError> = async {
-            // Serialize packet
-            let mut request_buffer = PacketBuffer::new();
-            query_packet
-                .write(&mut request_buffer)
-                .map_err(|e| DnsError::Internal(format!("TCP: Failed to serialize query: {e}")))?;
-            let request_bytes = request_buffer.get_buffer_to_pos();
-
-            // Prepend 2-byte length field (Big Endian)
-            let query_len = u16::try_from(request_bytes.len()).map_err(|_| {
-                DnsError::InvalidData("TCP: Query data length exceeds 65535 bytes".to_string())
-            })?;
-            if query_len == 0 {
-                return Err(DnsError::InvalidData(
-                    "TCP: Serialized query data is empty".to_string(),
-                ));
-            }
-            let mut tcp_request_data = Vec::with_capacity(2 + request_bytes.len());
-            tcp_request_data.extend_from_slice(&query_len.to_be_bytes());
-            tcp_request_data.extend_from_slice(request_bytes);
-
-            // Write request
-            match timeout(
-                timeout_duration,
-                tcp_connection_guard.write_all(&tcp_request_data),
-            )
-            .await
-            {
-                Ok(Ok(())) => {}
-                Ok(Err(e)) => {
-                    return Err(DnsError::Network(format!(
-                        "Failed to write request to {dns_resolver}: {e}"
-                    )));
-                }
-                Err(_) => {
-                    return Err(DnsError::Timeout(dns_resolver.to_string()));
-                }
-            }
-
-            // Read response length (2 bytes) with timeout
-            let mut response_len_buffer = [0u8; 2];
-            match timeout(
-                timeout_duration,
-                tcp_connection_guard.read_exact(&mut response_len_buffer),
-            )
-            .await
-            {
-                Ok(Ok(_)) => {}
-                Ok(Err(e)) => {
-                    return Err(DnsError::Network(format!(
-                        "Failed to read response length from {dns_resolver}: {e}"
-                    )));
-                }
-                Err(_) => {
-                    return Err(DnsError::Timeout(dns_resolver.to_string()));
-                }
-            }
-            let response_len = u16::from_be_bytes(response_len_buffer) as usize;
-
-            if response_len == 0 {
-                return Err(DnsError::InvalidData(
-                    "TCP: Received zero length response".to_owned(),
-                ));
-            }
-            // Basic sanity check for response size
-            if response_len > TCP_BUFFER_SIZE {
-                return Err(DnsError::InvalidData(format!(
-                    "TCP: Response length too large: {response_len} bytes (max: {TCP_BUFFER_SIZE})"
-                )));
-            }
-
-            // Read the actual response with timeout
-            let mut response_body_buffer = vec![0u8; response_len];
-            match timeout(
-                timeout_duration,
-                tcp_connection_guard.read_exact(&mut response_body_buffer),
-            )
-            .await
-            {
-                Ok(Ok(_)) => {}
-                Ok(Err(e)) => {
-                    return Err(DnsError::Network(format!(
-                        "Failed to read response from {dns_resolver}: {e}"
-                    )));
-                }
-                Err(_) => {
-                    return Err(DnsError::Timeout(dns_resolver.to_string()));
-                }
-            }
-
-            let mut response_packet_buffer = PacketBuffer::from_slice(&response_body_buffer)
-                .map_err(|e| DnsError::Internal(format!("Failed to create PacketBuffer: {e}")))?;
-            let response_packet = DnsPacket::from_buffer(&mut response_packet_buffer)?;
-
-            // Verify response ID matches query ID
-            if response_packet.header.id != query_id {
-                return Err(DnsError::InvalidData(format!(
-                    "DNS: Response ID {} does not match query ID {}",
-                    response_packet.header.id, query_id
-                )));
-            }
-
-            Self::process_dns_result(response_packet)
-        }
+        let result = Self::exchange_tcp(
+            &mut tcp_stream,
+            dns_resolver,
+            query_id,
+            request_buffer,
+            timeout_duration,
+        )
         .await;
+        drop(tcp_stream);
 
         if result.is_err() {
             self.inner.tcp_sockets.remove(&dns_resolver);
         }
 
         result
+    }
+
+    async fn exchange_tcp(
+        stream: &mut TcpStream,
+        dns_resolver: SocketAddr,
+        query_id: u16,
+        request_buffer: &PacketBuffer,
+        timeout_duration: Duration,
+    ) -> Result<DnsPacket, DnsError> {
+        let request_bytes = request_buffer.get_buffer_to_pos();
+
+        let query_len = u16::try_from(request_bytes.len()).map_err(|_| {
+            DnsError::InvalidData("TCP: Query data length exceeds 65535 bytes".to_string())
+        })?;
+        if query_len == 0 {
+            return Err(DnsError::InvalidData(
+                "TCP: Serialized query data is empty".to_string(),
+            ));
+        }
+
+        let mut framed_request = [0u8; 2 + 512];
+        let total_len = 2 + request_bytes.len();
+        if total_len > framed_request.len() {
+            return Err(DnsError::InvalidData(
+                "TCP: Query exceeds maximum buffer size".to_string(),
+            ));
+        }
+        framed_request[..2].copy_from_slice(&query_len.to_be_bytes());
+        framed_request[2..total_len].copy_from_slice(request_bytes);
+
+        io_timeout(
+            timeout_duration,
+            dns_resolver,
+            "write request to",
+            stream.write_all(&framed_request[..total_len]),
+        )
+        .await?;
+
+        let mut response_len_buf = [0u8; 2];
+        io_timeout(
+            timeout_duration,
+            dns_resolver,
+            "read response length from",
+            stream.read_exact(&mut response_len_buf),
+        )
+        .await?;
+
+        let response_len = usize::from(u16::from_be_bytes(response_len_buf));
+        if response_len == 0 {
+            return Err(DnsError::InvalidData(
+                "TCP: Received zero length response".to_string(),
+            ));
+        }
+        if response_len > TCP_BUFFER_SIZE {
+            return Err(DnsError::InvalidData(format!(
+                "TCP: Response length too large: {response_len} bytes (max: {TCP_BUFFER_SIZE})"
+            )));
+        }
+
+        let mut response_body = vec![0u8; response_len];
+        io_timeout(
+            timeout_duration,
+            dns_resolver,
+            "read response from",
+            stream.read_exact(&mut response_body),
+        )
+        .await?;
+
+        let response_packet = parse_dns_packet(&response_body)?;
+        if response_packet.header.id != query_id {
+            return Err(DnsError::InvalidData(format!(
+                "DNS: Response ID {} does not match query ID {query_id}",
+                response_packet.header.id
+            )));
+        }
+
+        Self::process_dns_result(response_packet)
     }
 
     fn process_dns_result(query_result: DnsPacket) -> Result<DnsPacket, DnsError> {
@@ -454,47 +564,6 @@ impl AsyncResolver {
         }
     }
 
-    fn build_dns_query(
-        query_id: u16,
-        domain: &str,
-        query_type: QueryType,
-        recursion: bool,
-    ) -> Result<DnsPacket, DnsError> {
-        if domain.is_empty() {
-            return Err(DnsError::InvalidData(
-                "Domain name cannot be empty".to_owned(),
-            ));
-        }
-
-        if domain.len() > 253 {
-            return Err(DnsError::InvalidData(format!(
-                "Domain name exceeds maximum length of 253 characters: {domain}"
-            )));
-        }
-
-        // Convert IP address to PTR format if needed
-        let domain = if query_type == QueryType::PTR {
-            #[allow(clippy::option_if_let_else)]
-            if let Ok(ipv4) = domain.parse::<Ipv4Addr>() {
-                crate::network::util::ipv4_to_ptr(ipv4)
-            } else if let Ok(ipv6) = domain.parse::<Ipv6Addr>() {
-                crate::network::util::ipv6_to_ptr(&ipv6)
-            } else {
-                domain.to_owned()
-            }
-        } else {
-            domain.to_owned()
-        };
-
-        let mut packet = DnsPacket::new();
-        packet.header.id = query_id;
-        packet.header.questions = 1;
-        packet.header.recursion_desired = recursion;
-        packet.questions.push(DnsQuestion::new(domain, query_type));
-
-        Ok(packet)
-    }
-
     pub fn shutdown(&self) {
         let _ = self.inner.shutdown_tx.send(());
     }
@@ -503,7 +572,7 @@ impl AsyncResolver {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::dns::protocol::{RData, ResourceRecord};
+    use crate::dns::protocol::{DnsQuestion, RData, ResourceRecord};
 
     #[tokio::test]
     async fn test_pool_size_clamping() {
@@ -762,5 +831,78 @@ mod tests {
 
         server_task.abort();
         assert!(res.is_ok());
+    }
+
+    #[test]
+    fn test_format_query_domain() {
+        assert_eq!(
+            format_query_domain("example.com", QueryType::A),
+            "example.com"
+        );
+        assert_eq!(
+            format_query_domain("192.0.2.1", QueryType::PTR),
+            "1.2.0.192.in-addr.arpa"
+        );
+        assert_eq!(
+            format_query_domain("2001:db8::1", QueryType::PTR),
+            "1.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.8.b.d.0.1.0.0.2.ip6.arpa"
+        );
+        assert_eq!(
+            format_query_domain("not-an-ip", QueryType::PTR),
+            "not-an-ip"
+        );
+    }
+
+    #[test]
+    fn test_serialize_query_direct_wire_format() {
+        assert!(serialize_query(1, "", QueryType::A, true).is_err());
+        let long_domain = "a".repeat(254);
+        assert!(serialize_query(1, &long_domain, QueryType::A, true).is_err());
+
+        // Test normal domain
+        let mut valid_query_buffer =
+            serialize_query(42, "example.com", QueryType::A, true).unwrap();
+        valid_query_buffer.set_pos(0).unwrap();
+        let packet = DnsPacket::from_buffer(&mut valid_query_buffer).unwrap();
+        assert_eq!(packet.header.id, 42);
+        assert!(packet.header.recursion_desired);
+        assert_eq!(packet.questions.len(), 1);
+        assert_eq!(packet.questions[0].name, "example.com");
+        assert_eq!(packet.questions[0].qtype, QueryType::A);
+        assert_eq!(packet.questions[0].qclass, 1);
+
+        // Test trailing dot
+        let mut trailing_dot_buffer =
+            serialize_query(43, "example.com.", QueryType::A, false).unwrap();
+        trailing_dot_buffer.set_pos(0).unwrap();
+        let packet_trailing = DnsPacket::from_buffer(&mut trailing_dot_buffer).unwrap();
+        assert_eq!(packet_trailing.header.id, 43);
+        assert!(!packet_trailing.header.recursion_desired);
+        assert_eq!(packet_trailing.questions.len(), 1);
+        assert_eq!(packet_trailing.questions[0].name, "example.com");
+
+        // Test 63-byte label boundary (valid)
+        let label_63 = "a".repeat(63);
+        let domain_63 = format!("{label_63}.com");
+        assert!(serialize_query(44, &domain_63, QueryType::A, true).is_ok());
+
+        // Test 64-byte label boundary (rejected)
+        let label_64 = "a".repeat(64);
+        let domain_64 = format!("{label_64}.com");
+        assert!(serialize_query(45, &domain_64, QueryType::A, true).is_err());
+    }
+
+    #[test]
+    fn test_udp_socket_entry_alignment() {
+        use std::mem::align_of;
+        assert_eq!(align_of::<UdpSocketEntry>(), 64);
+    }
+
+    #[test]
+    fn test_dispatch_udp_response_short_packet() {
+        let pending = DashMap::new();
+        // Packets shorter than 2 bytes should be discarded without panicking
+        dispatch_udp_response(&[0], &pending, "127.0.0.1:53");
+        assert!(pending.is_empty());
     }
 }

@@ -13,13 +13,81 @@ pub const DEFAULT_RESOLVER: SocketAddr = SocketAddr::V4(SocketAddrV4::new(
     DEFAULT_DNS_PORT,
 ));
 
+/// Stack-allocated buffer that dynamically spills to heap if capacity exceeds `N`.
+/// Avoids heap allocations on hot paths for pools with <= `N` resolvers.
+#[derive(Debug)]
+struct SmallList<T, const N: usize> {
+    inline: [T; N],
+    inline_len: usize,
+    heap: Vec<T>,
+}
+
+impl<T: Copy + Default, const N: usize> SmallList<T, N> {
+    fn with_capacity(capacity: usize) -> Self {
+        if capacity <= N {
+            Self {
+                inline: [T::default(); N],
+                inline_len: 0,
+                heap: Vec::new(),
+            }
+        } else {
+            Self {
+                inline: [T::default(); N],
+                inline_len: 0,
+                heap: Vec::with_capacity(capacity),
+            }
+        }
+    }
+
+    fn push(&mut self, item: T) {
+        if self.heap.capacity() == 0 {
+            if self.inline_len < N {
+                self.inline[self.inline_len] = item;
+                self.inline_len += 1;
+            } else {
+                let mut heap = Vec::with_capacity(N.saturating_mul(2));
+                heap.extend_from_slice(&self.inline[..self.inline_len]);
+                heap.push(item);
+                self.heap = heap;
+            }
+        } else {
+            self.heap.push(item);
+        }
+    }
+
+    fn as_slice(&self) -> &[T] {
+        if self.heap.capacity() == 0 {
+            &self.inline[..self.inline_len]
+        } else {
+            self.heap.as_slice()
+        }
+    }
+
+    const fn len(&self) -> usize {
+        if self.heap.capacity() == 0 {
+            self.inline_len
+        } else {
+            self.heap.len()
+        }
+    }
+
+    const fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    fn clear(&mut self) {
+        self.inline_len = 0;
+        self.heap.clear();
+    }
+}
+
 #[derive(Debug)]
 pub struct ResolverEntry {
     pub addr: SocketAddr,
+    pub ewma_success_permille: AtomicU32,
     pub in_flight: AtomicUsize,
     pub max_in_flight: AtomicUsize,
     pub ewma_latency_us: AtomicU64,
-    pub ewma_success_permille: AtomicU32,
     pub successes: AtomicU64,
     pub failures: AtomicU64,
     pub consecutive_failures: AtomicUsize,
@@ -35,10 +103,10 @@ impl ResolverEntry {
     pub fn new(addr: SocketAddr) -> Self {
         Self {
             addr,
+            ewma_success_permille: AtomicU32::new(1000),
             in_flight: AtomicUsize::new(0),
             max_in_flight: AtomicUsize::new(ResolverPool::DEFAULT_MAX_IN_FLIGHT),
             ewma_latency_us: AtomicU64::new(0),
-            ewma_success_permille: AtomicU32::new(1000),
             successes: AtomicU64::new(0),
             failures: AtomicU64::new(0),
             consecutive_failures: AtomicUsize::new(0),
@@ -51,6 +119,110 @@ impl ResolverEntry {
             )),
         }
     }
+
+    #[inline]
+    #[must_use]
+    pub fn is_disabled(&self, now_ms: u64) -> bool {
+        self.disabled_until_ms.load(Ordering::Relaxed) > now_ms
+    }
+
+    #[inline]
+    #[must_use]
+    pub fn is_saturated(&self) -> bool {
+        self.in_flight.load(Ordering::Relaxed) >= self.max_in_flight.load(Ordering::Relaxed)
+    }
+
+    pub fn disable(&self, until_ms: u64) {
+        self.disabled_until_ms.store(until_ms, Ordering::Relaxed);
+        self.current_weight.store(0, Ordering::Relaxed);
+    }
+
+    #[must_use]
+    pub fn calculate_weight(&self) -> u64 {
+        let ewma_us = self.ewma_latency_us.load(Ordering::Relaxed);
+        let latency_ms = if ewma_us == 0 {
+            50
+        } else {
+            (ewma_us / 1000).clamp(2, 2000)
+        };
+
+        let success_permille = u64::from(
+            self.ewma_success_permille
+                .load(Ordering::Relaxed)
+                .clamp(50, 1000),
+        );
+        (success_permille / latency_ms).clamp(1, 100)
+    }
+
+    #[must_use]
+    pub fn rto(&self) -> Duration {
+        let micros = self.ewma_latency_us.load(Ordering::Relaxed);
+        if micros == 0 {
+            Duration::from_millis(800)
+        } else {
+            let millis = micros / 1000;
+            let rto_ms = (millis * 3).clamp(250, 1500);
+            Duration::from_millis(rto_ms)
+        }
+    }
+
+    pub fn record_success(&self, latency: Duration) {
+        self.successes.fetch_add(1, Ordering::Relaxed);
+        self.consecutive_failures.store(0, Ordering::Relaxed);
+        self.cooldown_count.store(0, Ordering::Relaxed);
+
+        let lat_us = u64::try_from(latency.as_micros()).unwrap_or(u64::MAX);
+        let _ = self
+            .ewma_latency_us
+            .try_update(Ordering::Relaxed, Ordering::Relaxed, |cur| {
+                Some(if cur == 0 {
+                    lat_us
+                } else {
+                    cur.saturating_mul(7).saturating_add(lat_us) / 8
+                })
+            });
+
+        let _ =
+            self.ewma_success_permille
+                .try_update(Ordering::Relaxed, Ordering::Relaxed, |cur| {
+                    Some((cur * 9 + 1000) / 10)
+                });
+    }
+
+    pub fn record_failure(&self, threshold: usize) -> Option<usize> {
+        self.failures.fetch_add(1, Ordering::Relaxed);
+
+        let _ =
+            self.ewma_success_permille
+                .try_update(Ordering::Relaxed, Ordering::Relaxed, |cur| {
+                    Some((cur * 9) / 10)
+                });
+
+        let failures = self.consecutive_failures.fetch_add(1, Ordering::Relaxed) + 1;
+        if failures >= threshold {
+            self.consecutive_failures.store(0, Ordering::Relaxed);
+            Some(self.cooldown_count.fetch_add(1, Ordering::Relaxed))
+        } else {
+            None
+        }
+    }
+
+    pub fn schedule_pacing(&self, now_us: u64, interval_us: u64) -> u64 {
+        let mut current = self.last_dispatch_us.load(Ordering::Relaxed);
+        loop {
+            let scheduled = current.max(now_us);
+            let next = scheduled.saturating_add(interval_us);
+            match self.last_dispatch_us.compare_exchange_weak(
+                current,
+                next,
+                Ordering::Relaxed,
+                Ordering::Relaxed,
+            ) {
+                Ok(_) => return scheduled,
+                Err(actual) => current = actual,
+            }
+        }
+    }
 }
 
 /// RAII guard representing an in-flight query permit on a resolver.
@@ -58,6 +230,16 @@ impl ResolverEntry {
 pub struct ResolverPermit {
     entry: Arc<ResolverEntry>,
     _semaphore_permit: Option<tokio::sync::OwnedSemaphorePermit>,
+}
+
+impl ResolverPermit {
+    fn new(entry: Arc<ResolverEntry>, permit: tokio::sync::OwnedSemaphorePermit) -> Self {
+        entry.in_flight.fetch_add(1, Ordering::Relaxed);
+        Self {
+            entry,
+            _semaphore_permit: Some(permit),
+        }
+    }
 }
 
 impl Drop for ResolverPermit {
@@ -83,8 +265,6 @@ pub struct ResolverPool {
 
 impl ResolverPool {
     pub const FAILURE_THRESHOLD: usize = 3;
-    #[allow(dead_code)]
-    pub const DISABLE_COOLDOWN: Duration = Duration::from_secs(3);
     pub const BASE_COOLDOWN: Duration = Duration::from_secs(2);
     pub const MAX_COOLDOWN: Duration = Duration::from_secs(60);
     pub const DEFAULT_MAX_IN_FLIGHT: usize = 32;
@@ -112,18 +292,21 @@ impl ResolverPool {
     }
 
     #[inline]
+    fn elapsed_millis(&self) -> u64 {
+        u64::try_from(self.inner.start_instant.elapsed().as_millis()).unwrap_or(u64::MAX)
+    }
+
+    #[inline]
+    fn elapsed_micros(&self) -> u64 {
+        u64::try_from(self.inner.start_instant.elapsed().as_micros()).unwrap_or(u64::MAX)
+    }
+
+    #[inline]
     fn find_entry(&self, resolver: SocketAddr) -> Option<&Arc<ResolverEntry>> {
         self.inner
             .addr_to_index
             .get(&resolver)
             .and_then(|&idx| self.inner.entries.get(idx))
-    }
-
-    #[inline]
-    fn is_entry_disabled(&self, entry: &ResolverEntry) -> bool {
-        let now_ms =
-            u64::try_from(self.inner.start_instant.elapsed().as_millis()).unwrap_or(u64::MAX);
-        entry.disabled_until_ms.load(Ordering::Relaxed) > now_ms
     }
 
     /// Select a resolver favoring low-latency and high-success responsive resolvers.
@@ -142,108 +325,66 @@ impl ResolverPool {
 
         self.inner.select_count.fetch_add(1, Ordering::Relaxed);
 
+        let total = self.inner.entries.len();
+        let mut candidates = SmallList::<usize, 16>::with_capacity(total);
+        let mut unsaturated = SmallList::<usize, 16>::with_capacity(total);
+
+        let Some(indices) = self.collect_candidates(excluded, &mut candidates, &mut unsaturated)
+        else {
+            return self.fallback();
+        };
+
+        if indices.len() == 1 {
+            return Some(self.inner.entries[indices[0]].addr);
+        }
+
         if self.inner.use_random {
-            self.select_random(excluded)
+            self.weighted_random_select(indices)
         } else {
-            self.select_sequential(excluded)
+            self.swrr_select(indices)
         }
     }
 
-    fn select_sequential(&self, excluded: &[SocketAddr]) -> Option<SocketAddr> {
-        let total_entries = self.inner.entries.len();
-        if total_entries <= 64 {
-            let mut candidate_indices = [0usize; 64];
-            let mut count = 0;
-            let mut unsaturated_indices = [0usize; 64];
-            let mut unsaturated_count = 0;
+    fn collect_candidates<'a>(
+        &self,
+        excluded: &[SocketAddr],
+        candidates: &'a mut SmallList<usize, 16>,
+        unsaturated: &'a mut SmallList<usize, 16>,
+    ) -> Option<&'a [usize]> {
+        let filter_excluded = !excluded.is_empty();
+        self.populate_candidates(filter_excluded, excluded, candidates, unsaturated);
 
-            for (idx, entry) in self.inner.entries.iter().enumerate() {
-                if !self.is_entry_disabled(entry) && !excluded.contains(&entry.addr) {
-                    candidate_indices[count] = idx;
-                    count += 1;
+        if candidates.is_empty() && filter_excluded {
+            self.populate_candidates(false, excluded, candidates, unsaturated);
+        }
 
-                    if entry.in_flight.load(Ordering::Relaxed)
-                        < entry.max_in_flight.load(Ordering::Relaxed)
-                    {
-                        unsaturated_indices[unsaturated_count] = idx;
-                        unsaturated_count += 1;
-                    }
-                }
-            }
+        if candidates.is_empty() {
+            return None;
+        }
 
-            if count == 0 {
-                for (idx, entry) in self.inner.entries.iter().enumerate() {
-                    if !self.is_entry_disabled(entry) {
-                        candidate_indices[count] = idx;
-                        count += 1;
-
-                        if entry.in_flight.load(Ordering::Relaxed)
-                            < entry.max_in_flight.load(Ordering::Relaxed)
-                        {
-                            unsaturated_indices[unsaturated_count] = idx;
-                            unsaturated_count += 1;
-                        }
-                    }
-                }
-            }
-
-            if count == 0 {
-                return self.fallback();
-            }
-
-            if unsaturated_count > 0 {
-                if unsaturated_count == 1 {
-                    return Some(self.inner.entries[unsaturated_indices[0]].addr);
-                }
-                self.swrr_select(&unsaturated_indices[..unsaturated_count])
-            } else {
-                if count == 1 {
-                    return Some(self.inner.entries[candidate_indices[0]].addr);
-                }
-                self.swrr_select(&candidate_indices[..count])
-            }
+        if unsaturated.is_empty() {
+            Some(candidates.as_slice())
         } else {
-            let mut candidates: Vec<usize> = Vec::with_capacity(total_entries);
-            let mut unsaturated: Vec<usize> = Vec::with_capacity(total_entries);
+            Some(unsaturated.as_slice())
+        }
+    }
 
-            for (idx, entry) in self.inner.entries.iter().enumerate() {
-                if !self.is_entry_disabled(entry) && !excluded.contains(&entry.addr) {
-                    candidates.push(idx);
-                    if entry.in_flight.load(Ordering::Relaxed)
-                        < entry.max_in_flight.load(Ordering::Relaxed)
-                    {
-                        unsaturated.push(idx);
-                    }
+    fn populate_candidates(
+        &self,
+        filter_excluded: bool,
+        excluded: &[SocketAddr],
+        candidates: &mut SmallList<usize, 16>,
+        unsaturated: &mut SmallList<usize, 16>,
+    ) {
+        candidates.clear();
+        unsaturated.clear();
+        let now_ms = self.elapsed_millis();
+        for (idx, entry) in self.inner.entries.iter().enumerate() {
+            if !entry.is_disabled(now_ms) && (!filter_excluded || !excluded.contains(&entry.addr)) {
+                candidates.push(idx);
+                if !entry.is_saturated() {
+                    unsaturated.push(idx);
                 }
-            }
-
-            if candidates.is_empty() {
-                for (idx, entry) in self.inner.entries.iter().enumerate() {
-                    if !self.is_entry_disabled(entry) {
-                        candidates.push(idx);
-                        if entry.in_flight.load(Ordering::Relaxed)
-                            < entry.max_in_flight.load(Ordering::Relaxed)
-                        {
-                            unsaturated.push(idx);
-                        }
-                    }
-                }
-            }
-
-            if candidates.is_empty() {
-                return self.fallback();
-            }
-
-            if unsaturated.is_empty() {
-                if candidates.len() == 1 {
-                    return Some(self.inner.entries[candidates[0]].addr);
-                }
-                self.swrr_select(&candidates)
-            } else {
-                if unsaturated.len() == 1 {
-                    return Some(self.inner.entries[unsaturated[0]].addr);
-                }
-                self.swrr_select(&unsaturated)
             }
         }
     }
@@ -255,7 +396,7 @@ impl ResolverPool {
 
         for &idx in candidate_indices {
             let entry = &self.inner.entries[idx];
-            let weight = i64::try_from(Self::calculate_weight(entry)).unwrap_or(1);
+            let weight = i64::try_from(entry.calculate_weight()).unwrap_or(1);
             total_weight = total_weight.saturating_add(weight);
 
             let cur = entry.current_weight.fetch_add(weight, Ordering::Relaxed) + weight;
@@ -276,122 +417,13 @@ impl ResolverPool {
         )
     }
 
-    fn select_random(&self, excluded: &[SocketAddr]) -> Option<SocketAddr> {
-        let total_entries = self.inner.entries.len();
-        if total_entries <= 64 {
-            let mut candidate_indices = [0usize; 64];
-            let mut count = 0;
-            let mut unsaturated_indices = [0usize; 64];
-            let mut unsaturated_count = 0;
-
-            for (idx, entry) in self.inner.entries.iter().enumerate() {
-                if !self.is_entry_disabled(entry) && !excluded.contains(&entry.addr) {
-                    candidate_indices[count] = idx;
-                    count += 1;
-
-                    if entry.in_flight.load(Ordering::Relaxed)
-                        < entry.max_in_flight.load(Ordering::Relaxed)
-                    {
-                        unsaturated_indices[unsaturated_count] = idx;
-                        unsaturated_count += 1;
-                    }
-                }
-            }
-
-            if count == 0 {
-                for (idx, entry) in self.inner.entries.iter().enumerate() {
-                    if !self.is_entry_disabled(entry) {
-                        candidate_indices[count] = idx;
-                        count += 1;
-
-                        if entry.in_flight.load(Ordering::Relaxed)
-                            < entry.max_in_flight.load(Ordering::Relaxed)
-                        {
-                            unsaturated_indices[unsaturated_count] = idx;
-                            unsaturated_count += 1;
-                        }
-                    }
-                }
-            }
-
-            if count == 0 {
-                return self.fallback();
-            }
-
-            if unsaturated_count > 0 {
-                if unsaturated_count == 1 {
-                    return Some(self.inner.entries[unsaturated_indices[0]].addr);
-                }
-                self.weighted_random_select(&unsaturated_indices[..unsaturated_count])
-            } else {
-                if count == 1 {
-                    return Some(self.inner.entries[candidate_indices[0]].addr);
-                }
-                self.weighted_random_select(&candidate_indices[..count])
-            }
-        } else {
-            let mut candidates: Vec<usize> = Vec::with_capacity(total_entries);
-            let mut unsaturated: Vec<usize> = Vec::with_capacity(total_entries);
-
-            for (idx, entry) in self.inner.entries.iter().enumerate() {
-                if !self.is_entry_disabled(entry) && !excluded.contains(&entry.addr) {
-                    candidates.push(idx);
-                    if entry.in_flight.load(Ordering::Relaxed)
-                        < entry.max_in_flight.load(Ordering::Relaxed)
-                    {
-                        unsaturated.push(idx);
-                    }
-                }
-            }
-
-            if candidates.is_empty() {
-                for (idx, entry) in self.inner.entries.iter().enumerate() {
-                    if !self.is_entry_disabled(entry) {
-                        candidates.push(idx);
-                        if entry.in_flight.load(Ordering::Relaxed)
-                            < entry.max_in_flight.load(Ordering::Relaxed)
-                        {
-                            unsaturated.push(idx);
-                        }
-                    }
-                }
-            }
-
-            if candidates.is_empty() {
-                return self.fallback();
-            }
-
-            if unsaturated.is_empty() {
-                if candidates.len() == 1 {
-                    return Some(self.inner.entries[candidates[0]].addr);
-                }
-                self.weighted_random_select(&candidates)
-            } else {
-                if unsaturated.len() == 1 {
-                    return Some(self.inner.entries[unsaturated[0]].addr);
-                }
-                self.weighted_random_select(&unsaturated)
-            }
-        }
-    }
-
     fn weighted_random_select(&self, candidate_indices: &[usize]) -> Option<SocketAddr> {
         let mut total_weight: u64 = 0;
-        let mut weights = [0u64; 64];
-        let use_stack = candidate_indices.len() <= 64;
-        let mut heap_weights = if use_stack {
-            Vec::new()
-        } else {
-            Vec::with_capacity(candidate_indices.len())
-        };
+        let mut weights = SmallList::<u64, 16>::with_capacity(candidate_indices.len());
 
-        for (i, &idx) in candidate_indices.iter().enumerate() {
-            let w = Self::calculate_weight(&self.inner.entries[idx]);
-            if use_stack {
-                weights[i] = w;
-            } else {
-                heap_weights.push(w);
-            }
+        for &idx in candidate_indices {
+            let w = self.inner.entries[idx].calculate_weight();
+            weights.push(w);
             total_weight = total_weight.saturating_add(w);
         }
 
@@ -403,13 +435,9 @@ impl ResolverPool {
         let target = rng.random_range(0..total_weight);
         let mut acc = 0u64;
 
+        let weight_slice = weights.as_slice();
         for (i, &idx) in candidate_indices.iter().enumerate() {
-            let w = if use_stack {
-                weights[i]
-            } else {
-                heap_weights[i]
-            };
-            acc = acc.saturating_add(w);
+            acc = acc.saturating_add(weight_slice[i]);
             if target < acc {
                 return Some(self.inner.entries[idx].addr);
             }
@@ -420,29 +448,13 @@ impl ResolverPool {
             .map(|&idx| self.inner.entries[idx].addr)
     }
 
-    fn calculate_weight(entry: &ResolverEntry) -> u64 {
-        let ewma_us = entry.ewma_latency_us.load(Ordering::Relaxed);
-        let latency_ms = if ewma_us == 0 {
-            50
-        } else {
-            (ewma_us / 1000).clamp(2, 2000)
-        };
-
-        let success_permille = u64::from(
-            entry
-                .ewma_success_permille
-                .load(Ordering::Relaxed)
-                .clamp(50, 1000),
-        );
-        (success_permille / latency_ms).clamp(1, 100)
-    }
-
     #[inline]
-    #[allow(dead_code)]
+    #[cfg(test)]
     #[must_use]
     pub fn is_disabled(&self, resolver: SocketAddr) -> bool {
+        let now_ms = self.elapsed_millis();
         self.find_entry(resolver)
-            .is_some_and(|e| self.is_entry_disabled(e))
+            .is_some_and(|e| e.is_disabled(now_ms))
     }
 
     #[inline]
@@ -454,70 +466,29 @@ impl ResolverPool {
     /// Temporarily disable a resolver for the specified duration.
     /// Will not disable if it would leave no resolvers available.
     pub fn disable(&self, resolver: SocketAddr, duration: Duration) {
+        let now_ms = self.elapsed_millis();
         let other_available = self
             .inner
             .entries
             .iter()
-            .any(|e| e.addr != resolver && !self.is_entry_disabled(e));
+            .any(|e| e.addr != resolver && !e.is_disabled(now_ms));
 
         if other_available && let Some(entry) = self.find_entry(resolver) {
-            let now_ms =
-                u64::try_from(self.inner.start_instant.elapsed().as_millis()).unwrap_or(u64::MAX);
             let duration_ms = u64::try_from(duration.as_millis()).unwrap_or(u64::MAX);
-            entry
-                .disabled_until_ms
-                .store(now_ms.saturating_add(duration_ms), Ordering::Relaxed);
-            entry.current_weight.store(0, Ordering::Relaxed);
+            entry.disable(now_ms.saturating_add(duration_ms));
         }
     }
 
     /// Record a successful resolution with measured latency.
     /// Resets consecutive failures and progressive cooldown backoff, and updates EWMA latency and success rate.
     pub fn record_success_with_latency(&self, resolver: SocketAddr, latency: Duration) {
-        let Some(entry) = self.find_entry(resolver) else {
-            return;
-        };
-
-        entry.successes.fetch_add(1, Ordering::Relaxed);
-        entry.consecutive_failures.store(0, Ordering::Relaxed);
-        entry.cooldown_count.store(0, Ordering::Relaxed);
-
-        let lat_us = u64::try_from(latency.as_micros()).unwrap_or(u64::MAX);
-        let mut cur_lat = entry.ewma_latency_us.load(Ordering::Relaxed);
-        loop {
-            let new_lat = if cur_lat == 0 {
-                lat_us
-            } else {
-                cur_lat.saturating_mul(7).saturating_add(lat_us) / 8
-            };
-            match entry.ewma_latency_us.compare_exchange_weak(
-                cur_lat,
-                new_lat,
-                Ordering::Relaxed,
-                Ordering::Relaxed,
-            ) {
-                Ok(_) => break,
-                Err(actual) => cur_lat = actual,
-            }
-        }
-
-        let mut cur_rate = entry.ewma_success_permille.load(Ordering::Relaxed);
-        loop {
-            let new_rate = (cur_rate * 9 + 1000) / 10;
-            match entry.ewma_success_permille.compare_exchange_weak(
-                cur_rate,
-                new_rate,
-                Ordering::Relaxed,
-                Ordering::Relaxed,
-            ) {
-                Ok(_) => break,
-                Err(actual) => cur_rate = actual,
-            }
+        if let Some(entry) = self.find_entry(resolver) {
+            entry.record_success(latency);
         }
     }
 
     /// Record a successful resolution with a default 20ms baseline latency.
-    #[allow(dead_code)]
+    #[cfg(test)]
     pub fn record_success(&self, resolver: SocketAddr) {
         self.record_success_with_latency(resolver, Duration::from_millis(20));
     }
@@ -529,31 +500,10 @@ impl ResolverPool {
             return;
         };
 
-        entry.failures.fetch_add(1, Ordering::Relaxed);
-
-        let mut cur_rate = entry.ewma_success_permille.load(Ordering::Relaxed);
-        loop {
-            let new_rate = (cur_rate * 9) / 10;
-            match entry.ewma_success_permille.compare_exchange_weak(
-                cur_rate,
-                new_rate,
-                Ordering::Relaxed,
-                Ordering::Relaxed,
-            ) {
-                Ok(_) => break,
-                Err(actual) => cur_rate = actual,
-            }
-        }
-
-        let failures = entry.consecutive_failures.fetch_add(1, Ordering::Relaxed) + 1;
-        if failures >= Self::FAILURE_THRESHOLD {
-            entry.consecutive_failures.store(0, Ordering::Relaxed);
-            let streak = entry.cooldown_count.fetch_add(1, Ordering::Relaxed);
-
+        if let Some(streak) = entry.record_failure(Self::FAILURE_THRESHOLD) {
             let shift = u32::try_from(streak).unwrap_or(5).min(5);
             let multiplier = 1u32 << shift;
             let cooldown = (Self::BASE_COOLDOWN * multiplier).min(Self::MAX_COOLDOWN);
-
             self.disable(resolver, cooldown);
         }
     }
@@ -561,19 +511,8 @@ impl ResolverPool {
     /// Compute adaptive Retransmission Timeout (RTO) for a resolver based on EWMA latency.
     #[must_use]
     pub fn rto(&self, resolver: SocketAddr) -> Duration {
-        self.find_entry(resolver).map_or_else(
-            || Duration::from_millis(1500),
-            |entry| {
-                let micros = entry.ewma_latency_us.load(Ordering::Relaxed);
-                if micros == 0 {
-                    Duration::from_millis(800)
-                } else {
-                    let millis = micros / 1000;
-                    let rto_ms = (millis * 3).clamp(250, 1500);
-                    Duration::from_millis(rto_ms)
-                }
-            },
-        )
+        self.find_entry(resolver)
+            .map_or_else(|| Duration::from_millis(1500), |entry| entry.rto())
     }
 
     /// Acquire an in-flight permit for the resolver, bounding concurrent queries.
@@ -585,24 +524,16 @@ impl ResolverPool {
             .acquire_owned()
             .await
             .ok()?;
-        entry.in_flight.fetch_add(1, Ordering::Relaxed);
-        Some(ResolverPermit {
-            entry: entry.clone(),
-            _semaphore_permit: Some(semaphore_permit),
-        })
+        Some(ResolverPermit::new(entry.clone(), semaphore_permit))
     }
 
     /// Non-blocking attempt to acquire an in-flight permit for the resolver.
-    #[allow(dead_code)]
+    #[cfg(test)]
     #[must_use]
     pub fn try_acquire_permit(&self, resolver: SocketAddr) -> Option<ResolverPermit> {
         let entry = self.find_entry(resolver)?;
         let semaphore_permit = entry.in_flight_semaphore.clone().try_acquire_owned().ok()?;
-        entry.in_flight.fetch_add(1, Ordering::Relaxed);
-        Some(ResolverPermit {
-            entry: entry.clone(),
-            _semaphore_permit: Some(semaphore_permit),
-        })
+        Some(ResolverPermit::new(entry.clone(), semaphore_permit))
     }
 
     /// Paces queries to the specified resolver ensuring minimum interval between consecutive dispatches.
@@ -615,23 +546,8 @@ impl ResolverPool {
         };
 
         let interval_us = u64::try_from(interval.as_micros()).unwrap_or(u64::MAX);
-        let now_us =
-            u64::try_from(self.inner.start_instant.elapsed().as_micros()).unwrap_or(u64::MAX);
-        let mut current = entry.last_dispatch_us.load(Ordering::Relaxed);
-
-        let scheduled_us = loop {
-            let scheduled = current.max(now_us);
-            let next = scheduled.saturating_add(interval_us);
-            match entry.last_dispatch_us.compare_exchange_weak(
-                current,
-                next,
-                Ordering::Relaxed,
-                Ordering::Relaxed,
-            ) {
-                Ok(_) => break scheduled,
-                Err(actual) => current = actual,
-            }
-        };
+        let now_us = self.elapsed_micros();
+        let scheduled_us = entry.schedule_pacing(now_us, interval_us);
 
         if scheduled_us > now_us {
             let wait_us = scheduled_us - now_us;
@@ -639,53 +555,32 @@ impl ResolverPool {
         }
     }
 
-    /// Get current EWMA latency for a resolver.
-    #[allow(dead_code)]
-    #[must_use]
-    pub fn get_ewma_latency(&self, resolver: SocketAddr) -> Option<Duration> {
-        let entry = self.find_entry(resolver)?;
-        let ewma_us = entry.ewma_latency_us.load(Ordering::Relaxed);
-        if ewma_us == 0 {
-            None
-        } else {
-            Some(Duration::from_micros(ewma_us))
-        }
-    }
-
-    /// Get current success rate (0.0 to 1.0) for a resolver.
-    #[allow(dead_code)]
-    #[must_use]
-    pub fn get_success_rate(&self, resolver: SocketAddr) -> Option<f64> {
-        let entry = self.find_entry(resolver)?;
-        let permille = entry.ewma_success_permille.load(Ordering::Relaxed);
-        Some(f64::from(permille) / 1000.0)
-    }
-
     /// Get current in-flight query count for a resolver.
-    #[allow(dead_code)]
+    #[cfg(test)]
     #[must_use]
     pub fn in_flight_count(&self, resolver: SocketAddr) -> usize {
         self.find_entry(resolver)
             .map_or(0, |e| e.in_flight.load(Ordering::Relaxed))
     }
 
-    #[allow(dead_code)]
+    #[cfg(test)]
     #[must_use]
     pub fn available_count(&self) -> usize {
+        let now_ms = self.elapsed_millis();
         self.inner
             .entries
             .iter()
-            .filter(|e| !self.is_entry_disabled(e))
+            .filter(|e| !e.is_disabled(now_ms))
             .count()
     }
 
-    #[allow(dead_code)]
+    #[cfg(test)]
     #[must_use]
     pub fn total_count(&self) -> usize {
         self.inner.resolvers.len()
     }
 
-    #[allow(dead_code)]
+    #[cfg(test)]
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.inner.resolvers.is_empty()
@@ -1030,7 +925,6 @@ mod tests {
     }
 
     #[tokio::test]
-    #[allow(clippy::significant_drop_tightening)]
     async fn test_in_flight_permits_saturation() {
         let pool = ResolverPool::new(vec![resolver("1.1.1.1")], false);
         let res = resolver("1.1.1.1");
@@ -1057,7 +951,10 @@ mod tests {
             ResolverPool::DEFAULT_MAX_IN_FLIGHT - 1
         );
         let new_permit = pool.try_acquire_permit(res);
-        assert!(new_permit.is_some());
+        drop(permits);
+        let has_permit = new_permit.is_some();
+        drop(new_permit);
+        assert!(has_permit);
     }
 
     #[test]
@@ -1117,5 +1014,70 @@ mod tests {
         assert_eq!(pool.in_flight_count(resolver("1.1.1.1")), 0);
         assert_eq!(pool.in_flight_count(resolver("8.8.8.8")), 0);
         assert_eq!(pool.in_flight_count(resolver("9.9.9.9")), 0);
+    }
+
+    #[test]
+    fn test_small_list_operations() {
+        let mut list = SmallList::<usize, 4>::with_capacity(4);
+        assert!(list.is_empty());
+        assert_eq!(list.len(), 0);
+
+        list.push(10);
+        list.push(20);
+        assert_eq!(list.len(), 2);
+        assert_eq!(list.as_slice(), &[10, 20]);
+
+        // Push past inline capacity to test automatic heap spilling
+        list.push(30);
+        list.push(40);
+        list.push(50);
+        assert_eq!(list.len(), 5);
+        assert_eq!(list.as_slice(), &[10, 20, 30, 40, 50]);
+
+        list.clear();
+        assert!(list.is_empty());
+        assert_eq!(list.len(), 0);
+
+        // Test N=16 heap spilling with 20 elements
+        let mut list16 = SmallList::<usize, 16>::with_capacity(16);
+        for i in 0..20 {
+            list16.push(i);
+        }
+        assert_eq!(list16.len(), 20);
+        assert_eq!(list16.as_slice(), &(0..20).collect::<Vec<_>>()[..]);
+    }
+
+    #[test]
+    fn test_resolver_entry_layout() {
+        use std::mem::{align_of, size_of};
+        assert_eq!(align_of::<ResolverEntry>(), 8);
+        assert!(size_of::<ResolverEntry>() > 0);
+    }
+
+    #[test]
+    fn test_candidate_collection_single_pass() {
+        let pool = ResolverPool::new(
+            vec![
+                resolver("1.1.1.1"),
+                resolver("8.8.8.8"),
+                resolver("9.9.9.9"),
+            ],
+            false,
+        );
+
+        let mut candidates = SmallList::<usize, 16>::with_capacity(3);
+        let mut unsaturated = SmallList::<usize, 16>::with_capacity(3);
+        pool.populate_candidates(false, &[], &mut candidates, &mut unsaturated);
+
+        assert_eq!(candidates.len(), 3);
+        assert_eq!(unsaturated.len(), 3);
+        assert_eq!(candidates.as_slice(), &[0, 1, 2]);
+        assert_eq!(unsaturated.as_slice(), &[0, 1, 2]);
+
+        // When one is disabled
+        pool.disable(resolver("8.8.8.8"), Duration::from_secs(60));
+        pool.populate_candidates(false, &[], &mut candidates, &mut unsaturated);
+        assert_eq!(candidates.len(), 2);
+        assert_eq!(candidates.as_slice(), &[0, 2]);
     }
 }
