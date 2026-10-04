@@ -112,6 +112,39 @@ impl UdpSocketEntry {
     }
 }
 
+/// Determines if an I/O error returned from UDP `recv_from` is a transient network/connection
+/// condition (such as ICMP Port Unreachable notifications on Windows Winsock) rather than a fatal socket failure.
+fn is_transient_udp_recv_error(err: &std::io::Error) -> bool {
+    // Note: On Windows, WSAECONNRESET (10054) and WSAENETRESET (10052) are delivered to UDP sockets
+    // when a previous send triggers an ICMP Port Unreachable packet from an unresponsive resolver.
+    matches!(
+        err.kind(),
+        std::io::ErrorKind::ConnectionReset
+            | std::io::ErrorKind::ConnectionAborted
+            | std::io::ErrorKind::ConnectionRefused
+            | std::io::ErrorKind::NetworkUnreachable
+            | std::io::ErrorKind::HostUnreachable
+            | std::io::ErrorKind::NetworkDown
+            | std::io::ErrorKind::TimedOut
+            | std::io::ErrorKind::WouldBlock
+            | std::io::ErrorKind::Interrupted
+    ) || matches!(
+        err.raw_os_error(),
+        Some(
+            10040   // WSAEMSGSIZE: Datagram too long for receive buffer
+            | 10050 // WSAENETDOWN: Network subsystem is down
+            | 10051 // WSAENETUNREACH: Network is unreachable
+            | 10052 // WSAENETRESET: Network dropped connection on reset (e.g. keep-alive failure)
+            | 10053 // WSAECONNABORTED: Software caused connection abort
+            | 10054 // WSAECONNRESET: Connection reset by peer (ICMP Port Unreachable on Windows UDP)
+            | 10060 // WSAETIMEDOUT: Connection timed out
+            | 10061 // WSAECONNREFUSED: Connection refused
+            | 10064 // WSAEHOSTDOWN: Host is down
+            | 10065 // WSAEHOSTUNREACH: No route to host
+        )
+    )
+}
+
 fn spawn_udp_receiver(
     socket: Arc<UdpSocket>,
     pending_queries: Arc<DashMap<u16, QueryResultSender>>,
@@ -131,7 +164,9 @@ fn spawn_udp_receiver(
                     match result {
                         Ok((len, _)) => dispatch_udp_response(&recv_buffer[..len], &pending_queries, &addr_str),
                         Err(e) => {
-                            log_error!(format!("ERROR: UDP Recv: {e}"));
+                            if !is_transient_udp_recv_error(&e) {
+                                log_error!(format!("ERROR: UDP Recv: {e}"));
+                            }
                         }
                     }
                 }
@@ -904,5 +939,74 @@ mod tests {
         // Packets shorter than 2 bytes should be discarded without panicking
         dispatch_udp_response(&[0], &pending, "127.0.0.1:53");
         assert!(pending.is_empty());
+    }
+
+    #[test]
+    fn test_is_transient_udp_recv_error_kinds() {
+        let transient_kinds = [
+            std::io::ErrorKind::ConnectionReset,
+            std::io::ErrorKind::ConnectionAborted,
+            std::io::ErrorKind::ConnectionRefused,
+            std::io::ErrorKind::NetworkUnreachable,
+            std::io::ErrorKind::HostUnreachable,
+            std::io::ErrorKind::NetworkDown,
+            std::io::ErrorKind::TimedOut,
+            std::io::ErrorKind::WouldBlock,
+            std::io::ErrorKind::Interrupted,
+        ];
+
+        for kind in transient_kinds {
+            let err = std::io::Error::from(kind);
+            assert!(
+                is_transient_udp_recv_error(&err),
+                "ErrorKind {kind:?} should be transient"
+            );
+        }
+
+        let non_transient_kinds = [
+            std::io::ErrorKind::PermissionDenied,
+            std::io::ErrorKind::NotFound,
+            std::io::ErrorKind::AlreadyExists,
+            std::io::ErrorKind::InvalidInput,
+        ];
+
+        for kind in non_transient_kinds {
+            let err = std::io::Error::from(kind);
+            assert!(
+                !is_transient_udp_recv_error(&err),
+                "ErrorKind {kind:?} should not be transient"
+            );
+        }
+    }
+
+    #[test]
+    fn test_is_transient_udp_recv_error_os_codes() {
+        // Windows Winsock transient error codes:
+        // 10040 (WSAEMSGSIZE), 10050 (WSAENETDOWN), 10051 (WSAENETUNREACH),
+        // 10052 (WSAENETRESET), 10053 (WSAECONNABORTED), 10054 (WSAECONNRESET),
+        // 10060 (WSAETIMEDOUT), 10061 (WSAECONNREFUSED), 10064 (WSAEHOSTDOWN), 10065 (WSAEHOSTUNREACH)
+        let transient_codes = [
+            10040, 10050, 10051, 10052, 10053, 10054, 10060, 10061, 10064, 10065,
+        ];
+
+        for code in transient_codes {
+            let err = std::io::Error::from_raw_os_error(code);
+            assert!(
+                is_transient_udp_recv_error(&err),
+                "OS error code {code} should be transient"
+            );
+        }
+
+        let non_transient_codes = [
+            5, /* ERROR_ACCESS_DENIED */
+            2, /* ERROR_FILE_NOT_FOUND */
+        ];
+        for code in non_transient_codes {
+            let err = std::io::Error::from_raw_os_error(code);
+            assert!(
+                !is_transient_udp_recv_error(&err),
+                "OS error code {code} should not be transient"
+            );
+        }
     }
 }
