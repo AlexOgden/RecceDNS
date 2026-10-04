@@ -126,6 +126,7 @@ impl DnsHeader {
         Ok(())
     }
 
+    #[cfg(test)]
     pub fn write(&self, buffer: &mut PacketBuffer) -> Result<()> {
         buffer.write_u16(self.id)?;
 
@@ -177,6 +178,7 @@ impl DnsQuestion {
         Ok(())
     }
 
+    #[cfg(test)]
     pub fn write(&self, buffer: &mut PacketBuffer) -> Result<()> {
         buffer.write_qname(&self.name)?;
         buffer.write_u16(self.qtype as u16)?;
@@ -311,6 +313,7 @@ impl ResourceRecord {
         })
     }
 
+    #[cfg(test)]
     pub fn write(&self, buffer: &mut PacketBuffer) -> Result<()> {
         buffer.write_qname(&self.name)?;
         buffer.write_u16(self.data.to_qtype() as u16)?;
@@ -526,6 +529,7 @@ impl DnsPacket {
         Ok(result)
     }
 
+    #[cfg(test)]
     #[allow(clippy::cast_possible_truncation)]
     pub fn write(&mut self, buffer: &mut PacketBuffer) -> Result<(), DnsError> {
         self.header.questions = self.questions.len() as u16;

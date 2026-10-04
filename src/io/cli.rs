@@ -92,7 +92,7 @@ pub struct CommandArgs {
     #[arg(short = 'T', long, required = false, env = "RECCEDNS_THREADS")]
     pub threads: Option<usize>,
 
-    /// Use a random resolver for each query, otherwise use them sequentially
+    /// Use random tournament selection for resolvers instead of sequential (both prioritize low latency)
     #[arg(
         short = 'r',
         long,
@@ -122,7 +122,7 @@ pub struct CommandArgs {
     #[arg(long, env = "RECCEDNS_NO_RECURSION")]
     pub no_recursion: bool,
 
-    /// Don't retry failed queries
+    /// Don't retry failed queries (disables in-query failovers and end-of-run retries)
     #[arg(long, env = "RECCEDNS_NO_RETRY")]
     pub no_retry: bool,
 

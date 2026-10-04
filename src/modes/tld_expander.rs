@@ -117,7 +117,8 @@ pub async fn expand_tlds(cmd_args: &CommandArgs, dns_resolver_list: &[SocketAddr
         cmd_args.delay.clone(),
         query_plan.clone(),
         !cmd_args.no_recursion,
-    );
+    )
+    .with_retries(usize::from(!cmd_args.no_retry));
     let shared_context = Arc::new(TldContext {
         lookup: lookup_context,
         base_domain: target_base_domain.clone(),

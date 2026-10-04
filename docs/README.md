@@ -29,11 +29,14 @@ I originally started working on this project to learn Rust, improve on network p
 - Check for wildcard domains.
 - Check resolver(s) for NXDOMAIN hijacking.
 - Support for multiple resolvers.
-	- Select sequentially or randomly.
+	- Latency-aware weighted selection (EWMA latency & success rate) or random/sequential selection.
+	- Per-resolver in-flight concurrency caps (up to 32 parallel queries per resolver) with lock-free GCRA pacing to prevent rate limiting.
+	- Progressive exponential backoff cooldown (doubling up to 60s) for failing or unresponsive resolvers.
 - Support for both `UDP` and `TCP`.
 - Bruteforce subdomains with a wordlist.
 	- Show the resource record data for each subdomain or simply just show the domain.
-	- Retry failed queries. If a query fails for networking/protocol issues, retry at the end of enumeration or disable.
+	- Fast in-query failover retry against alternate resolvers upon packet drop/timeout, plus optional end-of-run retry pass.
+	- Adaptive query timeout (RTO) calculated dynamically from EWMA resolver latency (250ms–1500ms).
 	- Use an optional delay between queries (Fixed, Random Range, and Adaptive).
 	- **Mutation Engine:** Automatically generate and test subdomain variations (e.g., `api-dev`, `test-api`) using built-in or custom rules and wordlists.
 - SRV enumeration, use a wordlist with the query argument set to SRV to find common SRV records.
@@ -43,10 +46,11 @@ I originally started working on this project to learn Rust, improve on network p
 - Coloured output with progress reporting on bruteforce subdomain enumeration.
 - Output results to a JSON file.
 - High Performance Features:
-	- Multi-Threaded bruteforce enumeration.
-	- Use multiple DNS resolvers.
-	- Dynamically disable resolver for random time if rate limited.
-	- Adaptive delay (increases and decreases dynamically within bounds to reduce rate-limiting).
+	- Multi-Threaded bruteforce enumeration with zero-allocation query execution path.
+	- Latency-weighted multi-resolver pooling with automatic failover.
+	- Dynamic per-resolver concurrency limits and rate pacing to mitigate throttling.
+	- Adaptive query timeout (RTO) and adaptive pacing delay.
+	- Progressive exponential backoff cooldown for failing resolvers.
 	- Asynchronous UDP socket pooling - thousands of queries without locking up file resources.
 	- Graceful interrupt handling - press <kbd>Ctrl</kbd>+<kbd>C</kbd> to stop enumeration and still get results.
 
@@ -141,13 +145,13 @@ See the [releases](https://github.com/AlexOgden/RecceDNS/releases) page for the 
 | `--no-welcome` | `RECCEDNS_NO_WELCOME` | Don't show the welcome ASCII art. |
 | `--no-dns-check` | `RECCEDNS_NO_DNS_CHECK` | Don't check if DNS servers are working before starting. |
 | `--no-recursion` | `RECCEDNS_NO_RECURSION` | Set recursion-desired to false in DNS queries. |
-| `--no-retry` | `RECCEDNS_NO_RETRY` | Don't retry failed queries. |
+| `--no-retry` | `RECCEDNS_NO_RETRY` | Don't retry failed queries (disables both fast in-query failover and the end-of-run retry pass). |
 | `--no-print-records` | `RECCEDNS_NO_PRINT_RECORDS` | Don't print DNS records in subdomain enumeration (show only subdomains). |
 | `--no-query-stats` | `RECCEDNS_NO_QUERY_STATS` | Don't calculate/print average query time. |
 | `--no-print-errors` | `RECCEDNS_NO_PRINT_ERRORS` | Don't print failed queries during subdomain enumeration (errors still show on retry). Use `-Q` to silence all output. |
 | `--show-resolver` | `RECCEDNS_SHOW_RESOLVER` | Print which resolver was used for each query. |
 | `-D, --delay <MS\|RANGE\|ADAPTIVE>` | `RECCEDNS_DELAY` | **Delay between queries** (subdomain enumeration).<br>• Fixed: <code>1000</code> (ms)<br>• Range: <code>100-200</code> (random ms)<br>• Adaptive: <code>A</code> or <code>A:10-750</code> (dynamic, <code>A</code> alone uses <code>10-500</code> as the default range) |
-| `-r, --use-random` | `RECCEDNS_USE_RANDOM` | When multiple resolvers are provided, randomly select one for each query. |
+| `-r, --use-random` | `RECCEDNS_USE_RANDOM` | When multiple resolvers are provided, use random selection instead of sequential (both modes prioritize lower latency and responsive resolvers). |
 | `--json <path>` | `RECCEDNS_JSON_OUTPUT` | Output results to a JSON file. `.json` will be appended if not provided. |
 | `-Q, --quiet` | `RECCEDNS_QUIET` | Don't print any results to the terminal. Useful for large targets when outputting to JSON. |
 | `-T, --threads <N>` | `RECCEDNS_THREADS` | Number of threads for subdomain enumeration.<br>Defaults to (logical cores - 1). |
