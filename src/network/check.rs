@@ -12,10 +12,12 @@ use rand::RngExt;
 use rand::distr::Alphanumeric;
 use tokio::task::JoinSet;
 
-use crate::dns::async_resolver::AsyncResolver;
-use crate::dns::protocol::QueryType;
-use crate::io::validation::parse_ipv4_with_port;
-use crate::network::types::TransportProtocol;
+use crate::{
+    dns::{async_resolver::AsyncResolver, protocol::QueryType},
+    io::validation::parse_ipv4_with_port,
+    log_error, log_info, log_success, log_warn,
+    network::types::TransportProtocol,
+};
 
 const ROOT_SERVER: &str = "root-servers.net";
 
@@ -106,20 +108,20 @@ impl ResolverCheckStats {
 
         if self.failed == 0 {
             if self.total == 1 {
-                crate::log_success!(format!(
+                log_success!(format!(
                     "DNS Resolver: {} in {:.2?}",
                     "operational".green().bold(),
                     self.duration
                 ));
             } else {
-                crate::log_success!(format!(
+                log_success!(format!(
                     "DNS Resolvers: all {} operational in {:.2?}",
                     self.working.to_string().green().bold(),
                     self.duration
                 ));
             }
         } else if self.working > 0 {
-            crate::log_info!(format!(
+            log_info!(format!(
                 "DNS Resolvers: {}/{} operational ({:.1}%) in {:.2?}",
                 self.working.to_string().green().bold(),
                 self.total.to_string().bold(),
@@ -132,19 +134,19 @@ impl ResolverCheckStats {
             } else {
                 "resolvers"
             };
-            crate::log_warn!(format!(
+            log_warn!(format!(
                 "Removed {} non-working {resolver_word}: {failure_details}",
                 self.failed.to_string().red().bold()
             ));
         } else {
-            crate::log_warn!(format!(
+            log_warn!(format!(
                 "DNS Resolvers: {}/{} operational in {:.2?}",
                 "0".red().bold(),
                 self.total.to_string().bold(),
                 self.duration
             ));
             let failure_details = self.format_failure_details();
-            crate::log_error!(format!("All resolvers failed: {failure_details}"));
+            log_error!(format!("All resolvers failed: {failure_details}"));
         }
     }
 }
@@ -219,7 +221,7 @@ pub fn load_resolvers(input: &str) -> Result<Vec<SocketAddr>> {
 
     let duplicates = dedup_resolvers(&mut resolvers);
     if duplicates > 0 {
-        crate::log_info!(format!(
+        log_info!(format!(
             "Removed {duplicates} duplicate DNS resolver(s), {} remaining",
             resolvers.len()
         ));
@@ -307,7 +309,7 @@ pub async fn check_dns_resolvers_with_stats(
     let resolver_pool = match AsyncResolver::new(None).await {
         Ok(pool) => pool,
         Err(e) => {
-            crate::log_error!(format!(
+            log_error!(format!(
                 "Failed to create DNS resolver for health check: {e}"
             ));
             return (Vec::new(), ResolverCheckStats::default());
