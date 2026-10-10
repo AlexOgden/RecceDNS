@@ -1,13 +1,12 @@
 use anyhow::{Context, Result, anyhow, ensure};
 use regex::Regex;
 use std::{
-    fs,
     net::{IpAddr, Ipv4Addr, SocketAddr, SocketAddrV4},
     path::Path,
 };
 
 use crate::dns::DEFAULT_DNS_PORT;
-use crate::network::{check, types::TransportProtocol};
+use crate::network::check;
 use std::sync::LazyLock;
 
 static DOMAIN_REGEX: LazyLock<Regex> = LazyLock::new(|| {
@@ -18,14 +17,6 @@ static DOMAIN_REGEX: LazyLock<Regex> = LazyLock::new(|| {
 
 const MAX_LABEL_LENGTH: usize = 63;
 const MAX_DOMAIN_LENGTH: usize = 253;
-
-fn parse_csv(input: &str) -> Vec<String> {
-    input
-        .split(',')
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty())
-        .collect()
-}
 
 pub fn validate_target(input: &str) -> Result<String> {
     let input = input.trim();
@@ -124,14 +115,32 @@ pub fn validate_target(input: &str) -> Result<String> {
 }
 
 pub fn validate_dns_resolvers(servers: &str) -> Result<String> {
-    let server_list: Vec<String> = if Path::new(servers).exists() {
-        let contents = fs::read_to_string(servers)
-            .map_err(|e| anyhow!("Failed to read DNS resolver file: {e}"))?;
-        contents.lines().flat_map(parse_csv).collect()
-    } else {
-        parse_csv(servers)
-    };
+    let servers = servers.trim();
+    let path = Path::new(servers);
+    if path.is_file() {
+        return Ok(servers.to_string());
+    }
+    if path.is_dir() {
+        return Err(anyhow!(
+            "DNS resolvers path is a directory, expected a file: '{servers}'"
+        ));
+    }
 
+    let looks_like_file = !servers.contains(',')
+        && (servers.contains('/')
+            || servers.contains('\\')
+            || path.extension().is_some_and(|ext| {
+                ext.eq_ignore_ascii_case("txt")
+                    || ext.eq_ignore_ascii_case("conf")
+                    || ext.eq_ignore_ascii_case("list")
+            }))
+        && !servers.contains("//");
+
+    if looks_like_file {
+        return Err(anyhow!("DNS resolvers file not found: '{servers}'"));
+    }
+
+    let server_list = check::parse_resolver_list(servers);
     if server_list.is_empty() {
         return Err(anyhow!("No DNS resolvers provided."));
     }
@@ -181,23 +190,8 @@ pub fn validate_ipv4(input: &str) -> Result<String> {
     Ok(input.trim().to_string())
 }
 
-pub async fn filter_working_resolvers(
-    no_dns_check: bool,
-    transport_protocol: &TransportProtocol,
-    dns_resolvers: &[SocketAddr],
-) -> Vec<SocketAddr> {
-    if no_dns_check {
-        return dns_resolvers.to_vec();
-    }
-
-    let working_resolvers = check::check_dns_resolvers(dns_resolvers, transport_protocol).await;
-
-    dns_resolvers
-        .iter()
-        .copied()
-        .filter(|resolver| working_resolvers.contains(resolver))
-        .collect()
-}
+#[cfg(test)]
+pub use crate::network::check::dedup_resolvers;
 
 #[cfg(test)]
 mod test {
@@ -562,5 +556,49 @@ mod test {
     fn dns_resolver_rejects_ipv6() {
         // Currently only IPv4 is supported
         assert!(validate_dns_resolvers("2001:4860:4860::8888").is_err());
+    }
+
+    #[test]
+    fn dedup_resolvers_keeps_first_occurrence_order() {
+        let mut resolvers: Vec<SocketAddr> =
+            ["1.1.1.1", "8.8.8.8", "1.1.1.1", "9.9.9.9", "8.8.8.8"]
+                .iter()
+                .map(|s| parse_ipv4_with_port(s).unwrap())
+                .collect();
+        assert_eq!(dedup_resolvers(&mut resolvers), 2);
+        let expected: Vec<SocketAddr> = ["1.1.1.1", "8.8.8.8", "9.9.9.9"]
+            .iter()
+            .map(|s| parse_ipv4_with_port(s).unwrap())
+            .collect();
+        assert_eq!(resolvers, expected);
+    }
+
+    #[test]
+    fn dedup_resolvers_treats_default_port_as_equal() {
+        let mut resolvers: Vec<SocketAddr> = ["8.8.8.8", "8.8.8.8:53", "8.8.8.8:5353"]
+            .iter()
+            .map(|s| parse_ipv4_with_port(s).unwrap())
+            .collect();
+        assert_eq!(dedup_resolvers(&mut resolvers), 1);
+        assert_eq!(resolvers.len(), 2);
+    }
+
+    #[test]
+    fn dedup_resolvers_empty() {
+        let mut resolvers: Vec<SocketAddr> = Vec::new();
+        assert_eq!(dedup_resolvers(&mut resolvers), 0);
+    }
+
+    #[test]
+    fn test_validate_dns_resolvers_with_comments() {
+        let res = validate_dns_resolvers("8.8.8.8 # google , 1.1.1.1 // cloudflare").unwrap();
+        assert_eq!(res, "8.8.8.8,1.1.1.1");
+    }
+
+    #[test]
+    fn test_validate_dns_resolvers_rejects_directory() {
+        let res = validate_dns_resolvers("src");
+        assert!(res.is_err());
+        assert!(res.unwrap_err().to_string().contains("is a directory"));
     }
 }
